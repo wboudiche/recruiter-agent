@@ -24,7 +24,9 @@ class Application(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"))
     candidate_id: Mapped[int] = mapped_column(ForeignKey("candidates.id", ondelete="CASCADE"))
-    stage: Mapped[Stage] = mapped_column(SAEnum(Stage, name="stage"))
+    stage: Mapped[Stage] = mapped_column(
+        SAEnum(Stage, name="stage", values_callable=lambda x: [e.value for e in x])
+    )
     score: Mapped[int | None] = mapped_column(Integer)
     score_breakdown: Mapped[list[dict] | None] = mapped_column(JSON)
     score_rationale: Mapped[str | None] = mapped_column(String)

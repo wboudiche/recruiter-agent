@@ -1,8 +1,8 @@
 """initial core models
 
-Revision ID: 8b90788a8d12
+Revision ID: dc1c533a0989
 Revises: 
-Create Date: 2026-04-29 18:07:41.692702
+Create Date: 2026-04-29 18:11:11.537355
 
 """
 from typing import Sequence, Union
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = '8b90788a8d12'
+revision: str = 'dc1c533a0989'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -31,7 +31,7 @@ def upgrade() -> None:
     sa.Column('experience', sa.JSON(), nullable=False),
     sa.Column('education', sa.JSON(), nullable=False),
     sa.Column('links', sa.JSON(), nullable=False),
-    sa.Column('source_type', sa.Enum('URL', 'RESUME', 'PASTE', name='source_type'), nullable=True),
+    sa.Column('source_type', sa.Enum('url', 'resume', 'paste', name='source_type'), nullable=True),
     sa.Column('source_url', sa.String(length=2048), nullable=True),
     sa.Column('resume_path', sa.String(length=1024), nullable=True),
     sa.Column('raw_extracted', sa.JSON(), nullable=True),
@@ -44,7 +44,7 @@ def upgrade() -> None:
     sa.Column('title', sa.String(length=255), nullable=False),
     sa.Column('description', sa.String(), nullable=False),
     sa.Column('criteria', sa.JSON(), nullable=False),
-    sa.Column('status', sa.Enum('OPEN', 'CLOSED', name='job_status'), nullable=False),
+    sa.Column('status', sa.Enum('open', 'closed', name='job_status'), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('id')
@@ -53,7 +53,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('job_id', sa.Integer(), nullable=False),
     sa.Column('candidate_id', sa.Integer(), nullable=False),
-    sa.Column('stage', sa.Enum('SOURCED', 'EXTRACTING', 'SCORED', 'VALIDATED', 'INVITED', 'SCHEDULED', 'REJECTED', name='stage'), nullable=False),
+    sa.Column('stage', sa.Enum('sourced', 'extracting', 'scored', 'validated', 'invited', 'scheduled', 'rejected', name='stage'), nullable=False),
     sa.Column('score', sa.Integer(), nullable=True),
     sa.Column('score_breakdown', sa.JSON(), nullable=True),
     sa.Column('score_rationale', sa.String(), nullable=True),

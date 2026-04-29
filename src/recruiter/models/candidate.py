@@ -27,7 +27,9 @@ class Candidate(Base):
     experience: Mapped[list[dict]] = mapped_column(JSON, default=list)
     education: Mapped[list[dict]] = mapped_column(JSON, default=list)
     links: Mapped[list[dict]] = mapped_column(JSON, default=list)
-    source_type: Mapped[SourceType | None] = mapped_column(SAEnum(SourceType, name="source_type"))
+    source_type: Mapped[SourceType | None] = mapped_column(
+        SAEnum(SourceType, name="source_type", values_callable=lambda x: [e.value for e in x])
+    )
     source_url: Mapped[str | None] = mapped_column(String(2048))
     resume_path: Mapped[str | None] = mapped_column(String(1024))
     raw_extracted: Mapped[dict | None] = mapped_column(JSON)
