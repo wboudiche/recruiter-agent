@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 
-from recruiter.api import applications, candidates, jobs
+from recruiter.api import applications, candidates, jobs, settings
 
 app = FastAPI(title="Recruiter Agent")
 app.include_router(jobs.router)
 app.include_router(candidates.router)
 app.include_router(candidates.paste_router)
 app.include_router(applications.router)
+app.include_router(settings.router)
 
 
 @app.get("/health")

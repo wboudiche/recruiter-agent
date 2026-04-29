@@ -196,7 +196,7 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="RECRUITER_", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://recruiter:recruiter@localhost:5432/recruiter"
-    settings_key: str = "dev-only-32-byte-key-replace-me!!"  # 32 bytes
+    settings_key: str = "dev-only-32-byte-key-replace-me!"  # 32 bytes
     resume_storage_path: str = "./var/resumes"
     log_level: str = "INFO"
 
@@ -222,7 +222,7 @@ Create `.env.example`:
 
 ```
 RECRUITER_DATABASE_URL=postgresql+asyncpg://recruiter:recruiter@localhost:5432/recruiter
-RECRUITER_SETTINGS_KEY=dev-only-32-byte-key-replace-me!!
+RECRUITER_SETTINGS_KEY=dev-only-32-byte-key-replace-me!
 RECRUITER_RESUME_STORAGE_PATH=./var/resumes
 RECRUITER_LOG_LEVEL=INFO
 ```
