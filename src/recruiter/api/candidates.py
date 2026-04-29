@@ -105,3 +105,63 @@ async def _route_url(url: str) -> RoutedInput:
         return RoutedInput(kind=kind, text=parsed.text, source_url=url, resume_path=None)
     parsed = await fetch_webpage(url)
     return RoutedInput(kind=kind, text=parsed.text, source_url=url, resume_path=None)
+
+
+import os
+import uuid
+from pathlib import Path
+
+from fastapi import File, UploadFile
+
+from recruiter.pipeline.parsers.docx import parse_docx
+from recruiter.pipeline.parsers.pdf import parse_pdf
+
+
+@router.post("/upload", response_model=ApplicationCreated, status_code=status.HTTP_202_ACCEPTED)
+async def upload_resume(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient = Depends(get_llm),
+    bus: EventBus = Depends(get_event_bus),
+) -> ApplicationCreated:
+    job = await session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    data = await file.read()
+    name = (file.filename or "").lower()
+    if name.endswith(".pdf"):
+        parsed = parse_pdf(data)
+        kind = "pdf"
+    elif name.endswith(".docx"):
+        parsed = parse_docx(data)
+        kind = "docx"
+    else:
+        raise HTTPException(status_code=415, detail="only .pdf and .docx are accepted")
+
+    storage_dir = Path(get_config().resume_storage_path)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    stored_path = storage_dir / f"{uuid.uuid4().hex}_{os.path.basename(name)}"
+    stored_path.write_bytes(data)
+
+    candidate = Candidate(source_type=SourceType.RESUME, resume_path=str(stored_path))
+    session.add(candidate)
+    await session.flush()
+    application = Application(job_id=job.id, candidate_id=candidate.id, stage=Stage.EXTRACTING)
+    session.add(application)
+    await session.commit()
+    await session.refresh(application)
+
+    routed = RoutedInput(kind=kind, text=parsed.text, source_url=None, resume_path=str(stored_path))
+    background_tasks.add_task(
+        process_application,
+        application_id=application.id,
+        routed=routed,
+        engine=engine,
+        llm=llm,
+        bus=bus,
+    )
+    return ApplicationCreated(application_id=application.id)
