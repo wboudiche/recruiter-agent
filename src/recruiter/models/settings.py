@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String, func
+from sqlalchemy import JSON, CheckConstraint, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -8,6 +8,7 @@ from recruiter.models.base import Base
 
 class SettingsRow(Base):
     __tablename__ = "settings"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_settings_singleton"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     default_llm_provider: Mapped[str] = mapped_column(String(32), default="anthropic")

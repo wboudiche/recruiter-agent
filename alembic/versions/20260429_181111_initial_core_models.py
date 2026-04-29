@@ -77,4 +77,7 @@ def downgrade() -> None:
     op.drop_table('applications')
     op.drop_table('jobs')
     op.drop_table('candidates')
+    sa.Enum(name='stage').drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name='job_status').drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name='source_type').drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###

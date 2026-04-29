@@ -68,4 +68,7 @@ def downgrade() -> None:
     op.drop_table('notifications')
     op.drop_table('event_logs')
     op.drop_table('settings')
+    sa.Enum(name='notification_status').drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name='notification_provider').drop(op.get_bind(), checkfirst=True)
+    sa.Enum(name='notification_channel').drop(op.get_bind(), checkfirst=True)
     # ### end Alembic commands ###
