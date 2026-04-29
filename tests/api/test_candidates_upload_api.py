@@ -52,9 +52,15 @@ async def test_upload_pdf_resume_runs_pipeline(api_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_upload_unsupported_type_returns_415(api_client: AsyncClient) -> None:
-    job_id = (await api_client.post("/api/jobs", json={"title": "T", "description": "D", "criteria": []})).json()["id"]
-    resp = await api_client.post(
-        f"/api/jobs/{job_id}/candidates/upload",
-        files={"file": ("bad.txt", b"hello", "text/plain")},
-    )
-    assert resp.status_code == 415
+    # FastAPI resolves dependencies before the handler runs, so we still need
+    # to override get_llm even though it's never called for unsupported types.
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient()
+    try:
+        job_id = (await api_client.post("/api/jobs", json={"title": "T", "description": "D", "criteria": []})).json()["id"]
+        resp = await api_client.post(
+            f"/api/jobs/{job_id}/candidates/upload",
+            files={"file": ("bad.txt", b"hello", "text/plain")},
+        )
+        assert resp.status_code == 415
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
