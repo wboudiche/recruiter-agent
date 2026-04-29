@@ -225,8 +225,9 @@ RECRUITER_DATABASE_URL=postgresql+asyncpg://recruiter:recruiter@localhost:5432/r
 RECRUITER_SETTINGS_KEY=dev-only-32-byte-key-replace-me!!
 RECRUITER_RESUME_STORAGE_PATH=./var/resumes
 RECRUITER_LOG_LEVEL=INFO
-RECRUITER_ANTHROPIC_API_KEY=
 ```
+
+(The Anthropic API key is stored encrypted in the `Settings` row via the `/api/settings` endpoint — it is not loaded from environment variables.)
 
 Create `docker-compose.yml`:
 
