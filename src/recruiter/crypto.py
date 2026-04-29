@@ -18,10 +18,10 @@ class SecretCipher:
 
     def decrypt(self, token: str) -> str:
         try:
-            raw = base64.urlsafe_b64decode(token.encode("ascii"))
+            raw = base64.urlsafe_b64decode(token.encode("ascii") + b"===")
         except Exception as exc:
             raise ValueError("invalid token: not base64") from exc
-        if len(raw) < 13:
+        if len(raw) < 28:  # 12-byte nonce + 16-byte AES-GCM tag minimum
             raise ValueError("invalid token: too short")
         nonce, ct = raw[:12], raw[12:]
         try:

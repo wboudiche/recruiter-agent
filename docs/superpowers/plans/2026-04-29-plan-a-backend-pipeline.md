@@ -3917,10 +3917,21 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 def _cipher() -> SecretCipher:
-    key = get_config().settings_key.encode("utf-8")
-    if len(key) < 32:
-        key = key.ljust(32, b"0")
-    return SecretCipher(key[:32])
+    raw = get_config().settings_key
+    # Accept either a 32-byte raw string or a 64-char hex-encoded string. No silent padding.
+    if len(raw) == 64:
+        try:
+            key = bytes.fromhex(raw)
+        except ValueError as exc:
+            raise RuntimeError("RECRUITER_SETTINGS_KEY: 64-char value must be valid hex") from exc
+    else:
+        key = raw.encode("utf-8")
+    if len(key) != 32:
+        raise RuntimeError(
+            "RECRUITER_SETTINGS_KEY must be 32 bytes (or 64 hex chars). "
+            "Generate with: python -c 'import secrets; print(secrets.token_hex(32))'"
+        )
+    return SecretCipher(key)
 
 
 async def _load_or_create(session: AsyncSession) -> SettingsRow:
