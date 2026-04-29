@@ -999,11 +999,17 @@ class Notification(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     application_id: Mapped[int | None] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"))
-    channel: Mapped[NotificationChannel] = mapped_column(SAEnum(NotificationChannel, name="notification_channel"))
-    provider: Mapped[NotificationProvider] = mapped_column(SAEnum(NotificationProvider, name="notification_provider"))
+    channel: Mapped[NotificationChannel] = mapped_column(
+        SAEnum(NotificationChannel, name="notification_channel", values_callable=lambda x: [e.value for e in x])
+    )
+    provider: Mapped[NotificationProvider] = mapped_column(
+        SAEnum(NotificationProvider, name="notification_provider", values_callable=lambda x: [e.value for e in x])
+    )
     subject: Mapped[str | None] = mapped_column(String(512))
     body: Mapped[str | None] = mapped_column(String)
-    status: Mapped[NotificationStatus] = mapped_column(SAEnum(NotificationStatus, name="notification_status"))
+    status: Mapped[NotificationStatus] = mapped_column(
+        SAEnum(NotificationStatus, name="notification_status", values_callable=lambda x: [e.value for e in x])
+    )
     external_id: Mapped[str | None] = mapped_column(String(255))
     error: Mapped[str | None] = mapped_column(String)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -1895,13 +1901,13 @@ Create `tests/unit/test_text_parser.py`:
 from recruiter.pipeline.parsers.text import parse_text
 
 
-def test_parse_text_returns_input_unchanged() -> None:
+def test_parse_text_preserves_internal_newlines() -> None:
     result = parse_text("Alice\nPython, Rust\n")
-    assert result.text == "Alice\nPython, Rust\n"
+    assert result.text == "Alice\nPython, Rust"  # trailing newline stripped, internal preserved
     assert result.metadata == {}
 
 
-def test_parse_text_strips_only_outer_whitespace() -> None:
+def test_parse_text_strips_outer_whitespace() -> None:
     result = parse_text("   Alice\n  ")
     assert result.text == "Alice"
 ```
