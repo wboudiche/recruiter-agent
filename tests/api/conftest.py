@@ -4,6 +4,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from recruiter.api.candidates import get_engine_dep
 from recruiter.api.deps import get_session
 from recruiter.main import app
 from recruiter.models import Base
@@ -22,6 +23,7 @@ async def api_client(pg_dsn: str) -> AsyncIterator[AsyncClient]:
             yield session
 
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_engine_dep] = lambda: engine
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             yield client
