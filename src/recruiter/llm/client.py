@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ class LLMMessage(BaseModel):
     content: str
 
 
+@runtime_checkable
 class LLMClient(Protocol):
     async def chat(
         self,
@@ -51,7 +52,10 @@ class FakeLLMClient:
         max_tokens: int = 2048,
         temperature: float = 0.0,
     ) -> str:
-        self.calls.append({"kind": "chat", "messages": messages, "system": system})
+        self.calls.append({
+            "kind": "chat", "messages": messages, "system": system,
+            "max_tokens": max_tokens, "temperature": temperature,
+        })
         if not self._text:
             raise RuntimeError("FakeLLMClient text_responses exhausted")
         return self._text.popleft()
@@ -65,7 +69,10 @@ class FakeLLMClient:
         max_tokens: int = 2048,
         temperature: float = 0.0,
     ) -> T:
-        self.calls.append({"kind": "structured", "messages": messages, "system": system, "schema": schema.__name__})
+        self.calls.append({
+            "kind": "structured", "messages": messages, "system": system,
+            "schema": schema.__name__, "max_tokens": max_tokens, "temperature": temperature,
+        })
         if not self._structured:
             raise RuntimeError("FakeLLMClient structured_responses exhausted")
         nxt = self._structured.popleft()
