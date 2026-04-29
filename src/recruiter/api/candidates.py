@@ -165,3 +165,38 @@ async def upload_resume(
         bus=bus,
     )
     return ApplicationCreated(application_id=application.id)
+
+
+class PastePayload(BaseModel):
+    content: str
+
+
+paste_router = APIRouter(prefix="/api/applications", tags=["applications"])
+
+
+@paste_router.post("/{application_id}/paste", response_model=ApplicationCreated, status_code=status.HTTP_202_ACCEPTED)
+async def paste_content(
+    application_id: int,
+    payload: PastePayload,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient = Depends(get_llm),
+    bus: EventBus = Depends(get_event_bus),
+) -> ApplicationCreated:
+    application = await session.get(Application, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if application.stage != Stage.EXTRACTING:
+        raise HTTPException(status_code=409, detail=f"cannot paste in stage {application.stage.value}")
+
+    routed = RoutedInput(kind="paste", text=payload.content, source_url=None, resume_path=None)
+    background_tasks.add_task(
+        process_application,
+        application_id=application_id,
+        routed=routed,
+        engine=engine,
+        llm=llm,
+        bus=bus,
+    )
+    return ApplicationCreated(application_id=application_id)
