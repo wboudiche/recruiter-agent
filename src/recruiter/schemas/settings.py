@@ -1,7 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SettingsRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     default_llm_provider: str
     has_anthropic_api_key: bool
     local_llm_url: str | None
