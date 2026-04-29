@@ -2806,14 +2806,13 @@ async def test_process_application_extracts_scores_and_advances_stage(db_session
         bus=bus,
     )
 
-    refreshed = await db_session_with_schema.get(Application, app.id)
-    assert refreshed is not None
-    assert refreshed.stage == Stage.SCORED
-    assert refreshed.score == 85
+    # Orchestrator commits via its own session; refresh ours so we re-read from DB.
+    await db_session_with_schema.refresh(app)
+    await db_session_with_schema.refresh(candidate)
 
-    refreshed_cand = await db_session_with_schema.get(Candidate, candidate.id)
-    assert refreshed_cand is not None
-    assert refreshed_cand.full_name == "Alice"
+    assert app.stage == Stage.SCORED
+    assert app.score == 85
+    assert candidate.full_name == "Alice"
 
     stage_events = [e["stage"] for e in events]
     assert stage_events == ["extracting", "scored"]
