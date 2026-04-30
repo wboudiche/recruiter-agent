@@ -8,8 +8,10 @@ from recruiter.api.deps import get_session
 from recruiter.config import get_config
 from recruiter.db import get_engine
 from recruiter.events import EventBus
+from recruiter.llm.anthropic import AnthropicLLMClient
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, Job, SourceType, Stage
+from recruiter.llm.openai_compat import OpenAICompatLLMClient
+from recruiter.models import Application, Candidate, Job, SettingsRow, SourceType, Stage
 from recruiter.pipeline.fetchers.github import fetch_github
 from recruiter.pipeline.fetchers.linkedin_stub import fetch_linkedin
 from recruiter.pipeline.fetchers.webpage import fetch_webpage
@@ -26,8 +28,39 @@ def get_event_bus() -> EventBus:
     return _singleton_bus
 
 
-def get_llm() -> LLMClient:
-    raise HTTPException(status_code=500, detail="LLM client not configured for this environment")
+async def get_llm(session: AsyncSession = Depends(get_session)) -> LLMClient:
+    """Resolve the configured LLM client from the Settings singleton row.
+
+    Returns 503 if the settings row is missing, the provider is unknown, or the
+    selected provider's credentials/URL are not yet configured. Tests override
+    this dependency via app.dependency_overrides[get_llm] = lambda: FakeLLMClient(...).
+    """
+    from recruiter.api.settings import _cipher
+
+    row = await session.get(SettingsRow, 1)
+    if row is None:
+        raise HTTPException(status_code=503, detail="Settings not configured. PUT /api/settings first.")
+
+    provider = row.default_llm_provider
+    overrides = row.model_overrides or {}
+
+    if provider == "anthropic":
+        if not row.anthropic_api_key_enc:
+            raise HTTPException(status_code=503, detail="Anthropic API key not set in settings.")
+        api_key = _cipher().decrypt(row.anthropic_api_key_enc)
+        return AnthropicLLMClient(
+            api_key=api_key,
+            model=overrides.get("anthropic_model", "claude-sonnet-4-6"),
+        )
+    if provider == "local":
+        if not row.local_llm_url:
+            raise HTTPException(status_code=503, detail="Local LLM URL not set in settings.")
+        return OpenAICompatLLMClient(
+            base_url=row.local_llm_url,
+            model=overrides.get("local_model", "gpt-oss-120b"),
+            api_key="not-needed",
+        )
+    raise HTTPException(status_code=503, detail=f"Unknown LLM provider: {provider}")
 
 
 def get_engine_dep() -> AsyncEngine:
