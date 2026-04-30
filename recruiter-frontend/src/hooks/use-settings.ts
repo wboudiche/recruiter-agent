@@ -15,11 +15,20 @@ export interface SettingsRead {
   monthly_llm_spend_cap_usd: number | null;
 }
 
+export interface SmtpConfigInput {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  from_email: string;
+}
+
 export interface SettingsUpdate {
   default_llm_provider?: string;
   anthropic_api_key?: string;
   local_llm_url?: string;
   model_overrides?: Record<string, unknown>;
+  smtp_config?: SmtpConfigInput;
   recruiter_name?: string;
   recruiter_email?: string;
   monthly_llm_spend_cap_usd?: number;

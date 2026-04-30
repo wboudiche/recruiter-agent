@@ -1,6 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LlmTab } from "@/components/settings/llm-tab";
-import { NotificationsTabPlaceholder } from "@/components/settings/notifications-tab-placeholder";
+import { NotificationsTab } from "@/components/settings/notifications-tab";
 import { ProfileTab } from "@/components/settings/profile-tab";
 
 export default function Settings() {
@@ -17,7 +17,7 @@ export default function Settings() {
           <LlmTab />
         </TabsContent>
         <TabsContent value="notifications" className="pt-6">
-          <NotificationsTabPlaceholder />
+          <NotificationsTab />
         </TabsContent>
         <TabsContent value="profile" className="pt-6">
           <ProfileTab />
