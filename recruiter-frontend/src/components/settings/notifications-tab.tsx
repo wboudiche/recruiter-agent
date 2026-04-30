@@ -12,6 +12,7 @@ export function NotificationsTab() {
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [fromEmail, setFromEmail] = useState("");
+  const [useStartTls, setUseStartTls] = useState(true);
 
   if (settings.isLoading) return <p>Loading…</p>;
   if (!settings.data) return <p>No settings.</p>;
@@ -25,13 +26,14 @@ export function NotificationsTab() {
           user,
           password,
           from_email: fromEmail,
+          use_starttls: useStartTls,
         },
       },
       { onSuccess: () => setPassword("") },
     );
   }
 
-  const canSave = host && port && user && password && fromEmail;
+  const canSave = host && port && fromEmail;
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -80,6 +82,14 @@ export function NotificationsTab() {
             onChange={(e) => setFromEmail(e.target.value)}
           />
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={useStartTls}
+            onChange={(e) => setUseStartTls(e.target.checked)}
+          />
+          Use STARTTLS (uncheck for local dev SMTP servers like MailHog)
+        </label>
         <Button onClick={save} disabled={update.isPending || !canSave}>
           {update.isPending ? "Saving…" : "Save SMTP config"}
         </Button>

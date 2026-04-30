@@ -133,6 +133,7 @@ async def notify_endpoint(
             user=smtp_cfg_input.user,
             password=smtp_cfg_input.password,
             from_email=smtp_cfg_input.from_email,
+            use_starttls=smtp_cfg_input.use_starttls,
         )
         notifier = SmtpNotifier(cfg, smtp_factory=smtp_factory)
     else:

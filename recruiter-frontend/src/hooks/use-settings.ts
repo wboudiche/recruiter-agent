@@ -21,6 +21,7 @@ export interface SmtpConfigInput {
   user: string;
   password: string;
   from_email: string;
+  use_starttls?: boolean;
 }
 
 export interface SettingsUpdate {

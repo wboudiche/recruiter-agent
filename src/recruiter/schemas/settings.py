@@ -7,6 +7,7 @@ class SmtpConfigInput(BaseModel):
     user: str
     password: str
     from_email: str
+    use_starttls: bool = True
 
 
 class SettingsRead(BaseModel):

@@ -16,6 +16,7 @@ class SmtpConfig:
     user: str
     password: str
     from_email: str
+    use_starttls: bool = True
 
 
 class SmtpNotifier:
@@ -57,8 +58,10 @@ class SmtpNotifier:
         )
 
         with self._smtp_factory(self._config.host, self._config.port) as client:
-            client.starttls()
-            client.login(self._config.user, self._config.password)
+            if self._config.use_starttls:
+                client.starttls()
+            if self._config.user and self._config.password:
+                client.login(self._config.user, self._config.password)
             client.sendmail(self._config.from_email, [to_email], message.as_bytes())
 
         return NotificationReceipt(external_id=str(uuid.uuid4()), provider="smtp")
