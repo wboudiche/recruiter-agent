@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
+import { KanbanBoard } from "@/components/kanban/kanban-board";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
 
@@ -7,6 +10,7 @@ export default function JobDetail() {
   const id = Number(jobId);
   const job = useJob(id);
   const apps = useJobApplications(id);
+  const [showRejected, setShowRejected] = useState(false);
 
   if (job.isLoading || apps.isLoading) return <p>Loading…</p>;
   if (job.isError) return <p className="text-destructive">Failed to load job.</p>;
@@ -14,17 +18,22 @@ export default function JobDetail() {
 
   return (
     <div className="space-y-4">
-      <header>
-        <h2 className="text-xl font-semibold">{job.data.title}</h2>
-        <p className="text-sm text-muted-foreground">{job.data.status}</p>
+      <header className="flex items-baseline justify-between">
+        <div>
+          <h2 className="text-xl font-semibold">{job.data.title}</h2>
+          <p className="text-sm text-muted-foreground">{job.data.status}</p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowRejected((s) => !s)}
+          >
+            {showRejected ? "Hide rejected" : "Show rejected"}
+          </Button>
+        </div>
       </header>
-      <pre className="text-sm whitespace-pre-wrap text-muted-foreground line-clamp-3">
-        {job.data.description}
-      </pre>
-      <p className="text-sm">
-        {apps.data?.length ?? 0} candidate
-        {(apps.data?.length ?? 0) === 1 ? "" : "s"}
-      </p>
+      <KanbanBoard applications={apps.data ?? []} showRejected={showRejected} />
     </div>
   );
 }
