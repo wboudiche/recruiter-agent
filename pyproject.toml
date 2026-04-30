@@ -19,6 +19,10 @@ dependencies = [
   "cryptography>=42",
   "python-multipart>=0.0.9",
   "sse-starlette>=2.1",
+  "google-api-python-client>=2.140",
+  "google-auth>=2.34",
+  "google-auth-oauthlib>=1.2",
+  "icalendar>=5.0",
 ]
 
 [project.optional-dependencies]
