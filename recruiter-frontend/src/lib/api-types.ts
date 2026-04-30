@@ -143,6 +143,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/{application_id}/draft-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Draft Email Endpoint */
+        post: operations["draft_email_endpoint_api_applications__application_id__draft_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/{application_id}/notify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Notify Endpoint */
+        post: operations["notify_endpoint_api_applications__application_id__notify_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings": {
         parameters: {
             query?: never;
@@ -284,6 +318,18 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** DraftRequest */
+        DraftRequest: {
+            /** Slots */
+            slots: components["schemas"]["Slot"][];
+        };
+        /** DraftedEmail */
+        DraftedEmail: {
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -331,6 +377,27 @@ export interface components {
             criteria?: components["schemas"]["CriteriaItem"][] | null;
             /** Status */
             status?: string | null;
+        };
+        /** NotifyPayload */
+        NotifyPayload: {
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "smtp" | "gmail";
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            /** Slots */
+            slots: components["schemas"]["Slot"][];
+        };
+        /** NotifyResponse */
+        NotifyResponse: {
+            /** Notification Id */
+            notification_id: number;
+            /** External Id */
+            external_id: string;
         };
         /** PastePayload */
         PastePayload: {
@@ -383,12 +450,39 @@ export interface components {
             model_overrides?: {
                 [key: string]: unknown;
             } | null;
+            smtp_config?: components["schemas"]["SmtpConfigInput"] | null;
             /** Recruiter Name */
             recruiter_name?: string | null;
             /** Recruiter Email */
             recruiter_email?: string | null;
             /** Monthly Llm Spend Cap Usd */
             monthly_llm_spend_cap_usd?: number | null;
+        };
+        /** Slot */
+        Slot: {
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+        };
+        /** SmtpConfigInput */
+        SmtpConfigInput: {
+            /** Host */
+            host: string;
+            /** Port */
+            port: number;
+            /** User */
+            user: string;
+            /** Password */
+            password: string;
+            /** From Email */
+            from_email: string;
         };
         /** ValidationError */
         ValidationError: {
@@ -751,6 +845,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApplicationCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_email_endpoint_api_applications__application_id__draft_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftedEmail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_endpoint_api_applications__application_id__notify_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                application_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotifyPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotifyResponse"];
                 };
             };
             /** @description Validation Error */
