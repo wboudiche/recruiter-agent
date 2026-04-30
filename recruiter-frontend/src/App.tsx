@@ -1,15 +1,37 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { Toaster } from "sonner";
+import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "@/components/theme/theme-provider";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import IndexRedirect from "@/routes/index";
+import JobsList from "@/routes/jobs-list";
+import Settings from "@/routes/settings";
 
-export default function App() {
+interface AppProps {
+  noBrowserRouter?: boolean;
+}
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
+});
+
+export default function App({ noBrowserRouter = false }: AppProps = {}) {
+  const tree = (
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<IndexRedirect />} />
+        <Route path="/jobs" element={<JobsList />} />
+        <Route path="/settings" element={<Settings />} />
+      </Route>
+    </Routes>
+  );
+
   return (
     <ThemeProvider>
-      <div data-testid="app-root" className="min-h-screen p-4">
-        <header className="flex justify-between">
-          <h1 className="text-xl font-semibold">Recruiter Agent</h1>
-          <ThemeToggle />
-        </header>
-      </div>
+      <QueryClientProvider client={queryClient}>
+        {noBrowserRouter ? tree : <BrowserRouter>{tree}</BrowserRouter>}
+        <Toaster richColors closeButton />
+      </QueryClientProvider>
     </ThemeProvider>
   );
 }
