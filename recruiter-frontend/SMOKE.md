@@ -89,3 +89,25 @@ Open `http://localhost:5173`.
 
 - [ ] Stop the backend mid-session → kanban stays as last cached state, mutations toast "API connection error" or similar.
 - [ ] Restart backend → SSE reconnects (silent).
+
+
+## Plan C — SMTP smoke
+
+Requires MailHog running on localhost:1025 (SMTP) and 8025 (UI):
+
+```bash
+docker run -d --rm --name mailhog -p 1025:1025 -p 8025:8025 mailhog/mailhog
+```
+
+- [ ] In Settings → Notifications, save SMTP config: host=localhost, port=1025, user=any, password=any, from=me@example.com.
+- [ ] Add a candidate with paste content `Alice Doe alice@example.com - Rust expert` → wait for Scored.
+- [ ] Click candidate → Validate → "Notify & invite".
+- [ ] Wizard step 1 (Channel): SMTP option enabled. Pick it, Next.
+- [ ] Step 2 (Slots): Add 2 slots, Next.
+- [ ] Step 3 (Draft): AI auto-drafts subject + body. Edit subject. Next.
+- [ ] Step 4 (Confirm): Review, click Send. Toast "Invitation sent".
+- [ ] Card moves to Invited column on the kanban.
+- [ ] Open MailHog UI (http://localhost:8025). The email is present, has `text/calendar` attachment.
+- [ ] Open the .ics in any calendar app — attendee should be `alice@example.com`, organizer should be your `from_email`.
+- [ ] Try Notify on a candidate without an email → Notify button is hidden (canNotify guard).
+- [ ] Try Notify on a candidate with no SMTP configured → 503 toast "SMTP config not set in settings".
