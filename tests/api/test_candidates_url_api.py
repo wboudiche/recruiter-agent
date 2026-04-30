@@ -77,3 +77,21 @@ async def test_add_candidate_via_linkedin_url_stays_extracting_until_paste(api_c
         assert fake.calls == []
     finally:
         app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_add_candidate_with_invalid_url_returns_422(api_client: AsyncClient) -> None:
+    """A malformed URL should produce 422 (validation error), not 500."""
+    job_id = (await api_client.post("/api/jobs", json={"title": "T", "description": "D", "criteria": []})).json()["id"]
+
+    fake = FakeLLMClient()
+    app.dependency_overrides[get_llm] = lambda: fake
+    try:
+        resp = await api_client.post(
+            f"/api/jobs/{job_id}/candidates",
+            json={"kind": "url", "url": "not a url"},
+        )
+        assert resp.status_code == 422
+        assert "invalid URL" in resp.json()["detail"]
+    finally:
+        app.dependency_overrides.pop(get_llm, None)

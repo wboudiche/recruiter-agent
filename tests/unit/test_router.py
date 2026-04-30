@@ -23,6 +23,13 @@ def test_classify_invalid_url() -> None:
         classify_url("not a url")
 
 
+def test_classify_does_not_eat_leading_w_from_non_www_hosts() -> None:
+    # Regression: previously lstrip("www.") would strip ALL leading w/. chars,
+    # mangling hosts like "wwwapp.com" into "app.com" (an unrelated webpage).
+    assert classify_url("https://wwwapp.com/profile") == "webpage"
+    assert classify_url("https://wonderful.example") == "webpage"
+
+
 def test_routed_input_holds_kind_and_payload() -> None:
     r = RoutedInput(kind="paste", text="hello", source_url=None, resume_path=None)
     assert r.kind == "paste"

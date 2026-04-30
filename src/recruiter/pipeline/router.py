@@ -20,7 +20,7 @@ def classify_url(url: str) -> InputKind:
         raise ValueError("invalid URL") from exc
     if not parsed.scheme or not parsed.netloc:
         raise ValueError("invalid URL")
-    host = parsed.netloc.lower().lstrip("www.")
+    host = parsed.netloc.lower().removeprefix("www.")
     if host == "github.com":
         return "github"
     if host == "linkedin.com" or host.endswith(".linkedin.com"):

@@ -1,6 +1,9 @@
+import os
+import uuid
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -16,6 +19,8 @@ from recruiter.pipeline.fetchers.github import fetch_github
 from recruiter.pipeline.fetchers.linkedin_stub import fetch_linkedin
 from recruiter.pipeline.fetchers.webpage import fetch_webpage
 from recruiter.pipeline.orchestrator import process_application
+from recruiter.pipeline.parsers.docx import parse_docx
+from recruiter.pipeline.parsers.pdf import parse_pdf
 from recruiter.pipeline.router import RoutedInput, classify_url
 
 router = APIRouter(prefix="/api/jobs/{job_id}/candidates", tags=["candidates"])
@@ -97,7 +102,10 @@ async def add_candidate(
         raise HTTPException(status_code=404, detail="job not found")
 
     if payload.kind == "url":
-        routed = await _route_url(payload.url)
+        try:
+            routed = await _route_url(payload.url)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         source_type = SourceType.URL
         source_url = payload.url
     else:
@@ -138,16 +146,6 @@ async def _route_url(url: str) -> RoutedInput:
         return RoutedInput(kind=kind, text=parsed.text, source_url=url, resume_path=None)
     parsed = await fetch_webpage(url)
     return RoutedInput(kind=kind, text=parsed.text, source_url=url, resume_path=None)
-
-
-import os
-import uuid
-from pathlib import Path
-
-from fastapi import File, UploadFile
-
-from recruiter.pipeline.parsers.docx import parse_docx
-from recruiter.pipeline.parsers.pdf import parse_pdf
 
 
 @router.post("/upload", response_model=ApplicationCreated, status_code=status.HTTP_202_ACCEPTED)
