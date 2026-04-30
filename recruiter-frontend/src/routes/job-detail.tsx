@@ -40,7 +40,11 @@ export default function JobDetail() {
           </Button>
         </div>
       </header>
-      <KanbanBoard applications={apps.data ?? []} showRejected={showRejected} />
+      <KanbanBoard
+        applications={apps.data ?? []}
+        jobId={id}
+        showRejected={showRejected}
+      />
       <AddCandidatePanel jobId={id} open={addOpen} onOpenChange={setAddOpen} />
     </div>
   );
