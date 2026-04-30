@@ -34,6 +34,14 @@ async def process_application(
         await bus.publish({"type": "stage", "application_id": app.id, "stage": Stage.EXTRACTING.value})
 
         text = routed.text or ""
+        # Persist raw text up-front so retry can re-run even if extraction fails.
+        candidate.raw_extracted = {"text": text, "structured": None}
+        if routed.source_url is not None:
+            candidate.source_url = routed.source_url
+        if routed.resume_path is not None:
+            candidate.resume_path = routed.resume_path
+        await session.flush()
+
         try:
             extracted = await extract_candidate(text=text, llm=llm)
         except Exception as exc:

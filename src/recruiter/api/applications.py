@@ -102,3 +102,54 @@ async def patch_application(
     await session.commit()
     await session.refresh(app_row)
     return _to_read(app_row)
+
+
+from fastapi import BackgroundTasks
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from recruiter.api.candidates import ApplicationCreated, get_engine_dep, get_event_bus, get_llm
+from recruiter.events import EventBus
+from recruiter.llm.client import LLMClient
+from recruiter.models import Candidate
+from recruiter.pipeline.orchestrator import process_application
+from recruiter.pipeline.router import RoutedInput
+
+
+@router.post("/applications/{application_id}/retry", response_model=ApplicationCreated, status_code=202)
+async def retry_application(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient = Depends(get_llm),
+    bus: EventBus = Depends(get_event_bus),
+) -> ApplicationCreated:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if app_row.stage != Stage.EXTRACTING:
+        raise HTTPException(status_code=409, detail=f"cannot retry from stage {app_row.stage.value}")
+
+    candidate = await session.get(Candidate, app_row.candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+
+    raw_text = ""
+    if candidate.raw_extracted and isinstance(candidate.raw_extracted, dict):
+        raw_text = candidate.raw_extracted.get("text", "") or ""
+
+    routed = RoutedInput(
+        kind="paste",
+        text=raw_text,
+        source_url=candidate.source_url,
+        resume_path=candidate.resume_path,
+    )
+    background_tasks.add_task(
+        process_application,
+        application_id=application_id,
+        routed=routed,
+        engine=engine,
+        llm=llm,
+        bus=bus,
+    )
+    return ApplicationCreated(application_id=application_id)
