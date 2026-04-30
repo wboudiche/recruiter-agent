@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +8,7 @@ from recruiter.api.deps import get_session
 from recruiter.config import get_config
 from recruiter.crypto import SecretCipher
 from recruiter.models import SettingsRow
-from recruiter.schemas.settings import SettingsRead, SettingsUpdate
+from recruiter.schemas.settings import SettingsRead, SettingsUpdate, SmtpConfigInput
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -74,6 +76,8 @@ async def update_settings(
         row.local_llm_url = payload.local_llm_url
     if payload.model_overrides is not None:
         row.model_overrides = payload.model_overrides
+    if payload.smtp_config is not None:
+        row.smtp_config_enc = cipher.encrypt(json.dumps(payload.smtp_config.model_dump()))
     if payload.recruiter_name is not None:
         row.recruiter_name = payload.recruiter_name
     if payload.recruiter_email is not None:
@@ -83,3 +87,11 @@ async def update_settings(
     await session.commit()
     await session.refresh(row)
     return _to_read(row)
+
+
+def get_smtp_config(row: SettingsRow) -> SmtpConfigInput | None:
+    """Decrypt and parse the SMTP config blob from the Settings row."""
+    if not row.smtp_config_enc:
+        return None
+    raw = _cipher().decrypt(row.smtp_config_enc)
+    return SmtpConfigInput(**json.loads(raw))
