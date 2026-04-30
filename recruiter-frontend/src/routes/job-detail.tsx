@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AddCandidatePanel } from "@/components/kanban/add-candidate-panel";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
@@ -11,6 +13,7 @@ export default function JobDetail() {
   const job = useJob(id);
   const apps = useJobApplications(id);
   const [showRejected, setShowRejected] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   if (job.isLoading || apps.isLoading) return <p>Loading…</p>;
   if (job.isError) return <p className="text-destructive">Failed to load job.</p>;
@@ -31,9 +34,14 @@ export default function JobDetail() {
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
           </Button>
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" />
+            Add candidate
+          </Button>
         </div>
       </header>
       <KanbanBoard applications={apps.data ?? []} showRejected={showRejected} />
+      <AddCandidatePanel jobId={id} open={addOpen} onOpenChange={setAddOpen} />
     </div>
   );
 }
