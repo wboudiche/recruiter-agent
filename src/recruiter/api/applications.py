@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session
-from recruiter.models import Application, Stage
+from recruiter.models import Application, Candidate, Stage
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate
+from recruiter.schemas.candidate import CandidateRead
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -17,6 +18,16 @@ async def get_application(application_id: int, session: AsyncSession = Depends(g
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     return _to_read(app_row)
+
+
+@router.get("/candidates/{candidate_id}", response_model=CandidateRead)
+async def get_candidate(
+    candidate_id: int, session: AsyncSession = Depends(get_session)
+) -> CandidateRead:
+    candidate = await session.get(Candidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    return CandidateRead.model_validate(candidate)
 
 
 @router.get("/jobs/{job_id}/applications", response_model=list[ApplicationRead])
