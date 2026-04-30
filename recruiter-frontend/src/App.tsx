@@ -7,6 +7,7 @@ import IndexRedirect from "@/routes/index";
 import JobsList from "@/routes/jobs-list";
 import JobsNew from "@/routes/jobs-new";
 import JobDetail from "@/routes/job-detail";
+import ApplicationDetail from "@/routes/application-detail";
 import Settings from "@/routes/settings";
 
 interface AppProps {
@@ -25,6 +26,7 @@ export default function App({ noBrowserRouter = false }: AppProps = {}) {
         <Route path="/jobs" element={<JobsList />} />
         <Route path="/jobs/new" element={<JobsNew />} />
         <Route path="/jobs/:jobId" element={<JobDetail />} />
+        <Route path="/applications/:appId" element={<ApplicationDetail />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
