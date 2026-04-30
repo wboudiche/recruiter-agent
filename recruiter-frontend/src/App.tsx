@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { useSSE } from "@/lib/sse";
 import IndexRedirect from "@/routes/index";
 import JobsList from "@/routes/jobs-list";
 import JobsNew from "@/routes/jobs-new";
@@ -17,6 +18,11 @@ interface AppProps {
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
+
+function SSEMounter() {
+  useSSE();
+  return null;
+}
 
 export default function App({ noBrowserRouter = false }: AppProps = {}) {
   const tree = (
@@ -35,6 +41,7 @@ export default function App({ noBrowserRouter = false }: AppProps = {}) {
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
+        <SSEMounter />
         {noBrowserRouter ? tree : <BrowserRouter>{tree}</BrowserRouter>}
         <Toaster richColors closeButton />
       </QueryClientProvider>
