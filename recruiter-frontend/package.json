@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "gen:types": "./scripts/gen-types.sh"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
