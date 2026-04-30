@@ -1,10 +1,12 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session
-from recruiter.models import Application
-from recruiter.schemas.application import ApplicationRead
+from recruiter.models import Application, Stage
+from recruiter.schemas.application import ApplicationRead, ApplicationUpdate
 
 router = APIRouter(prefix="/api", tags=["applications"])
 
@@ -46,3 +48,57 @@ def _to_read(app_row: Application) -> ApplicationRead:
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
     )
+
+
+_TERMINAL_AFTER_INVITED = {Stage.INVITED, Stage.SCHEDULED}
+
+
+def _validate_transition(current: Stage, target: Stage) -> None:
+    """Enforce business rules. Raises HTTPException(409) on illegal transitions."""
+    if current in _TERMINAL_AFTER_INVITED and target != Stage.REJECTED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot move from {current.value} to {target.value} after invitation sent",
+        )
+    if target == Stage.SCORED and current != Stage.VALIDATED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot unvalidate from stage {current.value}",
+        )
+    if target == Stage.VALIDATED and current != Stage.SCORED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot validate from stage {current.value}",
+        )
+    if target == Stage.REJECTED and current == Stage.REJECTED:
+        raise HTTPException(status_code=409, detail="already rejected")
+
+
+@router.patch("/applications/{application_id}", response_model=ApplicationRead)
+async def patch_application(
+    application_id: int,
+    payload: ApplicationUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> ApplicationRead:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+
+    if payload.notes is not None:
+        app_row.notes = payload.notes
+
+    if payload.stage is not None:
+        new_stage = Stage(payload.stage)
+        _validate_transition(app_row.stage, new_stage)
+        app_row.stage = new_stage
+        now = datetime.now(timezone.utc)
+        if new_stage == Stage.VALIDATED:
+            app_row.validated_at = now
+        elif new_stage == Stage.REJECTED:
+            app_row.rejected_at = now
+        elif new_stage == Stage.SCORED:
+            app_row.validated_at = None
+
+    await session.commit()
+    await session.refresh(app_row)
+    return _to_read(app_row)
