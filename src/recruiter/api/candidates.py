@@ -63,7 +63,7 @@ async def get_llm(session: AsyncSession = Depends(get_session)) -> LLMClient:
         return OpenAICompatLLMClient(
             base_url=row.local_llm_url,
             model=overrides.get("local_model", "gpt-oss-120b"),
-            api_key="not-needed",
+            api_key=get_config().local_llm_api_key or "not-needed",
         )
     raise HTTPException(status_code=503, detail=f"Unknown LLM provider: {provider}")
 

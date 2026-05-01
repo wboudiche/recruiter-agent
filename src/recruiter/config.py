@@ -10,6 +10,7 @@ class Config(BaseSettings):
     settings_key: str = "dev-only-32-byte-key-replace-me!"  # 32 bytes (single trailing !)
     resume_storage_path: str = "./var/resumes"
     log_level: str = "INFO"
+    local_llm_api_key: str | None = None
 
 
 @lru_cache(maxsize=1)
