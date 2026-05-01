@@ -138,6 +138,65 @@ async def test_undo_reverses_stage_within_ttl(api_client: AsyncClient, with_fake
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_handles_client_disconnect(
+    api_client: AsyncClient, with_fake_llm,
+) -> None:
+    """If the client closes the stream early, the streamer's per-request DB
+    session must release cleanly and subsequent requests must still work.
+    The user message persisted before the LLM call should still be visible
+    in history (the orchestrator commits it before yielding the first event)."""
+    app_id = await _create_scored_app(api_client)
+
+    # Multi-event turn so there's content the client can disconnect mid-flight.
+    with_fake_llm._tool_turns.extend([
+        AssistantTurn(text=None, tool_calls=[
+            ToolCall(id="t1", name="get_candidate", arguments={}),
+        ]),
+        AssistantTurn(text="answer", tool_calls=[]),
+    ])
+
+    # Open the stream, read just the first event (the user-message echo),
+    # then exit the `async with` block — that triggers an httpx response
+    # close, which cancels the streamer's async generator under FastAPI.
+    async with api_client.stream(
+        "POST", f"/api/applications/{app_id}/chat",
+        json={"message": "hello"},
+    ) as r:
+        first = None
+        async for line in r.aiter_lines():
+            if line:
+                first = json.loads(line)
+                break
+
+    assert first is not None
+    assert first["type"] == "message"
+    assert first["content"] == "hello"
+
+    # 1. Health endpoint still serves — engine pool is not broken.
+    health = await api_client.get("/health")
+    assert health.status_code == 200
+
+    # 2. The user message persisted before disconnect.
+    history = await api_client.get(f"/api/applications/{app_id}/chat")
+    rows = history.json()
+    assert any(r["role"] == "user" and r["content"] == "hello" for r in rows)
+
+    # 3. Subsequent chat turn against the same application still works —
+    #    no leftover transaction, no session leak.
+    with_fake_llm._tool_turns.extend([AssistantTurn(text="follow-up", tool_calls=[])])
+    async with api_client.stream(
+        "POST", f"/api/applications/{app_id}/chat",
+        json={"message": "again"},
+    ) as r2:
+        events = []
+        async for line in r2.aiter_lines():
+            if line:
+                events.append(json.loads(line))
+    types = [e["type"] for e in events]
+    assert "message_done" in types
+
+
+@pytest.mark.asyncio
 async def test_undo_410_for_unknown_token(api_client: AsyncClient, with_fake_llm) -> None:
     app_id = await _create_scored_app(api_client)
     r = await api_client.post(

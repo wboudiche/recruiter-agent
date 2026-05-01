@@ -110,10 +110,12 @@ async def run_turn(
     # in here without growing the dispatch.
     ctx = ToolContext(session=session, application_id=application_id, undo_store=undo_store)
 
+    # Load history ONCE; we already know what we persisted ourselves below,
+    # so we accumulate in memory instead of re-querying every iteration.
+    history = await _load_history(session, application_id)
+
     # 3. Loop
     for step in range(max_steps):
-        history = await _load_history(session, application_id)
-
         try:
             turn: AssistantTurn = await llm.chat_with_tools(
                 history, TOOLS, system=system,
@@ -142,7 +144,7 @@ async def run_turn(
             yield message_done_event(id=assistant_row.id)
             return
 
-        # Persist assistant tool_calls turn
+        # Persist assistant tool_calls turn + mirror it in our local history.
         assistant_row = ChatMessage(
             application_id=application_id,
             role=MessageRole.ASSISTANT,
@@ -152,6 +154,9 @@ async def run_turn(
         )
         session.add(assistant_row)
         await session.commit()
+        history.append(ChatTurn(
+            role="assistant", content=turn.text, tool_calls=list(turn.tool_calls),
+        ))
 
         # Execute each tool call sequentially
         for tc in turn.tool_calls:
@@ -171,6 +176,10 @@ async def run_turn(
             )
             session.add(tool_row)
             await session.commit()
+            history.append(ChatTurn(
+                role="tool", tool_call_id=tc.id, tool_name=tc.name,
+                tool_result=result if isinstance(result, dict) else {"value": result},
+            ))
             yield tool_call_result_event(id=tc.id, name=tc.name, result=result)
 
     # Loop exhausted without a final answer
