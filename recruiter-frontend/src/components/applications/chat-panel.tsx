@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,10 @@ interface Props {
 export function ChatPanel({ applicationId }: Props) {
   const { messages, sendMessage, isStreaming, error, undo } = useChat(applicationId);
   const [input, setInput] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length, isStreaming]);
 
   async function onSend() {
     const text = input.trim();
@@ -38,6 +42,7 @@ export function ChatPanel({ applicationId }: Props) {
             {error}
           </p>
         )}
+        <div ref={bottomRef} />
       </div>
       <div className="p-3 border-t flex gap-2">
         <Textarea
