@@ -15,7 +15,7 @@ from recruiter.agent.tools import TOOLS, get_tool_handler
 from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall
 from recruiter.agent.undo import UndoStore
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, ChatMessage, Job, MessageRole
+from recruiter.models import Application, Candidate, ChatMessage, Job, MessageRole, SettingsRow
 
 MAX_STEPS_DEFAULT = 8
 
@@ -57,7 +57,6 @@ async def _build_system_prompt(session: AsyncSession, application_id: int) -> st
         return _system_prompt(recruiter_name=None, candidate_full_name=None, job_title=None)
     candidate = await session.get(Candidate, app.candidate_id)
     job = await session.get(Job, app.job_id)
-    from recruiter.models import SettingsRow
     settings = await session.get(SettingsRow, 1)
     return _system_prompt(
         recruiter_name=(settings.recruiter_name if settings else None),
@@ -89,7 +88,6 @@ async def run_turn(
     )
     session.add(user_row)
     await session.commit()
-    await session.refresh(user_row)
     yield message_event(role="user", id=user_row.id, content=user_message)
 
     # 2. Build system prompt + history
@@ -127,7 +125,6 @@ async def run_turn(
             )
             session.add(assistant_row)
             await session.commit()
-            await session.refresh(assistant_row)
             yield message_delta_event(text=text)
             yield message_done_event(id=assistant_row.id)
             return
@@ -142,7 +139,6 @@ async def run_turn(
         )
         session.add(assistant_row)
         await session.commit()
-        await session.refresh(assistant_row)
 
         # Execute each tool call sequentially
         for tc in turn.tool_calls:

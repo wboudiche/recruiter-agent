@@ -9,7 +9,10 @@ from recruiter.agent.types import ToolDef
 from recruiter.agent.undo import UndoStore, get_default_undo_store
 from recruiter.models import Application, Candidate, Job, Stage
 
-ToolHandler = Callable[[AsyncSession, int, dict], Awaitable[dict | list]]
+# Variadic over keyword args so write tools (validate/reject) which accept an
+# extra `undo_store` keyword still satisfy the alias. The agent loop does the
+# name-based dispatch; a future ToolContext refactor will collapse this.
+ToolHandler = Callable[..., Awaitable[dict | list]]
 
 _HANDLERS: dict[str, ToolHandler] = {}
 
@@ -23,7 +26,7 @@ def _register(name: str):
 
 def get_tool_handler(name: str) -> ToolHandler:
     if name not in _HANDLERS:
-        raise KeyError(f"unknown tool: {name}")
+        raise ValueError(f"unknown tool: {name}")
     return _HANDLERS[name]
 
 
@@ -214,12 +217,11 @@ async def _reject_application(
     return {"ok": True, "previous_stage": previous, "undo_token": token}
 
 
-# Note: validate/reject have an extra `undo_store` keyword that doesn't fit the
-# generic ToolHandler signature. We register them in _HANDLERS directly (not via
-# @_register) so the type alias stays clean. The agent loop (Task 8) detects these
-# two names and passes undo_store explicitly.
-_HANDLERS["validate_application"] = _validate_application  # type: ignore[assignment]
-_HANDLERS["reject_application"] = _reject_application  # type: ignore[assignment]
+# validate/reject accept an extra `undo_store` keyword. The variadic
+# ToolHandler alias above accepts any kwargs; the agent loop detects these
+# two names and threads undo_store explicitly.
+_HANDLERS["validate_application"] = _validate_application
+_HANDLERS["reject_application"] = _reject_application
 
 
 # Append the write tools to the registry
