@@ -3,6 +3,8 @@ from typing import Any, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel
 
+from recruiter.agent.types import AssistantTurn, ChatTurn, ToolDef
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -32,6 +34,15 @@ class LLMClient(Protocol):
         temperature: float = 0.0,
     ) -> T: ...
 
+    async def chat_with_tools(
+        self,
+        messages: list[ChatTurn],
+        tools: list[ToolDef],
+        *,
+        system: str | None = None,
+        max_tokens: int = 2048,
+    ) -> AssistantTurn: ...
+
 
 class FakeLLMClient:
     def __init__(
@@ -39,9 +50,11 @@ class FakeLLMClient:
         *,
         text_responses: list[str] | None = None,
         structured_responses: list[BaseModel] | None = None,
+        tool_turn_responses: list[AssistantTurn] | None = None,
     ) -> None:
         self._text = deque(text_responses or [])
         self._structured = deque(structured_responses or [])
+        self._tool_turns = deque(tool_turn_responses or [])
         self.calls: list[dict[str, Any]] = []
 
     async def chat(
@@ -79,3 +92,19 @@ class FakeLLMClient:
         if not isinstance(nxt, schema):
             raise TypeError(f"FakeLLMClient queued response is {type(nxt).__name__}, expected {schema.__name__}")
         return nxt
+
+    async def chat_with_tools(
+        self,
+        messages: list[ChatTurn],
+        tools: list[ToolDef],
+        *,
+        system: str | None = None,
+        max_tokens: int = 2048,
+    ) -> AssistantTurn:
+        self.calls.append({
+            "kind": "tools", "messages": messages, "tools": tools,
+            "system": system, "max_tokens": max_tokens,
+        })
+        if not self._tool_turns:
+            raise RuntimeError("FakeLLMClient tool_turn_responses exhausted")
+        return self._tool_turns.popleft()

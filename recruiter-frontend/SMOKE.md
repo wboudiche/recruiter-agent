@@ -111,3 +111,21 @@ docker run -d --rm --name mailhog -p 1025:1025 -p 8025:8025 mailhog/mailhog
 - [ ] Open the .ics in any calendar app — attendee should be `alice@example.com`, organizer should be your `from_email`.
 - [ ] Try Notify on a candidate without an email → Notify button is hidden (canNotify guard).
 - [ ] Try Notify on a candidate with no SMTP configured → 503 toast "SMTP config not set in settings".
+
+## Plan D — Chat panel
+
+Prereqs: backend + frontend running, an application in stage `scored`, an LLM
+provider configured (`/api/settings`).
+
+- [ ] Open `/applications/<scored-app-id>` → chat panel mounted on the right, history empty.
+- [ ] Type "summarize her async-Rust experience" + press Enter.
+  - [ ] Input disables while streaming, "Thinking…" indicator appears.
+  - [ ] Assistant text appears (no tool call card for a simple read query).
+- [ ] Type "validate her with note 'strong RustConf signal'".
+  - [ ] A `validate_application` tool card renders.
+  - [ ] Application stage on the left side / kanban moves to Validated.
+  - [ ] An "Undo" button is visible on the tool card.
+  - [ ] Click Undo → kanban reverts to Scored within ~1s.
+- [ ] Refresh the page → entire conversation reloads from the DB in order.
+- [ ] Kill the backend mid-turn → red error banner appears in the panel.
+- [ ] Restart backend → next user message succeeds.

@@ -37,3 +37,6 @@ class StubEventSource {
 }
 // @ts-expect-error -- assigning a stub to the global for jsdom tests.
 globalThis.EventSource = StubEventSource;
+
+// jsdom doesn't implement scrollIntoView; stub for ChatPanel auto-scroll and similar.
+Element.prototype.scrollIntoView = vi.fn();

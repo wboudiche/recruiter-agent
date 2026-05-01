@@ -4,6 +4,7 @@ from typing import TypeVar
 import httpx
 from pydantic import BaseModel
 
+from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall, ToolDef
 from recruiter.llm.client import LLMMessage
 
 T = TypeVar("T", bound=BaseModel)
@@ -75,6 +76,53 @@ class OpenAICompatLLMClient:
         )
         return schema.model_validate_json(_strip_fences(text))
 
+    async def chat_with_tools(
+        self,
+        messages: list[ChatTurn],
+        tools: list[ToolDef],
+        *,
+        system: str | None = None,
+        max_tokens: int = 2048,
+    ) -> AssistantTurn:
+        body_messages: list[dict] = []
+        if system is not None:
+            body_messages.append({"role": "system", "content": system})
+        for m in messages:
+            body_messages.append(_chat_turn_to_openai(m))
+
+        body: dict = {
+            "model": self._model,
+            "messages": body_messages,
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+        }
+        if tools:
+            body["tools"] = [
+                {"type": "function", "function": {
+                    "name": t.name, "description": t.description, "parameters": t.input_schema,
+                }} for t in tools
+            ]
+            body["tool_choice"] = "auto"
+
+        response = await self._client.post(
+            f"{self._base_url}/chat/completions",
+            json=body,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+        )
+        response.raise_for_status()
+        msg = response.json()["choices"][0]["message"]
+
+        raw_tcs = msg.get("tool_calls") or []
+        tool_calls = [
+            ToolCall(
+                id=tc["id"],
+                name=tc["function"]["name"],
+                arguments=json.loads(tc["function"]["arguments"] or "{}"),
+            )
+            for tc in raw_tcs
+        ]
+        return AssistantTurn(text=msg.get("content"), tool_calls=tool_calls)
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -86,3 +134,23 @@ def _strip_fences(text: str) -> str:
         if t.endswith("```"):
             t = t[:-3]
     return t.strip()
+
+
+def _chat_turn_to_openai(turn: ChatTurn) -> dict:
+    if turn.role == "tool":
+        return {
+            "role": "tool",
+            "tool_call_id": turn.tool_call_id,
+            "content": json.dumps(turn.tool_result or {}),
+        }
+    if turn.role == "assistant" and turn.tool_calls:
+        return {
+            "role": "assistant",
+            "content": turn.content,
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}
+                for tc in turn.tool_calls
+            ],
+        }
+    return {"role": turn.role, "content": turn.content}

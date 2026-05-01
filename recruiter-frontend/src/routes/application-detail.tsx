@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
+import { ChatPanel } from "@/components/applications/chat-panel";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
@@ -16,8 +17,8 @@ export default function ApplicationDetail() {
   if (!application.data) return <p>Not found.</p>;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6">
-      <div className="space-y-6">
+    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 h-[calc(100vh-8rem)]">
+      <div className="space-y-6 overflow-y-auto">
         <header className="space-y-2">
           <h2 className="text-xl font-semibold">
             {candidate.data?.full_name ??
@@ -36,10 +37,14 @@ export default function ApplicationDetail() {
         </header>
         <ScoreBreakdown application={application.data} />
       </div>
-      <aside>
-        <div className="rounded border p-4 text-sm text-muted-foreground">
-          Chat panel coming in Plan D
-        </div>
+      <aside className="rounded border overflow-hidden">
+        {application.data.stage === "extracting" ? (
+          <div className="p-4 text-sm text-muted-foreground">
+            Chat is available once extraction finishes.
+          </div>
+        ) : (
+          <ChatPanel applicationId={id} />
+        )}
       </aside>
     </div>
   );
