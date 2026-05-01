@@ -17,6 +17,7 @@ export function LlmTab() {
   const [provider, setProvider] = useState<string | undefined>();
   const [anthropicKey, setAnthropicKey] = useState("");
   const [localUrl, setLocalUrl] = useState<string | undefined>();
+  const [localKey, setLocalKey] = useState("");
 
   if (settings.isLoading) return <p>Loading…</p>;
   if (!settings.data) return <p>No settings.</p>;
@@ -35,7 +36,13 @@ export function LlmTab() {
       localUrl !== (current.local_llm_url ?? "")
     )
       body.local_llm_url = localUrl;
-    update.mutate(body, { onSuccess: () => setAnthropicKey("") });
+    if (localKey) body.local_llm_api_key = localKey;
+    update.mutate(body, {
+      onSuccess: () => {
+        setAnthropicKey("");
+        setLocalKey("");
+      },
+    });
   }
 
   return (
@@ -68,14 +75,33 @@ export function LlmTab() {
       )}
 
       {effProvider === "local" && (
-        <div className="space-y-2">
-          <Label>Local LLM URL</Label>
-          <Input
-            placeholder="http://localhost:11434/v1"
-            value={effLocalUrl}
-            onChange={(e) => setLocalUrl(e.target.value)}
-          />
-        </div>
+        <>
+          <div className="space-y-2">
+            <Label>Local LLM URL</Label>
+            <Input
+              placeholder="http://localhost:11434/v1"
+              value={effLocalUrl}
+              onChange={(e) => setLocalUrl(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Local LLM API key (optional)</Label>
+            <Input
+              type="password"
+              placeholder={
+                current.has_local_llm_api_key
+                  ? "•••••• (set)"
+                  : "leave blank for unauthenticated local servers"
+              }
+              value={localKey}
+              onChange={(e) => setLocalKey(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Required for hosted endpoints like ai.linagora.com or OpenRouter.
+              Skip for true-local Ollama / vLLM.
+            </p>
+          </div>
+        </>
       )}
 
       <Button onClick={save} disabled={update.isPending}>

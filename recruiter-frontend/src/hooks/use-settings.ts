@@ -7,6 +7,7 @@ export interface SettingsRead {
   default_llm_provider: string;
   has_anthropic_api_key: boolean;
   local_llm_url: string | null;
+  has_local_llm_api_key: boolean;
   model_overrides: Record<string, unknown>;
   has_google_oauth_tokens: boolean;
   has_smtp_config: boolean;
@@ -28,6 +29,7 @@ export interface SettingsUpdate {
   default_llm_provider?: string;
   anthropic_api_key?: string;
   local_llm_url?: string;
+  local_llm_api_key?: string;
   model_overrides?: Record<string, unknown>;
   smtp_config?: SmtpConfigInput;
   recruiter_name?: string;

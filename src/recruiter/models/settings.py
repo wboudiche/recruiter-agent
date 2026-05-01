@@ -14,6 +14,7 @@ class SettingsRow(Base):
     default_llm_provider: Mapped[str] = mapped_column(String(32), default="anthropic")
     anthropic_api_key_enc: Mapped[str | None] = mapped_column(String)
     local_llm_url: Mapped[str | None] = mapped_column(String(2048))
+    local_llm_api_key_enc: Mapped[str | None] = mapped_column(String)
     model_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
     google_oauth_tokens_enc: Mapped[str | None] = mapped_column(String)
     smtp_config_enc: Mapped[str | None] = mapped_column(String)

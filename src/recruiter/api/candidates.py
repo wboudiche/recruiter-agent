@@ -60,10 +60,16 @@ async def get_llm(session: AsyncSession = Depends(get_session)) -> LLMClient:
     if provider == "local":
         if not row.local_llm_url:
             raise HTTPException(status_code=503, detail="Local LLM URL not set in settings.")
+        # Prefer the in-DB encrypted key; fall back to env var (dev escape hatch);
+        # finally "not-needed" for truly anonymous local servers (Ollama).
+        if row.local_llm_api_key_enc:
+            api_key = _cipher().decrypt(row.local_llm_api_key_enc)
+        else:
+            api_key = get_config().local_llm_api_key or "not-needed"
         return OpenAICompatLLMClient(
             base_url=row.local_llm_url,
             model=overrides.get("local_model", "gpt-oss-120b"),
-            api_key=get_config().local_llm_api_key or "not-needed",
+            api_key=api_key,
         )
     raise HTTPException(status_code=503, detail=f"Unknown LLM provider: {provider}")
 

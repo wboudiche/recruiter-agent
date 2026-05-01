@@ -46,6 +46,7 @@ def _to_read(row: SettingsRow) -> SettingsRead:
         default_llm_provider=row.default_llm_provider,
         has_anthropic_api_key=bool(row.anthropic_api_key_enc),
         local_llm_url=row.local_llm_url,
+        has_local_llm_api_key=bool(row.local_llm_api_key_enc),
         model_overrides=row.model_overrides or {},
         has_google_oauth_tokens=bool(row.google_oauth_tokens_enc),
         has_smtp_config=bool(row.smtp_config_enc),
@@ -74,6 +75,8 @@ async def update_settings(
         row.anthropic_api_key_enc = cipher.encrypt(payload.anthropic_api_key)
     if payload.local_llm_url is not None:
         row.local_llm_url = payload.local_llm_url
+    if payload.local_llm_api_key is not None:
+        row.local_llm_api_key_enc = cipher.encrypt(payload.local_llm_api_key)
     if payload.model_overrides is not None:
         row.model_overrides = payload.model_overrides
     if payload.smtp_config is not None:

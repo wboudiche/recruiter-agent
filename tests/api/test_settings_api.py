@@ -22,3 +22,18 @@ async def test_update_settings_encrypts_secret(api_client: AsyncClient) -> None:
     assert body["has_anthropic_api_key"] is True
     assert "sk-ant-test" not in resp.text  # secret is not echoed
     assert body["recruiter_email"] == "me@example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_settings_encrypts_local_llm_api_key(api_client: AsyncClient) -> None:
+    initial = await api_client.get("/api/settings")
+    assert initial.json()["has_local_llm_api_key"] is False
+
+    resp = await api_client.put(
+        "/api/settings",
+        json={"local_llm_api_key": "sk-linagora-secret"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["has_local_llm_api_key"] is True
+    assert "sk-linagora-secret" not in resp.text  # secret is not echoed
