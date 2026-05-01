@@ -28,7 +28,6 @@ type StreamEvent =
 
 export function useChat(applicationId: number) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState<ChatRow[]>([]);
   const [isStreaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,12 +39,20 @@ export function useChat(applicationId: number) {
   async function sendMessage(message: string): Promise<void> {
     setError(null);
     setStreaming(true);
-    setDraft([]);
 
-    let nextId = -1;
-    function pushDraft(row: ChatRow) {
-      setDraft((d) => [...d, row]);
+    // We mutate the canonical history cache directly as events arrive — one
+    // source of truth, no separate `draft` array. On `finally` we
+    // invalidate, which refetches from the server and replaces the
+    // optimistic rows with their canonical (positive-id) counterparts.
+    // Synthetic-id rows for events the server doesn't surface (tool_call_start,
+    // message_delta) get replaced by the real assistant/tool rows that
+    // appear when the canonical history reloads.
+    let nextSyntheticId = -1;
+    const key = queryKeys.chat(applicationId);
+    function appendOptimistic(row: ChatRow) {
+      qc.setQueryData<ChatRow[]>(key, (prev) => [...(prev ?? []), row]);
     }
+    const now = () => new Date().toISOString();
 
     try {
       const response = await fetch(
@@ -63,40 +70,38 @@ export function useChat(applicationId: number) {
       for await (const ev of parseNdjsonStream<StreamEvent>(response.body)) {
         switch (ev.type) {
           case "message":
-            pushDraft({
+            appendOptimistic({
               id: ev.id, application_id: applicationId, role: ev.role,
               content: ev.content, tool_calls: null, tool_call_id: null,
-              tool_name: null, tool_result: null,
-              created_at: new Date().toISOString(),
+              tool_name: null, tool_result: null, created_at: now(),
             });
             break;
           case "tool_call_start":
-            pushDraft({
-              id: nextId--, application_id: applicationId, role: "assistant",
+            appendOptimistic({
+              id: nextSyntheticId--, application_id: applicationId, role: "assistant",
               content: null,
               tool_calls: [{ id: ev.id, name: ev.name, arguments: ev.arguments }],
-              tool_call_id: null, tool_name: null, tool_result: null,
-              created_at: new Date().toISOString(),
+              tool_call_id: null, tool_name: null, tool_result: null, created_at: now(),
             });
             break;
           case "tool_call_result":
-            pushDraft({
-              id: nextId--, application_id: applicationId, role: "tool",
+            appendOptimistic({
+              id: nextSyntheticId--, application_id: applicationId, role: "tool",
               content: null, tool_calls: null,
               tool_call_id: ev.id, tool_name: ev.name, tool_result: ev.result,
-              created_at: new Date().toISOString(),
+              created_at: now(),
             });
             break;
           case "message_delta":
-            pushDraft({
-              id: nextId--, application_id: applicationId, role: "assistant",
+            appendOptimistic({
+              id: nextSyntheticId--, application_id: applicationId, role: "assistant",
               content: ev.text, tool_calls: null, tool_call_id: null,
-              tool_name: null, tool_result: null,
-              created_at: new Date().toISOString(),
+              tool_name: null, tool_result: null, created_at: now(),
             });
             break;
           case "message_done":
-            // canonical state will reload from server
+            // No-op — invalidation in `finally` swaps the optimistic
+            // rows for canonical server-side rows.
             break;
           case "error":
             setError(ev.detail);
@@ -107,7 +112,7 @@ export function useChat(applicationId: number) {
       setError(err instanceof Error ? err.message : "stream failed");
     } finally {
       setStreaming(false);
-      qc.invalidateQueries({ queryKey: queryKeys.chat(applicationId) });
+      qc.invalidateQueries({ queryKey: key });
     }
   }
 
@@ -123,10 +128,6 @@ export function useChat(applicationId: number) {
     },
   });
 
-  // dedupe: server-side history takes precedence; draft is for in-flight events not yet persisted
-  const messages: ChatRow[] = [
-    ...(history.data ?? []),
-    ...draft.filter((d) => !(history.data ?? []).some((h) => h.id === d.id)),
-  ];
+  const messages: ChatRow[] = history.data ?? [];
   return { messages, sendMessage, isStreaming, error, undo: undo.mutate };
 }
