@@ -100,7 +100,7 @@ export function useChat(applicationId: number) {
             break;
           case "error":
             setError(ev.detail);
-            break;
+            return;
         }
       }
     } catch (err) {
@@ -123,6 +123,10 @@ export function useChat(applicationId: number) {
     },
   });
 
-  const messages: ChatRow[] = [...(history.data ?? []), ...draft];
+  // dedupe: server-side history takes precedence; draft is for in-flight events not yet persisted
+  const messages: ChatRow[] = [
+    ...(history.data ?? []),
+    ...draft.filter((d) => !(history.data ?? []).some((h) => h.id === d.id)),
+  ];
   return { messages, sendMessage, isStreaming, error, undo: undo.mutate };
 }
