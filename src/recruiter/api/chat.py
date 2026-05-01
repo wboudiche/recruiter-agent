@@ -85,8 +85,8 @@ async def post_undo(
     session: AsyncSession = Depends(get_session),
     undo_store: UndoStore = Depends(get_undo_store),
 ) -> ApplicationRead:
-    consumed = undo_store.consume(payload.undo_token)
-    if consumed is None or consumed.get("application_id") != application_id:
+    consumed = undo_store.consume(payload.undo_token, application_id=application_id)
+    if consumed is None:
         raise HTTPException(status_code=410, detail="undo token expired or unknown")
 
     app_row = await session.get(Application, application_id)
@@ -94,12 +94,33 @@ async def post_undo(
         raise HTTPException(status_code=404, detail="application not found")
 
     previous_stage = consumed["previous_stage"]
+    if previous_stage not in _UNDO_ALLOWED_STAGES:
+        # Defensive: a token from a future code path that revives a stage we
+        # don't currently allow undoing into. Refuse rather than silently set
+        # the stage to something the rest of the system won't expect.
+        raise HTTPException(status_code=410, detail="undo target stage no longer allowed")
+
     app_row.stage = Stage(previous_stage)
-    if previous_stage != "validated":
+    # Restore the timestamps the tool snapshotted at issue time. Falls back to
+    # the legacy behavior for tokens issued before the snapshot was added.
+    if "previous_validated_at" in consumed:
+        app_row.validated_at = _parse_iso(consumed["previous_validated_at"])
+    elif previous_stage != "validated":
         app_row.validated_at = None
-    if previous_stage != "rejected":
+    if "previous_rejected_at" in consumed:
+        app_row.rejected_at = _parse_iso(consumed["previous_rejected_at"])
+    elif previous_stage != "rejected":
         app_row.rejected_at = None
     app_row.updated_at = datetime.now(timezone.utc)
     await session.commit()
     await session.refresh(app_row)
     return ApplicationRead.model_validate(app_row)
+
+
+_UNDO_ALLOWED_STAGES = {"scored", "validated", "rejected"}
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromisoformat(value)

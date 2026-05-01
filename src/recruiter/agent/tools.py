@@ -180,7 +180,9 @@ async def _validate_application(
         return {"error": "application not found"}
     if app.stage not in _VALIDATE_FROM:
         return {"error": f"stage {app.stage.value} cannot move to validated"}
-    previous = app.stage.value
+    previous_stage = app.stage.value
+    previous_validated_at = app.validated_at.isoformat() if app.validated_at else None
+    previous_rejected_at = app.rejected_at.isoformat() if app.rejected_at else None
     app.stage = Stage.VALIDATED
     app.validated_at = datetime.now(timezone.utc)
     notes_arg = (args.get("notes") or "").strip()
@@ -188,8 +190,15 @@ async def _validate_application(
         _append_note(app, notes_arg)
     await session.commit()
     store = undo_store or get_default_undo_store()
-    token = store.issue(application_id=application_id, previous_stage=previous)
-    return {"ok": True, "previous_stage": previous, "undo_token": token}
+    token = store.issue(
+        application_id=application_id,
+        payload={
+            "previous_stage": previous_stage,
+            "previous_validated_at": previous_validated_at,
+            "previous_rejected_at": previous_rejected_at,
+        },
+    )
+    return {"ok": True, "previous_stage": previous_stage, "undo_token": token}
 
 
 async def _reject_application(
@@ -207,14 +216,23 @@ async def _reject_application(
         return {"error": "application not found"}
     if app.stage not in _REJECT_FROM:
         return {"error": f"stage {app.stage.value} cannot move to rejected"}
-    previous = app.stage.value
+    previous_stage = app.stage.value
+    previous_validated_at = app.validated_at.isoformat() if app.validated_at else None
+    previous_rejected_at = app.rejected_at.isoformat() if app.rejected_at else None
     app.stage = Stage.REJECTED
     app.rejected_at = datetime.now(timezone.utc)
     _append_note(app, f"Rejected: {reason}")
     await session.commit()
     store = undo_store or get_default_undo_store()
-    token = store.issue(application_id=application_id, previous_stage=previous)
-    return {"ok": True, "previous_stage": previous, "undo_token": token}
+    token = store.issue(
+        application_id=application_id,
+        payload={
+            "previous_stage": previous_stage,
+            "previous_validated_at": previous_validated_at,
+            "previous_rejected_at": previous_rejected_at,
+        },
+    )
+    return {"ok": True, "previous_stage": previous_stage, "undo_token": token}
 
 
 # validate/reject accept an extra `undo_store` keyword. The variadic

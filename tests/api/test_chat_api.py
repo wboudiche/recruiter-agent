@@ -144,3 +144,105 @@ async def test_undo_410_for_unknown_token(api_client: AsyncClient, with_fake_llm
         f"/api/applications/{app_id}/undo", json={"undo_token": "not-a-real-token"},
     )
     assert r.status_code == 410
+
+
+@pytest.mark.asyncio
+async def test_undo_410_on_cross_app_token_preserves_token(
+    api_client: AsyncClient, with_fake_llm,
+) -> None:
+    """A token issued for app A must NOT be consumed by an undo POST against app B."""
+    app_a = await _create_scored_app(api_client)
+    app_b = await _create_scored_app(api_client)
+
+    with_fake_llm._tool_turns.extend([
+        AssistantTurn(text=None, tool_calls=[
+            ToolCall(id="t1", name="validate_application", arguments={}),
+        ]),
+        AssistantTurn(text="Done.", tool_calls=[]),
+    ])
+    token = None
+    async with api_client.stream(
+        "POST", f"/api/applications/{app_a}/chat",
+        json={"message": "validate her"},
+    ) as r:
+        async for line in r.aiter_lines():
+            if not line:
+                continue
+            ev = json.loads(line)
+            if ev["type"] == "tool_call_result" and ev["name"] == "validate_application":
+                token = ev["result"]["undo_token"]
+    assert token is not None
+
+    # Wrong app id — must 410 AND must not burn the token
+    bad = await api_client.post(
+        f"/api/applications/{app_b}/undo", json={"undo_token": token},
+    )
+    assert bad.status_code == 410
+
+    # Right app id — token still works after the cross-app rejection
+    good = await api_client.post(
+        f"/api/applications/{app_a}/undo", json={"undo_token": token},
+    )
+    assert good.status_code == 200
+    assert good.json()["stage"] == "scored"
+
+
+@pytest.mark.asyncio
+async def test_undo_restores_validated_at_after_revalidate(
+    api_client: AsyncClient, with_fake_llm,
+) -> None:
+    """When the agent re-validates an already-validated app and the user undoes,
+    validated_at must revert to the original timestamp, not be cleared and not
+    leave the just-overwritten one in place."""
+    app_id = await _create_scored_app(api_client)
+
+    # First validate — captures a real validated_at
+    with_fake_llm._tool_turns.extend([
+        AssistantTurn(text=None, tool_calls=[
+            ToolCall(id="t1", name="validate_application", arguments={}),
+        ]),
+        AssistantTurn(text="Done.", tool_calls=[]),
+    ])
+    async with api_client.stream(
+        "POST", f"/api/applications/{app_id}/chat",
+        json={"message": "validate"},
+    ) as r:
+        async for _ in r.aiter_lines():
+            pass
+
+    first = await api_client.get(f"/api/applications/{app_id}")
+    original_validated_at = first.json()["validated_at"]
+    assert original_validated_at is not None
+
+    # Second validate — re-stamps validated_at; agent issues a new undo token.
+    with_fake_llm._tool_turns.extend([
+        AssistantTurn(text=None, tool_calls=[
+            ToolCall(id="t2", name="validate_application", arguments={}),
+        ]),
+        AssistantTurn(text="Re-validated.", tool_calls=[]),
+    ])
+    token = None
+    async with api_client.stream(
+        "POST", f"/api/applications/{app_id}/chat",
+        json={"message": "validate again"},
+    ) as r:
+        async for line in r.aiter_lines():
+            if not line:
+                continue
+            ev = json.loads(line)
+            if ev["type"] == "tool_call_result" and ev["name"] == "validate_application":
+                token = ev["result"]["undo_token"]
+    assert token is not None
+
+    second = await api_client.get(f"/api/applications/{app_id}")
+    new_validated_at = second.json()["validated_at"]
+    assert new_validated_at != original_validated_at  # was overwritten
+
+    # Undo should restore the ORIGINAL validated_at
+    undo = await api_client.post(
+        f"/api/applications/{app_id}/undo", json={"undo_token": token},
+    )
+    assert undo.status_code == 200
+    body = undo.json()
+    assert body["stage"] == "validated"  # we re-validated from validated → validated
+    assert body["validated_at"] == original_validated_at

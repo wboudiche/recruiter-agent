@@ -30,3 +30,35 @@ def test_consume_after_ttl_returns_none() -> None:
     token = store.issue(application_id=1, previous_stage="scored")
     time.sleep(0.05)
     assert store.consume(token) is None
+
+
+def test_issue_with_payload_carries_extra_fields() -> None:
+    store = UndoStore(ttl_seconds=60)
+    token = store.issue(
+        application_id=42,
+        payload={"previous_stage": "scored", "previous_validated_at": "2026-05-01T00:00:00+00:00"},
+    )
+    payload = store.consume(token)
+    assert payload == {
+        "application_id": 42,
+        "previous_stage": "scored",
+        "previous_validated_at": "2026-05-01T00:00:00+00:00",
+    }
+
+
+def test_consume_with_application_id_mismatch_does_not_burn_token() -> None:
+    store = UndoStore(ttl_seconds=60)
+    token = store.issue(application_id=42, previous_stage="scored")
+    # Wrong app id — should not consume.
+    assert store.consume(token, application_id=99) is None
+    # Right app id — token still works.
+    payload = store.consume(token, application_id=42)
+    assert payload is not None
+    assert payload["application_id"] == 42
+
+
+def test_consume_with_matching_application_id_succeeds() -> None:
+    store = UndoStore(ttl_seconds=60)
+    token = store.issue(application_id=7, previous_stage="validated")
+    payload = store.consume(token, application_id=7)
+    assert payload == {"application_id": 7, "previous_stage": "validated"}
