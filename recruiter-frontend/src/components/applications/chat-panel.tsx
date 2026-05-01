@@ -12,10 +12,22 @@ interface Props {
 export function ChatPanel({ applicationId }: Props) {
   const { messages, sendMessage, isStreaming, error, undo } = useChat(applicationId);
   const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Track whether the user is reading at the bottom; if they scrolled up,
+  // don't auto-scroll on new messages — that would yank them away from
+  // the part of the conversation they're currently reading.
+  const pinnedRef = useRef(true);
   useEffect(() => {
+    if (!pinnedRef.current) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, isStreaming]);
+
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    // 40px slack so micro-scroll-jitter doesn't unpin.
+    pinnedRef.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+  }
 
   async function onSend() {
     const text = input.trim();
@@ -27,12 +39,16 @@ export function ChatPanel({ applicationId }: Props) {
   return (
     <div className="flex flex-col h-full bg-card border-l">
       <div className="px-4 py-2 border-b font-medium">Chat</div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-3 space-y-3"
+      >
         {messages.length === 0 && (
           <p className="text-sm text-muted-foreground">Ask anything about this candidate.</p>
         )}
-        {messages.map((m, i) => (
-          <MessageRow key={`${m.id}-${i}`} row={m} onUndo={(t) => undo(t)} />
+        {messages.map((m) => (
+          <MessageRow key={m.id} row={m} onUndo={(t) => undo(t)} />
         ))}
         {isStreaming && (
           <p className="text-xs text-muted-foreground animate-pulse">Thinking…</p>

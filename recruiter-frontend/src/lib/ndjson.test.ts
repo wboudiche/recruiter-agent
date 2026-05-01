@@ -49,4 +49,31 @@ describe("parseNdjsonStream", () => {
     for await (const ev of parseNdjsonStream(stream)) events.push(ev);
     expect(events).toEqual([{ a: 1 }, { a: 2 }]);
   });
+
+  it("handles a UTF-8 multi-byte char split across chunks", async () => {
+    // "é" encodes as 0xC3 0xA9. Split between the two bytes — only
+    // TextDecoder({ stream: true }) handles this correctly.
+    const bytes = new TextEncoder().encode('{"x":"é"}\n');
+    const split = bytes.findIndex((b) => b === 0xa9);
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes.slice(0, split));
+        c.enqueue(bytes.slice(split));
+        c.close();
+      },
+    });
+    const events: unknown[] = [];
+    for await (const ev of parseNdjsonStream(stream)) events.push(ev);
+    expect(events).toEqual([{ x: "é" }]);
+  });
+
+  it("warns on malformed trailing line without final newline", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const stream = streamFrom('{"a":1}\nnope-not-json');
+    const events: unknown[] = [];
+    for await (const ev of parseNdjsonStream(stream)) events.push(ev);
+    expect(events).toEqual([{ a: 1 }]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });

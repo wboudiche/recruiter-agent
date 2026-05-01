@@ -1,3 +1,16 @@
+/**
+ * Async generator that parses a `ReadableStream<Uint8Array>` of NDJSON
+ * (one JSON object per line, `\n`-terminated) into typed events.
+ *
+ * Behavior:
+ * - Handles JSON objects split across chunk boundaries (UTF-8 safe via
+ *   `TextDecoder({ stream: true })`).
+ * - Yields a final trailing line even when the stream ends without `\n`.
+ * - Empty lines are skipped.
+ * - Malformed JSON lines are SILENTLY DROPPED with `console.warn`. The
+ *   consumer never sees an exception from this iterator. If you need
+ *   error visibility upstream, parse line-by-line yourself.
+ */
 export async function* parseNdjsonStream<T = unknown>(
   stream: ReadableStream<Uint8Array>,
 ): AsyncIterable<T> {

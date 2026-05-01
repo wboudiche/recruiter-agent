@@ -19,7 +19,7 @@ export type ChatRow = {
 };
 
 type StreamEvent =
-  | { type: "message"; role: string; id: number; content: string }
+  | { type: "message"; role: "user" | "assistant"; id: number; content: string }
   | { type: "tool_call_start"; id: string; name: string; arguments: Record<string, unknown> }
   | { type: "tool_call_result"; id: string; name: string; result: Record<string, unknown> }
   | { type: "message_delta"; text: string }
@@ -64,7 +64,7 @@ export function useChat(applicationId: number) {
         switch (ev.type) {
           case "message":
             pushDraft({
-              id: ev.id, application_id: applicationId, role: ev.role as "user",
+              id: ev.id, application_id: applicationId, role: ev.role,
               content: ev.content, tool_calls: null, tool_call_id: null,
               tool_name: null, tool_result: null,
               created_at: new Date().toISOString(),
