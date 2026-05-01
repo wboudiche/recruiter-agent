@@ -90,3 +90,97 @@ def test_tools_registry_lists_eight_tools() -> None:
                 "validate_application", "reject_application"}
     assert set(names) == expected
     assert len(names) == 8
+
+
+from recruiter.agent.undo import UndoStore
+
+
+@pytest.mark.asyncio
+async def test_save_note_appends_to_application_notes(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    result = await get_tool_handler("save_note")(
+        db_session_with_schema, app_id, {"text": "promising candidate"}
+    )
+    assert result["ok"] is True
+    app = await db_session_with_schema.get(Application, app_id)
+    assert app.notes is not None
+    assert "promising candidate" in app.notes
+
+
+@pytest.mark.asyncio
+async def test_save_note_appends_with_timestamp(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    await get_tool_handler("save_note")(db_session_with_schema, app_id, {"text": "first"})
+    await get_tool_handler("save_note")(db_session_with_schema, app_id, {"text": "second"})
+    app = await db_session_with_schema.get(Application, app_id)
+    assert "first" in app.notes
+    assert "second" in app.notes
+    # both notes preserved
+    assert app.notes.index("first") < app.notes.index("second")
+
+
+@pytest.mark.asyncio
+async def test_validate_from_scored_succeeds(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    store = UndoStore(ttl_seconds=60)
+    result = await get_tool_handler("validate_application")(
+        db_session_with_schema, app_id, {"notes": "looks great"}, undo_store=store,
+    )
+    assert result["ok"] is True
+    assert result["previous_stage"] == "scored"
+    assert isinstance(result["undo_token"], str)
+    app = await db_session_with_schema.get(Application, app_id)
+    assert app.stage.value == "validated"
+    assert app.validated_at is not None
+    assert "looks great" in (app.notes or "")
+
+
+@pytest.mark.asyncio
+async def test_validate_from_extracting_blocked(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    app = await db_session_with_schema.get(Application, app_id)
+    app.stage = Stage.EXTRACTING
+    await db_session_with_schema.commit()
+
+    result = await get_tool_handler("validate_application")(
+        db_session_with_schema, app_id, {}, undo_store=UndoStore(ttl_seconds=60),
+    )
+    assert "error" in result
+    assert "extracting" in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_reject_from_scored_succeeds(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    store = UndoStore(ttl_seconds=60)
+    result = await get_tool_handler("reject_application")(
+        db_session_with_schema, app_id, {"reason": "no Rust experience"},
+        undo_store=store,
+    )
+    assert result["ok"] is True
+    assert result["previous_stage"] == "scored"
+    app = await db_session_with_schema.get(Application, app_id)
+    assert app.stage.value == "rejected"
+    assert app.rejected_at is not None
+    assert "no Rust experience" in (app.notes or "")
+
+
+@pytest.mark.asyncio
+async def test_reject_from_invited_blocked(db_session_with_schema):
+    app_id = await _seed(db_session_with_schema)
+    app = await db_session_with_schema.get(Application, app_id)
+    app.stage = Stage.INVITED
+    await db_session_with_schema.commit()
+
+    result = await get_tool_handler("reject_application")(
+        db_session_with_schema, app_id, {"reason": "x"},
+        undo_store=UndoStore(ttl_seconds=60),
+    )
+    assert "error" in result
+    assert "invited" in result["error"].lower()
+
+
+def test_tools_registry_matches_handlers() -> None:
+    """Drift guard: every TOOLS entry must have a corresponding registered handler."""
+    from recruiter.agent.tools import TOOLS, _HANDLERS
+    assert {t.name for t in TOOLS} == set(_HANDLERS.keys())
