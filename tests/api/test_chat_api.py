@@ -197,6 +197,47 @@ async def test_chat_stream_handles_client_disconnect(
 
 
 @pytest.mark.asyncio
+async def test_chat_post_enforces_rate_limit(
+    api_client: AsyncClient, with_fake_llm,
+) -> None:
+    """Hammering POST /chat past the configured limit returns 429."""
+    from recruiter.api import rate_limit
+    from recruiter.config import get_config
+
+    cfg = get_config()
+    original_limit = cfg.chat_rate_limit
+    cfg.chat_rate_limit = "2/minute"
+    # Reset SlowAPI's in-memory store so this test starts from zero.
+    rate_limit.limiter.reset()
+
+    try:
+        app_id = await _create_scored_app(api_client)
+        with_fake_llm._tool_turns.extend([
+            AssistantTurn(text="ok1", tool_calls=[]),
+            AssistantTurn(text="ok2", tool_calls=[]),
+        ])
+
+        # First two requests within the window: allowed.
+        for _ in range(2):
+            async with api_client.stream(
+                "POST", f"/api/applications/{app_id}/chat",
+                json={"message": "hi"},
+            ) as r:
+                assert r.status_code == 200
+                async for _line in r.aiter_lines():
+                    pass
+
+        # Third within the same window: rate-limited.
+        blocked = await api_client.post(
+            f"/api/applications/{app_id}/chat", json={"message": "hi"},
+        )
+        assert blocked.status_code == 429
+    finally:
+        cfg.chat_rate_limit = original_limit
+        rate_limit.limiter.reset()
+
+
+@pytest.mark.asyncio
 async def test_undo_410_for_unknown_token(api_client: AsyncClient, with_fake_llm) -> None:
     app_id = await _create_scored_app(api_client)
     r = await api_client.post(

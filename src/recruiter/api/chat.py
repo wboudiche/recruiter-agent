@@ -1,7 +1,7 @@
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -11,6 +11,7 @@ from recruiter.agent.events import error_event, serialize_event
 from recruiter.agent.undo import UndoStore, get_default_undo_store
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.api.deps import get_session, streaming_session
+from recruiter.api.rate_limit import chat_rate_limit, limiter
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, ChatMessage, Stage
 from recruiter.schemas.application import ApplicationRead
@@ -40,7 +41,9 @@ async def get_chat_history(
 
 
 @router.post("/{application_id}/chat")
+@limiter.limit(chat_rate_limit)
 async def post_chat(
+    request: Request,  # required by SlowAPI's decorator to read remote IP
     application_id: int,
     payload: ChatRequest,
     engine: AsyncEngine = Depends(get_engine_dep),

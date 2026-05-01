@@ -11,6 +11,11 @@ class Config(BaseSettings):
     resume_storage_path: str = "./var/resumes"
     log_level: str = "INFO"
     local_llm_api_key: str | None = None
+    # Per-client rate limit on POST /api/applications/{id}/chat. Each chat
+    # turn can drive multiple LLM calls (one per agent loop step), so the
+    # cost ceiling matters even with a single user. SlowAPI string format,
+    # e.g. "30/minute", "10/second". Set to "" to disable.
+    chat_rate_limit: str = "30/minute"
 
 
 @lru_cache(maxsize=1)

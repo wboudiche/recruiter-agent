@@ -23,6 +23,7 @@ dependencies = [
   "google-auth>=2.34",
   "google-auth-oauthlib>=1.2",
   "icalendar>=5.0",
+  "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]
