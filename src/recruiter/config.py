@@ -16,6 +16,9 @@ class Config(BaseSettings):
     # cost ceiling matters even with a single user. SlowAPI string format,
     # e.g. "30/minute", "10/second". Set to "" to disable.
     chat_rate_limit: str = "30/minute"
+    # Optional Redis URL for cross-pod UndoStore. Empty/None = in-memory
+    # (process-local) store, which is fine for single-pod deploys.
+    redis_url: str | None = None
 
 
 @lru_cache(maxsize=1)

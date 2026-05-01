@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.agent.tools import TOOLS, ToolContext, get_tool_handler
-from recruiter.agent.undo import UndoStore
+from recruiter.agent.undo import InMemoryUndoStore, UndoStore
 from recruiter.models import Application, Candidate, Job, Stage
 
 
@@ -32,7 +32,7 @@ def _ctx(session: AsyncSession, application_id: int, undo_store: UndoStore | Non
     return ToolContext(
         session=session,
         application_id=application_id,
-        undo_store=undo_store or UndoStore(ttl_seconds=60),
+        undo_store=undo_store or InMemoryUndoStore(ttl_seconds=60),
     )
 
 
@@ -129,7 +129,7 @@ async def test_save_note_appends_with_timestamp(db_session_with_schema):
 @pytest.mark.asyncio
 async def test_validate_from_scored_succeeds(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
-    store = UndoStore(ttl_seconds=60)
+    store = InMemoryUndoStore(ttl_seconds=60)
     result = await get_tool_handler("validate_application")(
         _ctx(db_session_with_schema, app_id, undo_store=store), {"notes": "looks great"},
     )
@@ -159,7 +159,7 @@ async def test_validate_from_extracting_blocked(db_session_with_schema):
 @pytest.mark.asyncio
 async def test_reject_from_scored_succeeds(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
-    store = UndoStore(ttl_seconds=60)
+    store = InMemoryUndoStore(ttl_seconds=60)
     result = await get_tool_handler("reject_application")(
         _ctx(db_session_with_schema, app_id, undo_store=store), {"reason": "no Rust experience"},
     )
