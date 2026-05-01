@@ -3,5 +3,6 @@ export const queryKeys = {
   job: (id: number) => ["jobs", id] as const,
   jobApplications: (jobId: number) => ["jobs", jobId, "applications"] as const,
   application: (id: number) => ["applications", id] as const,
+  chat: (applicationId: number) => ["applications", applicationId, "chat"] as const,
   settings: () => ["settings"] as const,
 };
