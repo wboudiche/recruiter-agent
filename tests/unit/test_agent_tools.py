@@ -1,7 +1,8 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.agent.tools import TOOLS, get_tool_handler
+from recruiter.agent.tools import TOOLS, ToolContext, get_tool_handler
+from recruiter.agent.undo import UndoStore
 from recruiter.models import Application, Candidate, Job, Stage
 
 
@@ -27,11 +28,19 @@ async def _seed(session: AsyncSession) -> int:
     return app.id
 
 
+def _ctx(session: AsyncSession, application_id: int, undo_store: UndoStore | None = None) -> ToolContext:
+    return ToolContext(
+        session=session,
+        application_id=application_id,
+        undo_store=undo_store or UndoStore(ttl_seconds=60),
+    )
+
+
 @pytest.mark.asyncio
 async def test_get_candidate(db_session_with_schema: AsyncSession) -> None:
     app_id = await _seed(db_session_with_schema)
     handler = get_tool_handler("get_candidate")
-    result = await handler(db_session_with_schema, app_id, {})
+    result = await handler(_ctx(db_session_with_schema, app_id), {})
     assert result["full_name"] == "Marie Lefèvre"
     assert result["email"] == "m@example.com"
     assert "Rust" in result["skills"]
@@ -41,7 +50,7 @@ async def test_get_candidate(db_session_with_schema: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_get_application(db_session_with_schema: AsyncSession) -> None:
     app_id = await _seed(db_session_with_schema)
-    result = await get_tool_handler("get_application")(db_session_with_schema, app_id, {})
+    result = await get_tool_handler("get_application")(_ctx(db_session_with_schema, app_id), {})
     assert result["stage"] == "scored"
     assert result["score"] == 92
     assert result["validated_at"] is None
@@ -50,7 +59,7 @@ async def test_get_application(db_session_with_schema: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_get_score_breakdown(db_session_with_schema: AsyncSession) -> None:
     app_id = await _seed(db_session_with_schema)
-    result = await get_tool_handler("get_score_breakdown")(db_session_with_schema, app_id, {})
+    result = await get_tool_handler("get_score_breakdown")(_ctx(db_session_with_schema, app_id), {})
     assert result["score"] == 92
     assert result["rationale"] == "strong"
     assert result["breakdown"][0]["criterion"] == "rust"
@@ -59,7 +68,7 @@ async def test_get_score_breakdown(db_session_with_schema: AsyncSession) -> None
 @pytest.mark.asyncio
 async def test_get_job(db_session_with_schema: AsyncSession) -> None:
     app_id = await _seed(db_session_with_schema)
-    result = await get_tool_handler("get_job")(db_session_with_schema, app_id, {})
+    result = await get_tool_handler("get_job")(_ctx(db_session_with_schema, app_id), {})
     assert result["title"] == "Backend"
     assert result["criteria"][0]["name"] == "rust"
     assert result["status"] == "open"
@@ -75,7 +84,7 @@ async def test_list_other_applications_excludes_self(db_session_with_schema: Asy
     db_session_with_schema.add(app2); await db_session_with_schema.commit()
 
     result = await get_tool_handler("list_other_applications_for_candidate")(
-        db_session_with_schema, app_id, {}
+        _ctx(db_session_with_schema, app_id), {}
     )
     assert len(result) == 1
     assert result[0]["application_id"] == app2.id
@@ -92,14 +101,11 @@ def test_tools_registry_lists_eight_tools() -> None:
     assert len(names) == 8
 
 
-from recruiter.agent.undo import UndoStore
-
-
 @pytest.mark.asyncio
 async def test_save_note_appends_to_application_notes(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
     result = await get_tool_handler("save_note")(
-        db_session_with_schema, app_id, {"text": "promising candidate"}
+        _ctx(db_session_with_schema, app_id), {"text": "promising candidate"}
     )
     assert result["ok"] is True
     app = await db_session_with_schema.get(Application, app_id)
@@ -110,8 +116,9 @@ async def test_save_note_appends_to_application_notes(db_session_with_schema):
 @pytest.mark.asyncio
 async def test_save_note_appends_with_timestamp(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
-    await get_tool_handler("save_note")(db_session_with_schema, app_id, {"text": "first"})
-    await get_tool_handler("save_note")(db_session_with_schema, app_id, {"text": "second"})
+    ctx = _ctx(db_session_with_schema, app_id)
+    await get_tool_handler("save_note")(ctx, {"text": "first"})
+    await get_tool_handler("save_note")(ctx, {"text": "second"})
     app = await db_session_with_schema.get(Application, app_id)
     assert "first" in app.notes
     assert "second" in app.notes
@@ -124,7 +131,7 @@ async def test_validate_from_scored_succeeds(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
     store = UndoStore(ttl_seconds=60)
     result = await get_tool_handler("validate_application")(
-        db_session_with_schema, app_id, {"notes": "looks great"}, undo_store=store,
+        _ctx(db_session_with_schema, app_id, undo_store=store), {"notes": "looks great"},
     )
     assert result["ok"] is True
     assert result["previous_stage"] == "scored"
@@ -143,7 +150,7 @@ async def test_validate_from_extracting_blocked(db_session_with_schema):
     await db_session_with_schema.commit()
 
     result = await get_tool_handler("validate_application")(
-        db_session_with_schema, app_id, {}, undo_store=UndoStore(ttl_seconds=60),
+        _ctx(db_session_with_schema, app_id), {},
     )
     assert "error" in result
     assert "extracting" in result["error"].lower()
@@ -154,8 +161,7 @@ async def test_reject_from_scored_succeeds(db_session_with_schema):
     app_id = await _seed(db_session_with_schema)
     store = UndoStore(ttl_seconds=60)
     result = await get_tool_handler("reject_application")(
-        db_session_with_schema, app_id, {"reason": "no Rust experience"},
-        undo_store=store,
+        _ctx(db_session_with_schema, app_id, undo_store=store), {"reason": "no Rust experience"},
     )
     assert result["ok"] is True
     assert result["previous_stage"] == "scored"
@@ -173,8 +179,7 @@ async def test_reject_from_invited_blocked(db_session_with_schema):
     await db_session_with_schema.commit()
 
     result = await get_tool_handler("reject_application")(
-        db_session_with_schema, app_id, {"reason": "x"},
-        undo_store=UndoStore(ttl_seconds=60),
+        _ctx(db_session_with_schema, app_id), {"reason": "x"},
     )
     assert "error" in result
     assert "invited" in result["error"].lower()

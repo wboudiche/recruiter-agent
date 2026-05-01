@@ -11,7 +11,7 @@ from recruiter.agent.events import (
     tool_call_result_event,
     tool_call_start_event,
 )
-from recruiter.agent.tools import TOOLS, get_tool_handler
+from recruiter.agent.tools import TOOLS, ToolContext, get_tool_handler
 from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall
 from recruiter.agent.undo import UndoStore
 from recruiter.llm.client import LLMClient
@@ -105,6 +105,11 @@ async def run_turn(
         yield error_event(detail=f"failed to load context: {exc}", phase="persist")
         return
 
+    # Build the per-turn tool context. Same instance flows to every handler
+    # so future cross-cutting concerns (request_id, principal, dry_run) plug
+    # in here without growing the dispatch.
+    ctx = ToolContext(session=session, application_id=application_id, undo_store=undo_store)
+
     # 3. Loop
     for step in range(max_steps):
         history = await _load_history(session, application_id)
@@ -153,12 +158,7 @@ async def run_turn(
             yield tool_call_start_event(id=tc.id, name=tc.name, arguments=tc.arguments)
             try:
                 handler = get_tool_handler(tc.name)
-                if tc.name in ("validate_application", "reject_application"):
-                    result = await handler(
-                        session, application_id, tc.arguments, undo_store=undo_store,
-                    )
-                else:
-                    result = await handler(session, application_id, tc.arguments)
+                result = await handler(ctx, tc.arguments)
             except Exception as exc:
                 result = {"error": str(exc)}
 

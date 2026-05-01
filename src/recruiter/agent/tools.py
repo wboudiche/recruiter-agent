@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -6,13 +7,25 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.agent.types import ToolDef
-from recruiter.agent.undo import UndoStore, get_default_undo_store
+from recruiter.agent.undo import UndoStore
 from recruiter.models import Application, Candidate, Job, Stage
 
-# Variadic over keyword args so write tools (validate/reject) which accept an
-# extra `undo_store` keyword still satisfy the alias. The agent loop does the
-# name-based dispatch; a future ToolContext refactor will collapse this.
-ToolHandler = Callable[..., Awaitable[dict | list]]
+
+@dataclass
+class ToolContext:
+    """Per-turn context passed uniformly to every tool handler.
+
+    Carries cross-cutting concerns (DB session, application scope, undo store)
+    so handlers share one signature: `async def fn(ctx, args) -> dict | list`.
+    Future fields (request_id, principal, dry_run) plug in here without
+    growing the agent loop's dispatch.
+    """
+    session: AsyncSession
+    application_id: int
+    undo_store: UndoStore
+
+
+ToolHandler = Callable[[ToolContext, dict], Awaitable[dict | list]]
 
 _HANDLERS: dict[str, ToolHandler] = {}
 
@@ -31,11 +44,11 @@ def get_tool_handler(name: str) -> ToolHandler:
 
 
 @_register("get_candidate")
-async def _get_candidate(session: AsyncSession, application_id: int, args: dict) -> dict:
-    app = await session.get(Application, application_id)
+async def _get_candidate(ctx: ToolContext, args: dict) -> dict:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
-    candidate = await session.get(Candidate, app.candidate_id)
+    candidate = await ctx.session.get(Candidate, app.candidate_id)
     if candidate is None:
         return {"error": "candidate not found"}
     return {
@@ -57,8 +70,8 @@ def _iso(dt: Any) -> str | None:
 
 
 @_register("get_application")
-async def _get_application(session: AsyncSession, application_id: int, args: dict) -> dict:
-    app = await session.get(Application, application_id)
+async def _get_application(ctx: ToolContext, args: dict) -> dict:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
     return {
@@ -72,8 +85,8 @@ async def _get_application(session: AsyncSession, application_id: int, args: dic
 
 
 @_register("get_score_breakdown")
-async def _get_score_breakdown(session: AsyncSession, application_id: int, args: dict) -> dict:
-    app = await session.get(Application, application_id)
+async def _get_score_breakdown(ctx: ToolContext, args: dict) -> dict:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
     return {
@@ -84,11 +97,11 @@ async def _get_score_breakdown(session: AsyncSession, application_id: int, args:
 
 
 @_register("get_job")
-async def _get_job(session: AsyncSession, application_id: int, args: dict) -> dict:
-    app = await session.get(Application, application_id)
+async def _get_job(ctx: ToolContext, args: dict) -> dict:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
-    job = await session.get(Job, app.job_id)
+    job = await ctx.session.get(Job, app.job_id)
     if job is None:
         return {"error": "job not found"}
     return {
@@ -100,15 +113,15 @@ async def _get_job(session: AsyncSession, application_id: int, args: dict) -> di
 
 
 @_register("list_other_applications_for_candidate")
-async def _list_other(session: AsyncSession, application_id: int, args: dict) -> list[dict]:
-    app = await session.get(Application, application_id)
+async def _list_other(ctx: ToolContext, args: dict) -> list[dict]:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return []
-    rows = (await session.execute(
+    rows = (await ctx.session.execute(
         select(Application, Job.title)
         .join(Job, Job.id == Application.job_id)
         .where(Application.candidate_id == app.candidate_id)
-        .where(Application.id != application_id)
+        .where(Application.id != ctx.application_id)
         .order_by(Application.created_at.desc())
     )).all()
     return [
@@ -152,30 +165,25 @@ def _append_note(app: Application, text: str) -> None:
 
 
 @_register("save_note")
-async def _save_note(session: AsyncSession, application_id: int, args: dict) -> dict:
+async def _save_note(ctx: ToolContext, args: dict) -> dict:
     text = (args.get("text") or "").strip()
     if not text:
         return {"error": "text is required"}
-    app = await session.get(Application, application_id)
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
     _append_note(app, text)
-    await session.commit()
-    return {"ok": True, "note_id": application_id}
+    await ctx.session.commit()
+    return {"ok": True, "note_id": ctx.application_id}
 
 
 _VALIDATE_FROM = {Stage.SCORED, Stage.VALIDATED, Stage.REJECTED}
 _REJECT_FROM = {Stage.SCORED, Stage.VALIDATED, Stage.REJECTED}
 
 
-async def _validate_application(
-    session: AsyncSession,
-    application_id: int,
-    args: dict,
-    *,
-    undo_store: UndoStore | None = None,
-) -> dict:
-    app = await session.get(Application, application_id)
+@_register("validate_application")
+async def _validate_application(ctx: ToolContext, args: dict) -> dict:
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
     if app.stage not in _VALIDATE_FROM:
@@ -188,10 +196,9 @@ async def _validate_application(
     notes_arg = (args.get("notes") or "").strip()
     if notes_arg:
         _append_note(app, notes_arg)
-    await session.commit()
-    store = undo_store or get_default_undo_store()
-    token = store.issue(
-        application_id=application_id,
+    await ctx.session.commit()
+    token = ctx.undo_store.issue(
+        application_id=ctx.application_id,
         payload={
             "previous_stage": previous_stage,
             "previous_validated_at": previous_validated_at,
@@ -201,17 +208,12 @@ async def _validate_application(
     return {"ok": True, "previous_stage": previous_stage, "undo_token": token}
 
 
-async def _reject_application(
-    session: AsyncSession,
-    application_id: int,
-    args: dict,
-    *,
-    undo_store: UndoStore | None = None,
-) -> dict:
+@_register("reject_application")
+async def _reject_application(ctx: ToolContext, args: dict) -> dict:
     reason = (args.get("reason") or "").strip()
     if not reason:
         return {"error": "reason is required"}
-    app = await session.get(Application, application_id)
+    app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
     if app.stage not in _REJECT_FROM:
@@ -222,10 +224,9 @@ async def _reject_application(
     app.stage = Stage.REJECTED
     app.rejected_at = datetime.now(timezone.utc)
     _append_note(app, f"Rejected: {reason}")
-    await session.commit()
-    store = undo_store or get_default_undo_store()
-    token = store.issue(
-        application_id=application_id,
+    await ctx.session.commit()
+    token = ctx.undo_store.issue(
+        application_id=ctx.application_id,
         payload={
             "previous_stage": previous_stage,
             "previous_validated_at": previous_validated_at,
@@ -235,14 +236,6 @@ async def _reject_application(
     return {"ok": True, "previous_stage": previous_stage, "undo_token": token}
 
 
-# validate/reject accept an extra `undo_store` keyword. The variadic
-# ToolHandler alias above accepts any kwargs; the agent loop detects these
-# two names and threads undo_store explicitly.
-_HANDLERS["validate_application"] = _validate_application
-_HANDLERS["reject_application"] = _reject_application
-
-
-# Append the write tools to the registry
 TOOLS.extend([
     ToolDef(
         name="save_note",
@@ -274,3 +267,5 @@ TOOLS.extend([
         },
     ),
 ])
+
+
