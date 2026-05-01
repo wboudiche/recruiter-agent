@@ -83,6 +83,7 @@ class OpenAICompatLLMClient:
         *,
         system: str | None = None,
         max_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> AssistantTurn:
         body_messages: list[dict] = []
         if system is not None:
@@ -94,7 +95,7 @@ class OpenAICompatLLMClient:
             "model": self._model,
             "messages": body_messages,
             "max_tokens": max_tokens,
-            "temperature": 0.0,
+            "temperature": temperature,
         }
         if tools:
             body["tools"] = [

@@ -41,6 +41,7 @@ class LLMClient(Protocol):
         *,
         system: str | None = None,
         max_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> AssistantTurn: ...
 
 
@@ -100,10 +101,11 @@ class FakeLLMClient:
         *,
         system: str | None = None,
         max_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> AssistantTurn:
         self.calls.append({
             "kind": "tools", "messages": messages, "tools": tools,
-            "system": system, "max_tokens": max_tokens,
+            "system": system, "max_tokens": max_tokens, "temperature": temperature,
         })
         if not self._tool_turns:
             raise RuntimeError("FakeLLMClient tool_turn_responses exhausted")

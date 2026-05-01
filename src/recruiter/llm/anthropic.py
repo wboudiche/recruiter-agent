@@ -67,6 +67,7 @@ class AnthropicLLMClient:
         *,
         system: str | None = None,
         max_tokens: int = 2048,
+        temperature: float = 0.0,
     ) -> AssistantTurn:
         api_messages = [_chat_turn_to_anthropic(m) for m in messages]
         api_tools = [
@@ -76,6 +77,7 @@ class AnthropicLLMClient:
         kwargs: dict = {
             "model": self._model,
             "max_tokens": max_tokens,
+            "temperature": temperature,
             "messages": api_messages,
         }
         if system is not None:

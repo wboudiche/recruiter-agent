@@ -40,6 +40,26 @@ async def test_chat_with_tools_text_only() -> None:
     assert captured["body"]["tool_choice"] == "auto"
     assert captured["body"]["messages"][0] == {"role": "system", "content": "be helpful"}
     assert captured["body"]["messages"][1] == {"role": "user", "content": "hi"}
+    # Default temperature must flow through to the wire.
+    assert captured["body"]["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_chat_with_tools_forwards_temperature() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return _ok_response({"choices": [{"message": {"content": "ok", "tool_calls": None}}]})
+
+    client = OpenAICompatLLMClient(
+        base_url="https://x/v1", model="m", api_key="k",
+        transport=httpx.MockTransport(handler),
+    )
+    await client.chat_with_tools(
+        [ChatTurn(role="user", content="hi")], [], temperature=0.5,
+    )
+    assert captured["body"]["temperature"] == 0.5
 
 
 @pytest.mark.asyncio

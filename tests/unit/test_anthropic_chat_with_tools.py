@@ -36,6 +36,22 @@ async def test_anthropic_chat_with_tools_text_only(monkeypatch) -> None:
     assert kwargs["tools"] == [{
         "name": "get_candidate", "description": "d", "input_schema": {"type": "object"},
     }]
+    # Default temperature is forwarded explicitly so we don't inherit the SDK's default.
+    assert kwargs["temperature"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_anthropic_chat_with_tools_forwards_temperature() -> None:
+    response = MagicMock()
+    response.content = [_block("text", text="ok")]
+    response.stop_reason = "end_turn"
+    client = AnthropicLLMClient(api_key="x", model="claude-x")
+    client._client.messages.create = AsyncMock(return_value=response)
+
+    await client.chat_with_tools(
+        [ChatTurn(role="user", content="?")], [], temperature=0.7,
+    )
+    assert client._client.messages.create.call_args.kwargs["temperature"] == 0.7
 
 
 @pytest.mark.asyncio
