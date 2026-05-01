@@ -17,7 +17,7 @@ export default function ApplicationDetail() {
   if (!application.data) return <p>Not found.</p>;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 h-[calc(100vh-8rem)]">
+    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 h-[calc(100vh-6.5rem)]">
       <div className="space-y-6 overflow-y-auto">
         <header className="space-y-2">
           <h2 className="text-xl font-semibold">
