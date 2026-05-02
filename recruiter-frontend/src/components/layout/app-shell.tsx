@@ -1,5 +1,6 @@
 import { Link, Outlet } from "react-router-dom";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { UserChip } from "@/components/auth/user-chip";
 
 export function AppShell() {
   return (
@@ -12,6 +13,7 @@ export function AppShell() {
           <nav className="flex items-center gap-4">
             <Link to="/jobs" className="text-sm hover:underline">Jobs</Link>
             <Link to="/settings" className="text-sm hover:underline">Settings</Link>
+            <UserChip />
             <ThemeToggle />
           </nav>
         </div>
