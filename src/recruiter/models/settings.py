@@ -21,6 +21,10 @@ class SettingsRow(Base):
     recruiter_name: Mapped[str | None] = mapped_column(String(255))
     recruiter_email: Mapped[str | None] = mapped_column(String(255))
     monthly_llm_spend_cap_usd: Mapped[int | None] = mapped_column(Integer)
+    search_provider: Mapped[str | None] = mapped_column(String(32))
+    search_api_key_enc: Mapped[str | None] = mapped_column(String)
+    search_engine_id: Mapped[str | None] = mapped_column(String(255))
+    github_token_enc: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -23,6 +23,10 @@ class SettingsRead(BaseModel):
     recruiter_name: str | None
     recruiter_email: str | None
     monthly_llm_spend_cap_usd: int | None
+    search_provider: str | None = None
+    search_engine_id: str | None = None
+    has_search_api_key: bool = False
+    has_github_token: bool = False
 
 
 class SettingsUpdate(BaseModel):
@@ -35,3 +39,7 @@ class SettingsUpdate(BaseModel):
     recruiter_name: str | None = None
     recruiter_email: str | None = None
     monthly_llm_spend_cap_usd: int | None = None
+    search_provider: str | None = None
+    search_api_key: str | None = None
+    search_engine_id: str | None = None
+    github_token: str | None = None
