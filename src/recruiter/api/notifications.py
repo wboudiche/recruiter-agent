@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.candidates import get_llm
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.api.settings import get_smtp_config
 from recruiter.llm.client import LLMClient
 from recruiter.models import (
@@ -27,7 +27,7 @@ from recruiter.schemas.candidate import EducationItem, ExperienceItem, LinkItem
 from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.notification import DraftedEmail, NotifyPayload, Slot
 
-router = APIRouter(prefix="/api/applications", tags=["notifications"])
+router = APIRouter(prefix="/api/applications", tags=["notifications"], dependencies=[Depends(require_user)])
 
 
 def get_smtp_factory() -> Callable[[str, int], smtplib.SMTP]:

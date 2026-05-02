@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.models import Application, Candidate, Stage
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate
 from recruiter.schemas.candidate import CandidateRead
 
-router = APIRouter(prefix="/api", tags=["applications"])
+router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationRead)

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
 import { api, ApiError } from "./api";
@@ -46,5 +46,49 @@ describe("api", () => {
     } catch (err) {
       expect(err).toBeInstanceOf(ApiError);
     }
+  });
+});
+
+describe("api 401 handling", () => {
+  let originalLocation: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    originalLocation = Object.getOwnPropertyDescriptor(window, "location");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    if (originalLocation) {
+      Object.defineProperty(window, "location", originalLocation);
+    }
+  });
+
+  it("redirects to /api/auth/login on 401", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response("unauth", { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const hrefSetter = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: {
+        pathname: "/jobs",
+        search: "?x=1",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    await expect(api("/api/jobs")).rejects.toThrow();
+    expect(hrefSetter).toHaveBeenCalledTimes(1);
+    const target = hrefSetter.mock.calls[0][0] as string;
+    expect(target).toContain("/api/auth/login");
+    expect(target).toContain("next=" + encodeURIComponent("/jobs?x=1"));
   });
 });

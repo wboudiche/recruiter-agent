@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.config import get_config
 from recruiter.crypto import SecretCipher
 from recruiter.models import SettingsRow
 from recruiter.schemas.settings import SettingsRead, SettingsUpdate, SmtpConfigInput
 
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_user)])
 
 
 def _cipher() -> SecretCipher:

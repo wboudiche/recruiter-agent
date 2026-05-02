@@ -28,7 +28,16 @@ export async function api<T = unknown>(
     ...opts,
     headers,
     body: opts.json !== undefined ? JSON.stringify(opts.json) : opts.body,
+    credentials: "include",
   });
+
+  if (response.status === 401) {
+    const next = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    window.location.href = `${BASE_URL}/api/auth/login?next=${next}`;
+    throw new ApiError(401, "redirecting to login");
+  }
 
   const text = await response.text();
   const body = text ? safeParseJson(text) : undefined;

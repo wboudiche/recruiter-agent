@@ -11,14 +11,25 @@ class Config(BaseSettings):
     resume_storage_path: str = "./var/resumes"
     log_level: str = "INFO"
     local_llm_api_key: str | None = None
-    # Per-client rate limit on POST /api/applications/{id}/chat. Each chat
-    # turn can drive multiple LLM calls (one per agent loop step), so the
-    # cost ceiling matters even with a single user. SlowAPI string format,
-    # e.g. "30/minute", "10/second". Set to "" to disable.
     chat_rate_limit: str = "30/minute"
-    # Optional Redis URL for cross-pod UndoStore. Empty/None = in-memory
-    # (process-local) store, which is fine for single-pod deploys.
     redis_url: str | None = None
+
+    # OIDC SSO config — see docs/superpowers/specs/2026-05-02-oidc-auth-design.md
+    oidc_issuer: str = ""                        # e.g. https://accounts.google.com
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_redirect_uri: str = "http://localhost:8765/api/auth/callback"
+    oidc_allowed_domains: str = ""               # comma-separated, e.g. "acme.com,acme-corp.com"
+
+    # Cookie / session config
+    secure_cookies: bool = False                 # set true in HTTPS prod
+    session_ttl_days: int = 7
+
+    # Dev escape hatch — only active when oidc_issuer is empty
+    dev_auth_bypass: str = ""                    # e.g. "walid@acme.com"
+
+    # Comma-separated list for the Origin-header middleware
+    allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
 
 @lru_cache(maxsize=1)

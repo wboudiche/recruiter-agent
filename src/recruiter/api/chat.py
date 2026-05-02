@@ -10,14 +10,14 @@ from recruiter.agent.chat import run_turn
 from recruiter.agent.events import error_event, serialize_event
 from recruiter.agent.undo import UndoStore, get_default_undo_store
 from recruiter.api.candidates import get_engine_dep, get_llm
-from recruiter.api.deps import get_session, streaming_session
+from recruiter.api.deps import get_session, require_user, streaming_session
 from recruiter.api.rate_limit import chat_rate_limit, limiter
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, ChatMessage, Stage
 from recruiter.schemas.application import ApplicationRead
 from recruiter.schemas.chat import ChatMessageRead, ChatRequest, UndoRequest
 
-router = APIRouter(prefix="/api/applications", tags=["chat"])
+router = APIRouter(prefix="/api/applications", tags=["chat"], dependencies=[Depends(require_user)])
 
 
 def get_undo_store() -> UndoStore:

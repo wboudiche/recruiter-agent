@@ -10,10 +10,14 @@ from recruiter.models.notification import (
     NotificationProvider,
     NotificationStatus,
 )
+from recruiter.models.oauth_state import OAuthState
+from recruiter.models.session import AuthSession
 from recruiter.models.settings import SettingsRow
+from recruiter.models.user import User
 
 __all__ = [
     "Application",
+    "AuthSession",
     "Base",
     "Candidate",
     "ChatMessage",
@@ -25,7 +29,9 @@ __all__ = [
     "NotificationChannel",
     "NotificationProvider",
     "NotificationStatus",
+    "OAuthState",
     "SettingsRow",
     "SourceType",
     "Stage",
+    "User",
 ]
