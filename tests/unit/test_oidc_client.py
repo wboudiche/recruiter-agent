@@ -10,8 +10,16 @@ from recruiter.auth.oidc import (
     OIDCClient,
     OIDCConfig,
     build_authorize_url,
+    clear_oidc_cache,
     generate_pkce,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_oidc_cache():
+    clear_oidc_cache()
+    yield
+    clear_oidc_cache()
 
 DISCOVERY = {
     "issuer": "https://idp.example.com",
@@ -72,6 +80,83 @@ async def test_oidc_client_discovery_caches_well_known() -> None:
     d2 = await client.discover()
     assert d1 == d2 == DISCOVERY
     assert calls["discovery"] == 1  # cached
+
+
+@pytest.mark.asyncio
+async def test_oidc_client_discovery_shared_across_instances() -> None:
+    """Module-level cache: /login and /callback construct fresh OIDCClient
+    instances on every request, so the per-instance cache is useless. The
+    module-level cache shares discovery across instances for the same issuer."""
+    calls = {"discovery": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/.well-known/openid-configuration"):
+            calls["discovery"] += 1
+            return httpx.Response(200, json=DISCOVERY)
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    c1 = OIDCClient(_config(), transport=transport)
+    await c1.discover()
+    await c1.aclose()
+
+    c2 = OIDCClient(_config(), transport=transport)
+    await c2.discover()
+    await c2.aclose()
+
+    assert calls["discovery"] == 1  # second instance hit the module-level cache
+
+
+@pytest.mark.asyncio
+async def test_oidc_client_jwks_shared_across_instances() -> None:
+    """JWKS is fetched per-issuer; second client for the same issuer reuses it."""
+    calls = {"jwks": 0}
+    jwks = {"keys": [{"kid": "k1", "kty": "RSA"}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/.well-known/openid-configuration"):
+            return httpx.Response(200, json=DISCOVERY)
+        if request.url.path.endswith("/jwks"):
+            calls["jwks"] += 1
+            return httpx.Response(200, json=jwks)
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    c1 = OIDCClient(_config(), transport=transport)
+    await c1.get_jwks()
+    await c1.aclose()
+
+    c2 = OIDCClient(_config(), transport=transport)
+    await c2.get_jwks()
+    await c2.aclose()
+
+    assert calls["jwks"] == 1
+
+
+@pytest.mark.asyncio
+async def test_clear_oidc_cache_forces_refetch() -> None:
+    """clear_oidc_cache() drops both discovery and JWKS — used by tests and
+    by any future admin endpoint that wants to force a key-rotation pickup."""
+    calls = {"discovery": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/.well-known/openid-configuration"):
+            calls["discovery"] += 1
+            return httpx.Response(200, json=DISCOVERY)
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    c1 = OIDCClient(_config(), transport=transport)
+    await c1.discover()
+    await c1.aclose()
+
+    clear_oidc_cache()
+
+    c2 = OIDCClient(_config(), transport=transport)
+    await c2.discover()
+    await c2.aclose()
+
+    assert calls["discovery"] == 2
 
 
 @pytest.mark.asyncio

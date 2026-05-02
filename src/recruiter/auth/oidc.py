@@ -19,6 +19,25 @@ class OIDCValidationError(OIDCError):
     """id_token failed structural validation."""
 
 
+# Module-level discovery + JWKS cache, keyed by issuer URL.
+# /login and /callback each construct a fresh OIDCClient, so the per-instance
+# caches were useless across requests. JWKS rotation is rare (Google rotates
+# every few weeks); discovery docs are essentially static. 1h TTL.
+_CACHE_TTL_SECONDS = 3600
+_discovery_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_jwks_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def clear_oidc_cache() -> None:
+    """Drop the module-level discovery + JWKS cache.
+
+    Used by tests for isolation, and available as an escape hatch if an
+    operator ever needs to force a key-rotation pickup without restarting.
+    """
+    _discovery_cache.clear()
+    _jwks_cache.clear()
+
+
 @dataclass
 class OIDCConfig:
     issuer: str
@@ -81,7 +100,12 @@ class OIDCClient:
     async def discover(self) -> dict[str, Any]:
         if self._discovery is not None:
             return self._discovery
-        url = self._cfg.issuer.rstrip("/") + "/.well-known/openid-configuration"
+        issuer = self._cfg.issuer
+        cached = _discovery_cache.get(issuer)
+        if cached is not None and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+            self._discovery = cached[1]
+            return cached[1]
+        url = issuer.rstrip("/") + "/.well-known/openid-configuration"
         try:
             r = await self._client.get(url)
         except httpx.HTTPError as e:
@@ -90,12 +114,19 @@ class OIDCClient:
             raise OIDCError(f"discovery {r.status_code}: {r.text[:200]}")
         if r.status_code != 200:
             raise OIDCValidationError(f"discovery {r.status_code}: {r.text[:200]}")
-        self._discovery = r.json()
-        return self._discovery
+        doc = r.json()
+        _discovery_cache[issuer] = (time.time(), doc)
+        self._discovery = doc
+        return doc
 
     async def get_jwks(self) -> dict[str, Any]:
         if self._jwks is not None:
             return self._jwks
+        issuer = self._cfg.issuer
+        cached = _jwks_cache.get(issuer)
+        if cached is not None and time.time() - cached[0] < _CACHE_TTL_SECONDS:
+            self._jwks = cached[1]
+            return cached[1]
         d = await self.discover()
         try:
             r = await self._client.get(d["jwks_uri"])
@@ -105,8 +136,10 @@ class OIDCClient:
             raise OIDCError(f"jwks {r.status_code}: {r.text[:200]}")
         if r.status_code != 200:
             raise OIDCValidationError(f"jwks {r.status_code}: {r.text[:200]}")
-        self._jwks = r.json()
-        return self._jwks
+        doc = r.json()
+        _jwks_cache[issuer] = (time.time(), doc)
+        self._jwks = doc
+        return doc
 
     async def exchange_code(self, *, code: str, code_verifier: str) -> dict[str, Any]:
         d = await self.discover()
