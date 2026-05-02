@@ -14,7 +14,6 @@ def _reset_config():
     get_config.cache_clear()
 
 
-@pytest.mark.skip(reason="enabled when api/auth.py lands in Task 9")
 @pytest.mark.asyncio
 async def test_require_user_returns_401_without_cookie(api_client: AsyncClient) -> None:
     r = await api_client.get("/api/auth/me")

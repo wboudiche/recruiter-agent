@@ -138,3 +138,37 @@ async def test_callback_403_when_email_not_in_allowlist(
     r = await api_client.get(f"/api/auth/callback?code=c&state={state}")
     assert r.status_code == 403
     assert "Not authorized" in r.text
+
+
+@pytest.mark.asyncio
+async def test_me_401_when_not_logged_in(api_client: AsyncClient) -> None:
+    r = await api_client.get("/api/auth/me")
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_then_me_is_401(
+    api_client: AsyncClient, oidc_env, fake_idp,
+) -> None:
+    """Login flow → /me works → /logout → /me 401."""
+    redirect = await api_client.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]
+    nonce = parse_qs(urlparse(redirect.headers["location"]).query)["nonce"][0]
+    fake_idp["next_id_token"] = fake_idp["make_id_token"]({
+        "iss": "https://idp.example.com", "aud": "cid", "exp": int(time.time()) + 600,
+        "iat": int(time.time()), "nonce": nonce,
+        "email": "alice@acme.com", "email_verified": True, "sub": "g-1", "name": "Alice",
+    })
+    cb = await api_client.get(f"/api/auth/callback?code=c&state={state}", follow_redirects=False)
+    set_cookie = cb.headers["set-cookie"]
+    cookie_value = set_cookie.split(";")[0].split("=", 1)[1]
+
+    me = await api_client.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
+    assert me.status_code == 200
+    assert me.json()["email"] == "alice@acme.com"
+
+    out = await api_client.post("/api/auth/logout", cookies={"recruiter_session": cookie_value})
+    assert out.status_code == 204
+
+    me_again = await api_client.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
+    assert me_again.status_code == 401

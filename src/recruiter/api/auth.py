@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.auth.allowlist import is_email_allowed, parse_allowed_domains
 from recruiter.auth.oidc import (
     OIDCClient,
@@ -16,9 +16,10 @@ from recruiter.auth.oidc import (
     generate_pkce,
     validate_id_token_claims,
 )
-from recruiter.auth.sessions import create_session
+from recruiter.auth.sessions import create_session, revoke_session
 from recruiter.config import get_config
 from recruiter.models import OAuthState, User
+from recruiter.schemas.auth import UserRead
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -154,3 +155,21 @@ async def callback(
         secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",
     )
     return response
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    cookie = request.cookies.get("recruiter_session")
+    if cookie:
+        await revoke_session(session, token=cookie)
+    response.delete_cookie(key="recruiter_session", path="/")
+    return Response(status_code=204)
+
+
+@router.get("/me", response_model=UserRead)
+async def me(user: User = Depends(require_user)) -> UserRead:
+    return UserRead.model_validate(user)
