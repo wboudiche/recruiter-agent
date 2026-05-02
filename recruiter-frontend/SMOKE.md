@@ -129,3 +129,15 @@ provider configured (`/api/settings`).
 - [ ] Refresh the page → entire conversation reloads from the DB in order.
 - [ ] Kill the backend mid-turn → red error banner appears in the panel.
 - [ ] Restart backend → next user message succeeds.
+
+## OIDC auth (Phase 4)
+
+Prereqs: real Google Workspace project configured per `docs/setup.md` §Auth setup; backend running with `RECRUITER_OIDC_*` set; frontend running.
+
+- [ ] Open `http://localhost:5173/jobs` in a fresh incognito → redirected to Google's consent screen.
+- [ ] Sign in with `walid@acme.com` (allowlisted) → land on `/jobs` authenticated; user chip in the header shows the email.
+- [ ] Click the email in the header → "Sign out". Confirm the cookie is cleared (DevTools → Application → Cookies); navigating to any page redirects to login again.
+- [ ] Try to log in with a non-allowlisted Google account → see the "Not authorized" page, no cookie set.
+- [ ] DevTools → Application → Cookies: `recruiter_session` has `HttpOnly`, `SameSite=Strict`. (`Secure` is off for localhost dev.)
+- [ ] Confirm `/health` is the only API route accessible without auth: `curl http://localhost:8765/api/jobs` → 401.
+- [ ] Wait at least 1 hour, perform an action → DB shows `last_seen_at` and `expires_at` bumped on the active session.
