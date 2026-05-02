@@ -12,7 +12,7 @@ from recruiter.config import get_config
 
 app = FastAPI(title="Recruiter Agent")
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
 _cfg = get_config()
 _origins = [o.strip() for o in _cfg.allowed_origins.split(",") if o.strip()]

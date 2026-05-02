@@ -1,4 +1,4 @@
-import fitz  # PyMuPDF
+import fitz  # type: ignore[import-untyped]  # PyMuPDF — no published stubs
 
 from recruiter.pipeline.parsers.text import ParsedContent
 

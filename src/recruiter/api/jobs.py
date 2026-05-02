@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
 from recruiter.models import Job, JobStatus
-from recruiter.schemas.job import JobCreate, JobRead, JobUpdate
+from recruiter.schemas.job import CriteriaItem, JobCreate, JobRead, JobUpdate
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_user)])
 
@@ -61,7 +61,7 @@ def _to_read(job: Job) -> JobRead:
         id=job.id,
         title=job.title,
         description=job.description,
-        criteria=job.criteria,
+        criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
         status=job.status.value,
         created_at=job.created_at,
         updated_at=job.updated_at,

@@ -107,6 +107,7 @@ async def add_candidate(
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
 
+    source_url: str | None
     if payload.kind == "url":
         try:
             routed = await _route_url(payload.url)
@@ -170,6 +171,7 @@ async def upload_resume(
 
     data = await file.read()
     name = (file.filename or "").lower()
+    kind: Literal["pdf", "docx"]
     if name.endswith(".pdf"):
         parsed = parse_pdf(data)
         kind = "pdf"

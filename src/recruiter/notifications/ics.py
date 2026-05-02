@@ -37,7 +37,7 @@ def build_ics(
         event.add("dtend", slot.end)
         event.add("dtstamp", datetime.now(timezone.utc))
         event["organizer"] = organizer
-        event.add("attendee", attendee, encode=0)
+        event.add("attendee", attendee, encode=False)
         cal.add_component(event)
 
     return cal.to_ical()

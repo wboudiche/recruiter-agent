@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
 from recruiter.models import Application, Candidate, Stage
-from recruiter.schemas.application import ApplicationRead, ApplicationUpdate
+from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead
 
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
@@ -43,13 +43,18 @@ async def list_applications_for_job(
 
 
 def _to_read(app_row: Application) -> ApplicationRead:
+    breakdown = (
+        [ScoreBreakdownItem.model_validate(c) for c in app_row.score_breakdown]
+        if app_row.score_breakdown
+        else None
+    )
     return ApplicationRead(
         id=app_row.id,
         job_id=app_row.job_id,
         candidate_id=app_row.candidate_id,
         stage=app_row.stage.value,
         score=app_row.score,
-        score_breakdown=app_row.score_breakdown,
+        score_breakdown=breakdown,
         score_rationale=app_row.score_rationale,
         notes=app_row.notes,
         validated_at=app_row.validated_at,

@@ -1,5 +1,7 @@
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from sse_starlette.sse import EventSourceResponse
@@ -20,7 +22,7 @@ async def stream_events(bus: EventBus = Depends(get_event_bus)) -> EventSourceRe
 
     unsubscribe = bus.subscribe(listener)
 
-    async def event_generator() -> object:
+    async def event_generator() -> AsyncIterator[dict[str, Any]]:
         try:
             while True:
                 event = await queue.get()
