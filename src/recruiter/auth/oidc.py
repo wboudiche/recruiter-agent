@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
-from authlib.jose import jwt
-from authlib.jose.errors import JoseError
+from authlib.jose import jwt  # type: ignore[import-untyped]
+from authlib.jose.errors import JoseError  # type: ignore[import-untyped]
 
 
 class OIDCError(Exception):
