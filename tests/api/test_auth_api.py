@@ -147,6 +147,14 @@ async def test_me_401_when_not_logged_in(api_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_logout_without_cookie_is_204(api_client: AsyncClient) -> None:
+    """Idempotent: POST /logout without a cookie still returns 204
+    (defends against double-clicks / stale-tab requests)."""
+    r = await api_client.post("/api/auth/logout")
+    assert r.status_code == 204
+
+
+@pytest.mark.asyncio
 async def test_logout_then_me_is_401(
     api_client: AsyncClient, oidc_env, fake_idp,
 ) -> None:

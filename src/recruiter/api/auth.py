@@ -166,7 +166,12 @@ async def logout(
     cookie = request.cookies.get("recruiter_session")
     if cookie:
         await revoke_session(session, token=cookie)
-    response.delete_cookie(key="recruiter_session", path="/")
+    # Mirror set_cookie's attributes so the unset matches in all browsers.
+    cfg = get_config()
+    response.delete_cookie(
+        key="recruiter_session", path="/",
+        httponly=True, samesite="strict", secure=cfg.secure_cookies,
+    )
     return Response(status_code=204)
 
 
