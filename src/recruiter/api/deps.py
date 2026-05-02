@@ -1,7 +1,10 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from recruiter.auth import dev_bypass
@@ -54,5 +57,10 @@ async def require_user(
         raise HTTPException(status_code=401, detail="session expired")
 
     cfg = get_config()
-    await touch_session(session, token=cookie, ttl_days=cfg.session_ttl_days)
+    # Sliding-window bump is best-effort: a transient DB hiccup must not
+    # 500 an otherwise-authenticated user. Throttled to once/hour anyway.
+    try:
+        await touch_session(session, token=cookie, ttl_days=cfg.session_ttl_days)
+    except Exception:
+        logger.warning("touch_session failed; continuing without bump", exc_info=True)
     return user
