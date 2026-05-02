@@ -69,6 +69,12 @@ class OIDCClient:
         self._discovery: dict[str, Any] | None = None
         self._jwks: dict[str, Any] | None = None
 
+    async def __aenter__(self) -> "OIDCClient":
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        await self.aclose()
+
     async def aclose(self) -> None:
         await self._client.aclose()
 
@@ -76,8 +82,14 @@ class OIDCClient:
         if self._discovery is not None:
             return self._discovery
         url = self._cfg.issuer.rstrip("/") + "/.well-known/openid-configuration"
-        r = await self._client.get(url)
-        r.raise_for_status()
+        try:
+            r = await self._client.get(url)
+        except httpx.HTTPError as e:
+            raise OIDCError(f"discovery network failure: {e}") from e
+        if r.status_code >= 500:
+            raise OIDCError(f"discovery {r.status_code}: {r.text[:200]}")
+        if r.status_code != 200:
+            raise OIDCValidationError(f"discovery {r.status_code}: {r.text[:200]}")
         self._discovery = r.json()
         return self._discovery
 
@@ -85,8 +97,14 @@ class OIDCClient:
         if self._jwks is not None:
             return self._jwks
         d = await self.discover()
-        r = await self._client.get(d["jwks_uri"])
-        r.raise_for_status()
+        try:
+            r = await self._client.get(d["jwks_uri"])
+        except httpx.HTTPError as e:
+            raise OIDCError(f"jwks network failure: {e}") from e
+        if r.status_code >= 500:
+            raise OIDCError(f"jwks {r.status_code}: {r.text[:200]}")
+        if r.status_code != 200:
+            raise OIDCValidationError(f"jwks {r.status_code}: {r.text[:200]}")
         self._jwks = r.json()
         return self._jwks
 
@@ -104,7 +122,7 @@ class OIDCClient:
             d["token_endpoint"], data=form,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
-        if r.status_code >= 500:
+        if r.status_code >= 500 or r.status_code == 429:
             raise OIDCError(f"token endpoint {r.status_code}: {r.text[:200]}")
         if r.status_code != 200:
             raise OIDCValidationError(f"token endpoint {r.status_code}: {r.text[:200]}")
@@ -140,12 +158,19 @@ def validate_id_token_claims(
     if not aud_ok:
         raise OIDCValidationError(f"id_token audience mismatch: {aud!r}")
     exp = claims.get("exp")
-    if not exp or int(exp) < time.time():
+    # Accept up to 30s clock skew between IdP and us — common in containers
+    # without NTP sync. RFC 7519 / OIDC implementations typically allow ~30–60s.
+    if not exp or int(exp) + 30 < time.time():
         raise OIDCValidationError("id_token expired")
     if claims.get("nonce") != expected_nonce:
         raise OIDCValidationError("id_token nonce mismatch")
-    # email_verified: explicitly False is rejected; absent is treated as verified
-    # (Google omits the field for Workspace).
+    # email_verified: explicitly False is rejected; absent is treated as verified.
+    # Google Workspace omits the field. Acceptable here because:
+    #   1. We're single-tenant with a domain allowlist (parse_allowed_domains),
+    #      so "trusted" already means "verified by the IdP we configured".
+    #   2. The IdP is fully trusted (it's our own corporate IdP).
+    # If this module is ever reused in a multi-tenant or external-IdP context,
+    # tighten this to require email_verified=True.
     if claims.get("email_verified") is False:
         raise OIDCValidationError("email not verified")
     email = claims.get("email")

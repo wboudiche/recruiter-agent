@@ -96,6 +96,7 @@ async def test_oidc_client_exchange_code_returns_tokens() -> None:
     assert "code=auth-code" in captured["form"]
     assert "code_verifier=VER" in captured["form"]
     assert "grant_type=authorization_code" in captured["form"]
+    assert "client_secret=csecret" in captured["form"]  # don't drop the secret
 
 
 @pytest.mark.asyncio
@@ -153,7 +154,7 @@ def test_validate_id_token_rejects_expired() -> None:
 
     now = int(time.time())
     claims = {"iss": "https://idp.example.com", "aud": "cid",
-              "exp": now - 1, "nonce": "n", "email": "x@x.com", "sub": "s"}
+              "exp": now - 60, "nonce": "n", "email": "x@x.com", "sub": "s"}
     with pytest.raises(OIDCValidationError, match="expired"):
         validate_id_token_claims(claims, issuer="https://idp.example.com",
                                  audience="cid", expected_nonce="n")
