@@ -5,4 +5,5 @@ export const queryKeys = {
   application: (id: number) => ["applications", id] as const,
   chat: (applicationId: number) => ["applications", applicationId, "chat"] as const,
   settings: () => ["settings"] as const,
+  currentUser: () => ["auth", "me"] as const,
 };
