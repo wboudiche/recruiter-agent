@@ -53,6 +53,8 @@ async def touch_session(
         return False
     now = datetime.now(timezone.utc)
     last_seen = row.last_seen_at
+    # asyncpg + SQLAlchemy occasionally hand back tz-naive datetimes after a
+    # refresh; reattach UTC so the subtraction below doesn't TypeError.
     if last_seen.tzinfo is None:
         last_seen = last_seen.replace(tzinfo=timezone.utc)
     if (now - last_seen) < _IDLE_BUMP_THRESHOLD:
