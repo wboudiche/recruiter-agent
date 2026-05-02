@@ -141,3 +141,31 @@ Prereqs: real Google Workspace project configured per `docs/setup.md` §Auth set
 - [ ] DevTools → Application → Cookies: `recruiter_session` has `HttpOnly`, `SameSite=Strict`. (`Secure` is off for localhost dev.)
 - [ ] Confirm `/health` is the only API route accessible without auth: `curl http://localhost:8765/api/jobs` → 401.
 - [ ] Wait at least 1 hour, perform an action → DB shows `last_seen_at` and `expires_at` bumped on the active session.
+
+### DB integrity check
+
+Run after a successful login to verify the data model is healthy:
+
+```bash
+.venv/bin/python -c "
+import asyncio
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+from recruiter.config import get_config
+
+async def main():
+    eng = create_async_engine(get_config().database_url)
+    async with eng.connect() as c:
+        users = (await c.execute(text('SELECT id, email, sub, last_login_at FROM users'))).all()
+        print('users:', users)
+        sess = (await c.execute(text('SELECT id, user_id, expires_at FROM auth_sessions'))).all()
+        print('sessions:', [(r[0][:8] + '...', r[1], r[2]) for r in sess])
+        states = (await c.execute(text('SELECT state, next_url, created_at FROM oauth_states'))).all()
+        print('oauth_states:', states)
+asyncio.run(main())
+"
+```
+
+- [ ] `users` has exactly one row with your email + the IdP-issued `sub` + a recent `last_login_at`.
+- [ ] `auth_sessions` has at least one active row whose `user_id` matches.
+- [ ] `oauth_states` is empty (rows are consumed atomically on successful callback).
