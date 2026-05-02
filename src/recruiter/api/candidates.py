@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.config import get_config
 from recruiter.db import get_engine
 from recruiter.events import EventBus
@@ -23,7 +23,7 @@ from recruiter.pipeline.parsers.docx import parse_docx
 from recruiter.pipeline.parsers.pdf import parse_pdf
 from recruiter.pipeline.router import RoutedInput, classify_url
 
-router = APIRouter(prefix="/api/jobs/{job_id}/candidates", tags=["candidates"])
+router = APIRouter(prefix="/api/jobs/{job_id}/candidates", tags=["candidates"], dependencies=[Depends(require_user)])
 
 
 _singleton_bus = EventBus()
@@ -208,7 +208,7 @@ class PastePayload(BaseModel):
     content: str
 
 
-paste_router = APIRouter(prefix="/api/applications", tags=["applications"])
+paste_router = APIRouter(prefix="/api/applications", tags=["applications"], dependencies=[Depends(require_user)])
 
 
 @paste_router.post("/{application_id}/paste", response_model=ApplicationCreated, status_code=status.HTTP_202_ACCEPTED)

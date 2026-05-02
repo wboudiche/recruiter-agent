@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends
 from sse_starlette.sse import EventSourceResponse
 
 from recruiter.api.candidates import get_event_bus
+from recruiter.api.deps import require_user
 from recruiter.events import EventBus
 
-router = APIRouter(prefix="/api", tags=["events"])
+router = APIRouter(prefix="/api", tags=["events"], dependencies=[Depends(require_user)])
 
 
 @router.get("/events")

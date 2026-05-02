@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.api.deps import get_session
+from recruiter.api.deps import get_session, require_user
 from recruiter.models import Job, JobStatus
 from recruiter.schemas.job import JobCreate, JobRead, JobUpdate
 
-router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_user)])
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
