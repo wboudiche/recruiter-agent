@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from recruiter.api.deps import get_session, require_user
 from recruiter.models import Application, Candidate, Stage
@@ -12,9 +13,21 @@ from recruiter.schemas.candidate import CandidateRead
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
 
+async def _load_application(session: AsyncSession, application_id: int) -> Application | None:
+    """Load an application with the candidate eager-loaded so awaiting_paste
+    can be computed without a follow-up query."""
+    return (
+        await session.execute(
+            select(Application)
+            .where(Application.id == application_id)
+            .options(selectinload(Application.candidate))
+        )
+    ).scalar_one_or_none()
+
+
 @router.get("/applications/{application_id}", response_model=ApplicationRead)
 async def get_application(application_id: int, session: AsyncSession = Depends(get_session)) -> ApplicationRead:
-    app_row = await session.get(Application, application_id)
+    app_row = await _load_application(session, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     return _to_read(app_row)
@@ -36,7 +49,10 @@ async def list_applications_for_job(
 ) -> list[ApplicationRead]:
     rows = (
         await session.execute(
-            select(Application).where(Application.job_id == job_id).order_by(Application.created_at.desc())
+            select(Application)
+            .where(Application.job_id == job_id)
+            .order_by(Application.created_at.desc())
+            .options(selectinload(Application.candidate))
         )
     ).scalars().all()
     return [_to_read(r) for r in rows]
@@ -47,6 +63,12 @@ def _to_read(app_row: Application) -> ApplicationRead:
         [ScoreBreakdownItem.model_validate(c) for c in app_row.score_breakdown]
         if app_row.score_breakdown
         else None
+    )
+    awaiting_paste = (
+        app_row.stage == Stage.EXTRACTING
+        and app_row.candidate is not None
+        and app_row.candidate.source_url is not None
+        and "linkedin.com" in app_row.candidate.source_url.lower()
     )
     return ApplicationRead(
         id=app_row.id,
@@ -63,6 +85,7 @@ def _to_read(app_row: Application) -> ApplicationRead:
         rejected_at=app_row.rejected_at,
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
+        awaiting_paste=awaiting_paste,
     )
 
 
@@ -96,7 +119,7 @@ async def patch_application(
     payload: ApplicationUpdate,
     session: AsyncSession = Depends(get_session),
 ) -> ApplicationRead:
-    app_row = await session.get(Application, application_id)
+    app_row = await _load_application(session, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
@@ -117,6 +140,8 @@ async def patch_application(
 
     await session.commit()
     await session.refresh(app_row)
+    # Ensure candidate is loaded for awaiting_paste computation.
+    await session.refresh(app_row, attribute_names=["candidate"])
     return _to_read(app_row)
 
 

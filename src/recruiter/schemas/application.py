@@ -28,6 +28,7 @@ class ApplicationRead(BaseModel):
     rejected_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    awaiting_paste: bool = False
 
 
 class ApplicationUpdate(BaseModel):

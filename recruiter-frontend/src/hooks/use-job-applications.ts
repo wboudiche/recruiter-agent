@@ -26,6 +26,7 @@ export interface ApplicationRead {
   rejected_at: string | null;
   created_at: string;
   updated_at: string;
+  awaiting_paste: boolean;
 }
 
 export function useJobApplications(jobId: number) {

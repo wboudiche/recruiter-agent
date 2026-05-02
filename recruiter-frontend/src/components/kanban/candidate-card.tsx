@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useDraggable } from "@dnd-kit/core";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ScoreBadge } from "./score-badge";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
@@ -16,6 +17,7 @@ export function CandidateCard({
   draggable = true,
 }: Props) {
   const isDraggable = draggable && application.stage !== "extracting";
+  const awaitingPaste = application.awaiting_paste;
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: `app-${application.id}`,
@@ -30,7 +32,7 @@ export function CandidateCard({
     <Card
       ref={setNodeRef}
       style={style}
-      className={`p-3 ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""}`}
+      className={`p-3 ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""} ${awaitingPaste ? "border-yellow-500 border-2" : ""}`}
       {...(isDraggable ? listeners : {})}
       {...(isDraggable ? attributes : {})}
     >
@@ -44,6 +46,14 @@ export function CandidateCard({
         <p className="text-xs text-muted-foreground capitalize">
           {application.stage}
         </p>
+        {awaitingPaste && (
+          <Badge
+            variant="outline"
+            className="border-yellow-500 text-yellow-700 bg-yellow-50"
+          >
+            Needs profile
+          </Badge>
+        )}
       </Link>
     </Card>
   );

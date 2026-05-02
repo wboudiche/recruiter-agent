@@ -1,10 +1,14 @@
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, DateTime, Enum as SAEnum, ForeignKey, Integer, String, UniqueConstraint, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from recruiter.models.base import Base
+
+if TYPE_CHECKING:
+    from recruiter.models.candidate import Candidate
 
 
 class Stage(str, Enum):
@@ -39,3 +43,5 @@ class Application(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    candidate: Mapped["Candidate"] = relationship(back_populates="applications")

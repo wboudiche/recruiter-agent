@@ -1,6 +1,7 @@
 import { useParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
 import { ChatPanel } from "@/components/applications/chat-panel";
+import { PasteProfileForm } from "@/components/applications/paste-profile-form";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
@@ -38,7 +39,12 @@ export default function ApplicationDetail() {
         <ScoreBreakdown application={application.data} />
       </div>
       <aside className="rounded border overflow-hidden">
-        {application.data.stage === "extracting" ? (
+        {application.data.awaiting_paste ? (
+          <PasteProfileForm
+            applicationId={id}
+            sourceUrl={candidate.data?.source_url}
+          />
+        ) : application.data.stage === "extracting" ? (
           <div className="p-4 text-sm text-muted-foreground">
             Chat is available once extraction finishes.
           </div>
