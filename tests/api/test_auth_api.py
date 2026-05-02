@@ -66,9 +66,9 @@ def fake_idp(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_login_redirects_to_idp_authorize(
-    api_client: AsyncClient, oidc_env, fake_idp,
+    api_client_unauth: AsyncClient, oidc_env, fake_idp,
 ) -> None:
-    r = await api_client.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    r = await api_client_unauth.get("/api/auth/login?next=/jobs", follow_redirects=False)
     assert r.status_code == 302
     location = r.headers["location"]
     assert location.startswith("https://idp.example.com/authorize?")
@@ -80,19 +80,19 @@ async def test_login_redirects_to_idp_authorize(
 
 
 @pytest.mark.asyncio
-async def test_login_503_when_oidc_not_configured(api_client: AsyncClient, monkeypatch) -> None:
+async def test_login_503_when_oidc_not_configured(api_client_unauth: AsyncClient, monkeypatch) -> None:
     monkeypatch.setenv("RECRUITER_OIDC_ISSUER", "")
     get_config.cache_clear()
-    r = await api_client.get("/api/auth/login")
+    r = await api_client_unauth.get("/api/auth/login")
     assert r.status_code == 503
 
 
 @pytest.mark.asyncio
 async def test_callback_full_happy_path(
-    api_client: AsyncClient, oidc_env, fake_idp,
+    api_client_unauth: AsyncClient, oidc_env, fake_idp,
 ) -> None:
     # Trigger /login to create the OAuthState row + capture state.
-    redirect = await api_client.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    redirect = await api_client_unauth.get("/api/auth/login?next=/jobs", follow_redirects=False)
     state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]
     nonce = parse_qs(urlparse(redirect.headers["location"]).query)["nonce"][0]
 
@@ -103,7 +103,7 @@ async def test_callback_full_happy_path(
         "sub": "g-12345", "name": "Alice",
     })
 
-    r = await api_client.get(
+    r = await api_client_unauth.get(
         f"/api/auth/callback?code=auth-code&state={state}",
         follow_redirects=False,
     )
@@ -116,16 +116,16 @@ async def test_callback_full_happy_path(
 
 
 @pytest.mark.asyncio
-async def test_callback_400_when_state_unknown(api_client: AsyncClient, oidc_env, fake_idp) -> None:
-    r = await api_client.get("/api/auth/callback?code=x&state=unknown")
+async def test_callback_400_when_state_unknown(api_client_unauth: AsyncClient, oidc_env, fake_idp) -> None:
+    r = await api_client_unauth.get("/api/auth/callback?code=x&state=unknown")
     assert r.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_callback_403_when_email_not_in_allowlist(
-    api_client: AsyncClient, oidc_env, fake_idp,
+    api_client_unauth: AsyncClient, oidc_env, fake_idp,
 ) -> None:
-    redirect = await api_client.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    redirect = await api_client_unauth.get("/api/auth/login?next=/jobs", follow_redirects=False)
     state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]
     nonce = parse_qs(urlparse(redirect.headers["location"]).query)["nonce"][0]
 
@@ -135,31 +135,31 @@ async def test_callback_403_when_email_not_in_allowlist(
         "email": "intruder@evil.com", "email_verified": True, "sub": "g-99",
     })
 
-    r = await api_client.get(f"/api/auth/callback?code=c&state={state}")
+    r = await api_client_unauth.get(f"/api/auth/callback?code=c&state={state}")
     assert r.status_code == 403
     assert "Not authorized" in r.text
 
 
 @pytest.mark.asyncio
-async def test_me_401_when_not_logged_in(api_client: AsyncClient) -> None:
-    r = await api_client.get("/api/auth/me")
+async def test_me_401_when_not_logged_in(api_client_unauth: AsyncClient) -> None:
+    r = await api_client_unauth.get("/api/auth/me")
     assert r.status_code == 401
 
 
 @pytest.mark.asyncio
-async def test_logout_without_cookie_is_204(api_client: AsyncClient) -> None:
+async def test_logout_without_cookie_is_204(api_client_unauth: AsyncClient) -> None:
     """Idempotent: POST /logout without a cookie still returns 204
     (defends against double-clicks / stale-tab requests)."""
-    r = await api_client.post("/api/auth/logout")
+    r = await api_client_unauth.post("/api/auth/logout")
     assert r.status_code == 204
 
 
 @pytest.mark.asyncio
 async def test_logout_then_me_is_401(
-    api_client: AsyncClient, oidc_env, fake_idp,
+    api_client_unauth: AsyncClient, oidc_env, fake_idp,
 ) -> None:
     """Login flow → /me works → /logout → /me 401."""
-    redirect = await api_client.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    redirect = await api_client_unauth.get("/api/auth/login?next=/jobs", follow_redirects=False)
     state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]
     nonce = parse_qs(urlparse(redirect.headers["location"]).query)["nonce"][0]
     fake_idp["next_id_token"] = fake_idp["make_id_token"]({
@@ -167,16 +167,16 @@ async def test_logout_then_me_is_401(
         "iat": int(time.time()), "nonce": nonce,
         "email": "alice@acme.com", "email_verified": True, "sub": "g-1", "name": "Alice",
     })
-    cb = await api_client.get(f"/api/auth/callback?code=c&state={state}", follow_redirects=False)
+    cb = await api_client_unauth.get(f"/api/auth/callback?code=c&state={state}", follow_redirects=False)
     set_cookie = cb.headers["set-cookie"]
     cookie_value = set_cookie.split(";")[0].split("=", 1)[1]
 
-    me = await api_client.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
+    me = await api_client_unauth.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
     assert me.status_code == 200
     assert me.json()["email"] == "alice@acme.com"
 
-    out = await api_client.post("/api/auth/logout", cookies={"recruiter_session": cookie_value})
+    out = await api_client_unauth.post("/api/auth/logout", cookies={"recruiter_session": cookie_value})
     assert out.status_code == 204
 
-    me_again = await api_client.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
+    me_again = await api_client_unauth.get("/api/auth/me", cookies={"recruiter_session": cookie_value})
     assert me_again.status_code == 401

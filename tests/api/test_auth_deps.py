@@ -15,8 +15,8 @@ def _reset_config():
 
 
 @pytest.mark.asyncio
-async def test_require_user_returns_401_without_cookie(api_client: AsyncClient) -> None:
-    r = await api_client.get("/api/auth/me")
+async def test_require_user_returns_401_without_cookie(api_client_unauth: AsyncClient) -> None:
+    r = await api_client_unauth.get("/api/auth/me")
     assert r.status_code == 401
 
 
