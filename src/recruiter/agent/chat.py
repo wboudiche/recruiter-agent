@@ -181,6 +181,12 @@ async def run_turn(
                 tool_result=result if isinstance(result, dict) else {"value": result},
             ))
             yield tool_call_result_event(id=tc.id, name=tc.name, result=result)
+            # Drain any frontend-only side events the handler accumulated.
+            # These do NOT enter the LLM context (no history append) — they
+            # only stream to the UI.
+            for ev in ctx.frontend_events:
+                yield ev
+            ctx.frontend_events.clear()
 
     # Loop exhausted without a final answer
     err_row = ChatMessage(

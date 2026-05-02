@@ -1,5 +1,5 @@
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +23,7 @@ class ToolContext:
     session: AsyncSession
     application_id: int
     undo_store: UndoStore
+    frontend_events: list[dict] = field(default_factory=list)
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict | list]]
