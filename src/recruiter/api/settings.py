@@ -5,30 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
-from recruiter.config import get_config
-from recruiter.crypto import SecretCipher
+from recruiter.crypto import settings_cipher
 from recruiter.models import SettingsRow
 from recruiter.schemas.settings import SettingsRead, SettingsUpdate, SmtpConfigInput
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_user)])
 
 
-def _cipher() -> SecretCipher:
-    raw = get_config().settings_key
-    # Accept either a 32-byte raw string or a 64-char hex-encoded string. No silent padding.
-    if len(raw) == 64:
-        try:
-            key = bytes.fromhex(raw)
-        except ValueError as exc:
-            raise RuntimeError("RECRUITER_SETTINGS_KEY: 64-char value must be valid hex") from exc
-    else:
-        key = raw.encode("utf-8")
-    if len(key) != 32:
-        raise RuntimeError(
-            "RECRUITER_SETTINGS_KEY must be 32 bytes (or 64 hex chars). "
-            "Generate with: python -c 'import secrets; print(secrets.token_hex(32))'"
-        )
-    return SecretCipher(key)
+# Backwards-compat alias kept until external callers migrate to settings_cipher().
+_cipher = settings_cipher
 
 
 async def _load_or_create(session: AsyncSession) -> SettingsRow:

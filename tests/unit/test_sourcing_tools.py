@@ -122,3 +122,23 @@ async def test_search_github_uses_github_client_not_provider(
     assert "alice" in result["summary"]
     assert captured["token"] is None  # no token configured = anonymous fine
     assert ctx.frontend_events[0]["source"] == "github"
+
+
+@pytest.mark.asyncio
+async def test_search_linkedin_empty_results_does_not_emit_event(
+    fake_settings, monkeypatch,
+) -> None:
+    """A provider returning [] must produce 'No results found.' for the LLM
+    AND not push an empty card stack to the frontend."""
+    fake = _FakeProvider(results=[])
+    import recruiter.sourcing.provider as provider_mod
+    monkeypatch.setattr(provider_mod, "resolve", lambda _s: fake)
+    import recruiter.agent.tools as tools_mod
+    async def _load_settings(_session): return fake_settings
+    monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
+
+    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    handler = get_tool_handler("search_linkedin")
+    result = await handler(ctx, {"query": "zzznoresults"})
+    assert result["summary"] == "No results found."
+    assert ctx.frontend_events == []

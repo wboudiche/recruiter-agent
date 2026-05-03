@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ApiError } from "@/lib/api";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 
 export function SourcingTab() {
@@ -38,6 +40,10 @@ export function SourcingTab() {
       onSuccess: () => {
         setApiKey("");
         setGhToken("");
+        toast.success("Sourcing settings saved");
+      },
+      onError: (err) => {
+        toast.error(err instanceof ApiError ? err.detail : "Save failed");
       },
     });
   }

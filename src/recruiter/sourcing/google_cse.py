@@ -1,7 +1,6 @@
 import httpx
 
-from recruiter.config import get_config
-from recruiter.crypto import SecretCipher
+from recruiter.crypto import settings_cipher
 from recruiter.sourcing.provider import SearchError, SearchResult, register
 
 
@@ -72,20 +71,6 @@ class GoogleCSEProvider:
         return out
 
 
-def _settings_cipher() -> SecretCipher:
-    raw = get_config().settings_key
-    if len(raw) == 64:
-        try:
-            key = bytes.fromhex(raw)
-        except ValueError as exc:
-            raise RuntimeError("RECRUITER_SETTINGS_KEY must be valid hex when 64 chars") from exc
-    else:
-        key = raw.encode("utf-8")
-    if len(key) != 32:
-        raise RuntimeError("RECRUITER_SETTINGS_KEY must be 32 bytes (or 64 hex chars)")
-    return SecretCipher(key)
-
-
 @register("google_cse")
 def _factory(settings) -> GoogleCSEProvider:
     if not settings.search_api_key_enc or not settings.search_engine_id:
@@ -93,5 +78,5 @@ def _factory(settings) -> GoogleCSEProvider:
             "google_cse requires both search_api_key and search_engine_id",
             transient=False,
         )
-    api_key = _settings_cipher().decrypt(settings.search_api_key_enc)
+    api_key = settings_cipher().decrypt(settings.search_api_key_enc)
     return GoogleCSEProvider(api_key=api_key, cse_id=settings.search_engine_id)

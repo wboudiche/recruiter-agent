@@ -9,8 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from recruiter.agent.events import tool_search_results_event
 from recruiter.agent.types import ToolDef
 from recruiter.agent.undo import UndoStore
-from recruiter.config import get_config
-from recruiter.crypto import SecretCipher
+from typing import Literal
+
+from recruiter.crypto import settings_cipher
 from recruiter.models import Application, Candidate, Job, Stage, SettingsRow
 from recruiter.sourcing import provider as sourcing_provider
 from recruiter.sourcing.github import GitHubSearchClient
@@ -152,9 +153,7 @@ async def _load_settings_for_tool(session) -> SettingsRow | None:
 def _decrypt_github_token(settings: SettingsRow) -> str | None:
     if not settings.github_token_enc:
         return None
-    raw = get_config().settings_key
-    key = bytes.fromhex(raw) if len(raw) == 64 else raw.encode("utf-8")
-    return SecretCipher(key).decrypt(settings.github_token_enc)
+    return settings_cipher().decrypt(settings.github_token_enc)
 
 
 def _format_results_for_llm(results: list[SearchResult]) -> str:
@@ -168,7 +167,12 @@ def _format_results_for_llm(results: list[SearchResult]) -> str:
 
 
 async def _run_provider_search(
-    ctx: "ToolContext", *, query: str, limit: int, source: str, tool_name: str,
+    ctx: "ToolContext",
+    *,
+    query: str,
+    limit: int,
+    source: Literal["linkedin", "github", "web"],
+    tool_name: str,
 ) -> dict:
     settings = await _load_settings_for_tool(ctx.session)
     if settings is None:
@@ -184,12 +188,12 @@ async def _run_provider_search(
         return {"summary": f"Search isn't configured correctly: {e}. Set it in Settings → Sourcing."}
     # Override per-card source from the provider's generic value.
     for r in results:
-        r.source = source  # type: ignore[assignment]
+        r.source = source
     cards = [{"name": r.name, "url": r.url, "snippet": r.snippet, "source": r.source}
              for r in results]
     if cards:
         ctx.frontend_events.append(tool_search_results_event(
-            tool_name=tool_name, source=source, results=cards,  # type: ignore[arg-type]
+            tool_name=tool_name, source=source, results=cards,
         ))
     return {"summary": _format_results_for_llm(results)}
 
