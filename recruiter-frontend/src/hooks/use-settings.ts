@@ -14,6 +14,10 @@ export interface SettingsRead {
   recruiter_name: string | null;
   recruiter_email: string | null;
   monthly_llm_spend_cap_usd: number | null;
+  search_provider: string | null;
+  search_engine_id: string | null;
+  has_search_api_key: boolean;
+  has_github_token: boolean;
 }
 
 export interface SmtpConfigInput {
@@ -35,6 +39,10 @@ export interface SettingsUpdate {
   recruiter_name?: string;
   recruiter_email?: string;
   monthly_llm_spend_cap_usd?: number;
+  search_provider?: string;
+  search_api_key?: string;
+  search_engine_id?: string;
+  github_token?: string;
 }
 
 export function useSettings() {

@@ -53,6 +53,10 @@ def _to_read(row: SettingsRow) -> SettingsRead:
         recruiter_name=row.recruiter_name,
         recruiter_email=row.recruiter_email,
         monthly_llm_spend_cap_usd=row.monthly_llm_spend_cap_usd,
+        search_provider=row.search_provider,
+        search_engine_id=row.search_engine_id,
+        has_search_api_key=bool(row.search_api_key_enc),
+        has_github_token=bool(row.github_token_enc),
     )
 
 
@@ -87,6 +91,14 @@ async def update_settings(
         row.recruiter_email = payload.recruiter_email
     if payload.monthly_llm_spend_cap_usd is not None:
         row.monthly_llm_spend_cap_usd = payload.monthly_llm_spend_cap_usd
+    if payload.search_provider is not None:
+        row.search_provider = payload.search_provider
+    if payload.search_api_key is not None:
+        row.search_api_key_enc = cipher.encrypt(payload.search_api_key)
+    if payload.search_engine_id is not None:
+        row.search_engine_id = payload.search_engine_id
+    if payload.github_token is not None:
+        row.github_token_enc = cipher.encrypt(payload.github_token)
     await session.commit()
     await session.refresh(row)
     return _to_read(row)

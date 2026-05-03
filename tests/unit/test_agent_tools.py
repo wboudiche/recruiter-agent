@@ -92,13 +92,14 @@ async def test_list_other_applications_excludes_self(db_session_with_schema: Asy
     assert result[0]["stage"] == "extracting"
 
 
-def test_tools_registry_lists_eight_tools() -> None:
+def test_tools_registry_lists_all_tools() -> None:
     names = [t.name for t in TOOLS]
     expected = {"get_candidate", "get_application", "get_score_breakdown", "get_job",
                 "list_other_applications_for_candidate", "save_note",
-                "validate_application", "reject_application"}
+                "validate_application", "reject_application",
+                "search_linkedin", "search_github", "search_web"}
     assert set(names) == expected
-    assert len(names) == 8
+    assert len(names) == 11
 
 
 @pytest.mark.asyncio

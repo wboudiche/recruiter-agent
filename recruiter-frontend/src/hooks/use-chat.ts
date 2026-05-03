@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import type { SearchResult } from "@/components/applications/search-result-card";
 import { api, ApiError } from "@/lib/api";
 import { parseNdjsonStream } from "@/lib/ndjson";
 import { queryKeys } from "@/lib/query-keys";
@@ -24,12 +25,14 @@ type StreamEvent =
   | { type: "tool_call_result"; id: string; name: string; result: Record<string, unknown> }
   | { type: "message_delta"; text: string }
   | { type: "message_done"; id: number }
+  | { type: "tool.search_results"; tool_name: string; source: "linkedin" | "github" | "web"; results: SearchResult[] }
   | { type: "error"; detail: string; phase: string };
 
 export function useChat(applicationId: number) {
   const qc = useQueryClient();
   const [isStreaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<Record<string, SearchResult[]>>({});
 
   const history = useQuery({
     queryKey: queryKeys.chat(applicationId),
@@ -48,6 +51,7 @@ export function useChat(applicationId: number) {
     // message_delta) get replaced by the real assistant/tool rows that
     // appear when the canonical history reloads.
     let nextSyntheticId = -1;
+    let lastToolCallId: string | null = null;
     const key = queryKeys.chat(applicationId);
     function appendOptimistic(row: ChatRow) {
       qc.setQueryData<ChatRow[]>(key, (prev) => [...(prev ?? []), row]);
@@ -85,6 +89,7 @@ export function useChat(applicationId: number) {
             });
             break;
           case "tool_call_result":
+            lastToolCallId = ev.id;
             appendOptimistic({
               id: nextSyntheticId--, application_id: applicationId, role: "tool",
               content: null, tool_calls: null,
@@ -102,6 +107,15 @@ export function useChat(applicationId: number) {
           case "message_done":
             // No-op — invalidation in `finally` swaps the optimistic
             // rows for canonical server-side rows.
+            break;
+          case "tool.search_results":
+            if (lastToolCallId) {
+              const id = lastToolCallId;
+              setSearchResults((prev) => ({
+                ...prev,
+                [id]: [...(prev[id] ?? []), ...ev.results],
+              }));
+            }
             break;
           case "error":
             setError(ev.detail);
@@ -129,5 +143,5 @@ export function useChat(applicationId: number) {
   });
 
   const messages: ChatRow[] = history.data ?? [];
-  return { messages, sendMessage, isStreaming, error, undo: undo.mutate };
+  return { messages, sendMessage, isStreaming, error, undo: undo.mutate, searchResults };
 }

@@ -1,14 +1,20 @@
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from recruiter.agent.events import tool_search_results_event
 from recruiter.agent.types import ToolDef
 from recruiter.agent.undo import UndoStore
-from recruiter.models import Application, Candidate, Job, Stage
+from recruiter.config import get_config
+from recruiter.crypto import SecretCipher
+from recruiter.models import Application, Candidate, Job, Stage, SettingsRow
+from recruiter.sourcing import provider as sourcing_provider
+from recruiter.sourcing.github import GitHubSearchClient
+from recruiter.sourcing.provider import SearchError, SearchResult
 
 
 @dataclass
@@ -23,6 +29,7 @@ class ToolContext:
     session: AsyncSession
     application_id: int
     undo_store: UndoStore
+    frontend_events: list[dict] = field(default_factory=list)
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict | list]]
@@ -136,6 +143,106 @@ async def _list_other(ctx: ToolContext, args: dict) -> list[dict]:
     ]
 
 
+async def _load_settings_for_tool(session) -> SettingsRow | None:
+    """Load the singleton Settings row. Tools call this rather than poking
+    SettingsRow directly so tests have one seam to monkeypatch."""
+    return await session.get(SettingsRow, 1)
+
+
+def _decrypt_github_token(settings: SettingsRow) -> str | None:
+    if not settings.github_token_enc:
+        return None
+    raw = get_config().settings_key
+    key = bytes.fromhex(raw) if len(raw) == 64 else raw.encode("utf-8")
+    return SecretCipher(key).decrypt(settings.github_token_enc)
+
+
+def _format_results_for_llm(results: list[SearchResult]) -> str:
+    if not results:
+        return "No results found."
+    lines = [f"Found {len(results)} result(s):"]
+    for i, r in enumerate(results, 1):
+        snippet = r.snippet[:120] + "…" if len(r.snippet) > 120 else r.snippet
+        lines.append(f"{i}. {r.name} — {r.url} — {snippet}")
+    return "\n".join(lines)
+
+
+async def _run_provider_search(
+    ctx: "ToolContext", *, query: str, limit: int, source: str, tool_name: str,
+) -> dict:
+    settings = await _load_settings_for_tool(ctx.session)
+    if settings is None:
+        return {"summary": "Search is not configured. Set a provider in Settings → Sourcing."}
+    provider = sourcing_provider.resolve(settings)
+    if provider is None:
+        return {"summary": "Search is not configured. Set a provider in Settings → Sourcing."}
+    try:
+        results = await provider.search(query, limit)
+    except SearchError as e:
+        if e.transient:
+            return {"summary": f"Search temporarily unavailable: {e}."}
+        return {"summary": f"Search isn't configured correctly: {e}. Set it in Settings → Sourcing."}
+    # Override per-card source from the provider's generic value.
+    for r in results:
+        r.source = source  # type: ignore[assignment]
+    cards = [{"name": r.name, "url": r.url, "snippet": r.snippet, "source": r.source}
+             for r in results]
+    if cards:
+        ctx.frontend_events.append(tool_search_results_event(
+            tool_name=tool_name, source=source, results=cards,  # type: ignore[arg-type]
+        ))
+    return {"summary": _format_results_for_llm(results)}
+
+
+@_register("search_linkedin")
+async def _search_linkedin(ctx: "ToolContext", args: dict) -> dict:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {"summary": "query is required"}
+    limit = max(1, min(int(args.get("limit") or 5), 10))
+    return await _run_provider_search(
+        ctx, query=f"site:linkedin.com/in/ {query}", limit=limit,
+        source="linkedin", tool_name="search_linkedin",
+    )
+
+
+@_register("search_web")
+async def _search_web(ctx: "ToolContext", args: dict) -> dict:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {"summary": "query is required"}
+    limit = max(1, min(int(args.get("limit") or 5), 10))
+    return await _run_provider_search(
+        ctx, query=query, limit=limit, source="web", tool_name="search_web",
+    )
+
+
+@_register("search_github")
+async def _search_github(ctx: "ToolContext", args: dict) -> dict:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {"summary": "query is required"}
+    limit = max(1, min(int(args.get("limit") or 5), 30))
+    settings = await _load_settings_for_tool(ctx.session)
+    token = _decrypt_github_token(settings) if settings else None
+    client = GitHubSearchClient(token=token)
+    try:
+        results = await client.search_users(query, limit)
+    except SearchError as e:
+        if e.transient:
+            return {"summary": f"GitHub search temporarily unavailable: {e}."}
+        return {"summary": f"GitHub search misconfigured: {e}."}
+    finally:
+        await client.aclose()
+    cards = [{"name": r.name, "url": r.url, "snippet": r.snippet, "source": "github"}
+             for r in results]
+    if cards:
+        ctx.frontend_events.append(tool_search_results_event(
+            tool_name="search_github", source="github", results=cards,
+        ))
+    return {"summary": _format_results_for_llm(results)}
+
+
 # JSON Schema definitions — input_schema=={"type":"object","properties":{}} for no-arg tools.
 _NO_ARGS = {"type": "object", "properties": {}, "additionalProperties": False}
 
@@ -155,6 +262,45 @@ TOOLS: list[ToolDef] = [
     ToolDef(name="list_other_applications_for_candidate",
             description="List the same candidate's applications to other jobs (excludes this one).",
             input_schema=_NO_ARGS),
+    ToolDef(
+        name="search_linkedin",
+        description="Search the open web for LinkedIn profiles matching the query. Returns up to 'limit' result cards (name, URL, snippet). The user can click 'Add' on a card to add the candidate.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Free-text search like 'senior Rust engineer Berlin'."},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="search_github",
+        description="Search GitHub for users matching the query. Returns up to 'limit' user cards.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 30, "default": 5},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
+    ToolDef(
+        name="search_web",
+        description="Search the open web (any site) for the query. Returns up to 'limit' web result cards. Use for personal sites, conference talks, blog posts.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 10, "default": 5},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
