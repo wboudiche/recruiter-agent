@@ -49,7 +49,7 @@ export default function ApplicationDetail() {
             Chat is available once extraction finishes.
           </div>
         ) : (
-          <ChatPanel applicationId={id} />
+          <ChatPanel applicationId={id} jobId={application.data.job_id} />
         )}
       </aside>
     </div>

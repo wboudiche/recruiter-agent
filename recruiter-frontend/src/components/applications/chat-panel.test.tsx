@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -26,7 +26,7 @@ describe("ChatPanel", () => {
         HttpResponse.json([]),
       ),
     );
-    render(<ChatPanel applicationId={1} />, { wrapper: wrap() });
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
     await waitFor(() =>
       expect(screen.getByText(/ask anything/i)).toBeInTheDocument(),
     );
@@ -45,7 +45,7 @@ describe("ChatPanel", () => {
         ]),
       ),
     );
-    render(<ChatPanel applicationId={1} />, { wrapper: wrap() });
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
     await waitFor(() => expect(screen.getByText("hi")).toBeInTheDocument());
     expect(screen.getByText("hello")).toBeInTheDocument();
   });
@@ -61,7 +61,7 @@ describe("ChatPanel", () => {
         ]),
       ),
     );
-    render(<ChatPanel applicationId={1} />, { wrapper: wrap() });
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
     await waitFor(() => expect(screen.getByText(/get_candidate/)).toBeInTheDocument());
     expect(screen.queryByText(/Marie/)).not.toBeInTheDocument();
     await userEvent.click(screen.getByText(/get_candidate/));
@@ -89,9 +89,74 @@ describe("ChatPanel", () => {
         });
       }),
     );
-    render(<ChatPanel applicationId={1} />, { wrapper: wrap() });
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
     const button = await screen.findByRole("button", { name: /undo/i });
     await userEvent.click(button);
     await waitFor(() => expect(undoCalls).toBe(1));
+  });
+});
+
+describe("ChatPanel — tool.search_results rendering", () => {
+  it("renders SearchResultCards inline when the stream emits tool.search_results", async () => {
+    let postCalled = false;
+    server.use(
+      http.get("http://localhost:8000/api/applications/42/chat", () => {
+        if (!postCalled) return HttpResponse.json([]);
+        // After the POST stream finishes, react-query invalidates and refetches.
+        // Return the canonical chat rows so the tool row (and its inline
+        // SearchResultCards keyed by tool_call_id) stays mounted.
+        return HttpResponse.json([
+          { id: 1, application_id: 42, role: "user", content: "find rust devs",
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:00Z" },
+          { id: 2, application_id: 42, role: "tool", content: null, tool_calls: null,
+            tool_call_id: "t1", tool_name: "search_linkedin",
+            tool_result: { summary: "Found 1." },
+            created_at: "2026-05-01T00:00:01Z" },
+          { id: 3, application_id: 42, role: "assistant", content: "Found 1.",
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:02Z" },
+        ]);
+      }),
+      http.post("http://localhost:8000/api/applications/42/chat", () => {
+        postCalled = true;
+        const events = [
+          { type: "message", role: "user", id: 1, content: "find rust devs" },
+          { type: "tool_call_start", id: "t1", name: "search_linkedin", arguments: { query: "rust" } },
+          { type: "tool_call_result", id: "t1", name: "search_linkedin", result: { summary: "Found 1." } },
+          {
+            type: "tool.search_results",
+            tool_name: "search_linkedin",
+            source: "linkedin",
+            results: [{
+              name: "Alice Doe",
+              url: "https://www.linkedin.com/in/alice/",
+              snippet: "Rust dev",
+              source: "linkedin",
+            }],
+          },
+          { type: "message_delta", text: "Found 1." },
+          { type: "message_done", id: 2 },
+        ];
+        const ndjson = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+        return new HttpResponse(ndjson, {
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }),
+    );
+
+    const Wrapper = wrap();
+    render(
+      <Wrapper>
+        <ChatPanel applicationId={42} jobId={1} />
+      </Wrapper>,
+    );
+
+    const input = await screen.findByPlaceholderText(/ask anything/i);
+    fireEvent.change(input, { target: { value: "find rust devs" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await screen.findByText("Alice Doe", undefined, { timeout: 3000 });
+    expect(screen.getByRole("button", { name: /add/i })).toBeInTheDocument();
   });
 });

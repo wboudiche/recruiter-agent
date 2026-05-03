@@ -4,13 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ChatRow, useChat } from "@/hooks/use-chat";
+import { SearchResultCard, type SearchResult } from "./search-result-card";
 
 interface Props {
   applicationId: number;
+  jobId: number;
 }
 
-export function ChatPanel({ applicationId }: Props) {
-  const { messages, sendMessage, isStreaming, error, undo } = useChat(applicationId);
+export function ChatPanel({ applicationId, jobId }: Props) {
+  const { messages, sendMessage, isStreaming, error, undo, searchResults } = useChat(applicationId);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -48,7 +50,13 @@ export function ChatPanel({ applicationId }: Props) {
           <p className="text-sm text-muted-foreground">Ask anything about this candidate.</p>
         )}
         {messages.map((m) => (
-          <MessageRow key={m.id} row={m} onUndo={(t) => undo(t)} />
+          <MessageRow
+            key={m.id}
+            row={m}
+            onUndo={(t) => undo(t)}
+            searchResults={searchResults}
+            jobId={jobId}
+          />
         ))}
         {isStreaming && (
           <p className="text-xs text-muted-foreground animate-pulse">Thinking…</p>
@@ -82,7 +90,14 @@ export function ChatPanel({ applicationId }: Props) {
   );
 }
 
-function MessageRow({ row, onUndo }: { row: ChatRow; onUndo: (token: string) => void }) {
+function MessageRow({
+  row, onUndo, searchResults, jobId,
+}: {
+  row: ChatRow;
+  onUndo: (token: string) => void;
+  searchResults: Record<string, SearchResult[]>;
+  jobId: number;
+}) {
   if (row.role === "user") {
     return (
       <div className="flex justify-end">
@@ -116,7 +131,19 @@ function MessageRow({ row, onUndo }: { row: ChatRow; onUndo: (token: string) => 
     );
   }
   if (row.role === "tool") {
-    return <ToolResultCard row={row} onUndo={onUndo} />;
+    const cards = row.tool_call_id ? searchResults[row.tool_call_id] : undefined;
+    return (
+      <div className="space-y-2">
+        <ToolResultCard row={row} onUndo={onUndo} />
+        {cards && cards.length > 0 && (
+          <div className="space-y-2 pl-4 border-l border-l-primary/30">
+            {cards.map((c) => (
+              <SearchResultCard key={c.url} result={c} jobId={jobId} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
   return null;
 }
