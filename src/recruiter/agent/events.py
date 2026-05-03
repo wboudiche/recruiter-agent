@@ -26,6 +26,23 @@ def error_event(*, detail: str, phase: Literal["llm", "tool", "persist", "agent"
     return {"type": "error", "detail": detail, "phase": phase}
 
 
+def tool_search_results_event(
+    *,
+    tool_name: str,
+    source: Literal["linkedin", "github", "web"],
+    results: list[dict],
+) -> dict:
+    """Frontend-only event carrying structured search-result cards.
+    NOT fed back to the LLM (the tool handler returns a text summary
+    separately for that)."""
+    return {
+        "type": "tool.search_results",
+        "tool_name": tool_name,
+        "source": source,
+        "results": results,
+    }
+
+
 def serialize_event(event: dict) -> str:
     """One JSON object per line, trailing newline; non-ASCII passes through."""
     return json.dumps(event, ensure_ascii=False) + "\n"
