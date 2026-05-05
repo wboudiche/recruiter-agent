@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -30,6 +30,12 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { setTheme } = useTheme();
   const [query, setQuery] = useState("");
+
+  // Reset the search input every time the palette closes so a stale filter
+  // from the previous session doesn't hide items the next time it opens.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   const jobs = useQuery({
     queryKey: queryKeys.jobs(),
