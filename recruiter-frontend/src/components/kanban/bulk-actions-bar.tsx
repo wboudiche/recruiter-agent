@@ -9,7 +9,7 @@ interface Props {
   selected: Set<number>;
   applications: ApplicationRead[];
   jobId: number;
-  onClear: () => void;
+  setSelected: (next: Set<number>) => void;
 }
 
 async function patchOne(id: number, stage: "validated" | "rejected"): Promise<number> {
@@ -17,51 +17,67 @@ async function patchOne(id: number, stage: "validated" | "rejected"): Promise<nu
   return id;
 }
 
-export function BulkActionsBar({ selected, applications, jobId, onClear }: Props) {
+interface RunArgs {
+  selected: Set<number>;
+  stage: "validated" | "rejected";
+}
+
+interface RunResult {
+  failedIds: number[];
+  failures: PromiseRejectedResult[];
+}
+
+async function runBulk({ selected, stage }: RunArgs): Promise<RunResult> {
+  const ids = [...selected];
+  const results = await Promise.allSettled(ids.map((id) => patchOne(id, stage)));
+  const failedIds: number[] = [];
+  const failures: PromiseRejectedResult[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      failedIds.push(ids[i]);
+      failures.push(r);
+    }
+  });
+  return { failedIds, failures };
+}
+
+export function BulkActionsBar({ selected, applications, jobId, setSelected }: Props) {
   const qc = useQueryClient();
 
   const validateMut = useMutation({
-    mutationFn: async () => {
-      return Promise.allSettled(
-        [...selected].map((id) => patchOne(id, "validated"))
-      );
-    },
-    onSettled: (results) => {
+    mutationFn: () => runBulk({ selected, stage: "validated" }),
+    onSettled: (res) => {
       qc.invalidateQueries({ queryKey: queryKeys.jobApplications(jobId) });
-      const failures = (results ?? []).filter((r) => r.status === "rejected");
-      if (failures.length === 0) {
+      if (!res) return;
+      if (res.failedIds.length === 0) {
         toast.success(`Validated ${selected.size} application${selected.size === 1 ? "" : "s"}`);
-        onClear();
+        setSelected(new Set());
       } else {
-        for (const r of failures) {
-          if (r.status === "rejected") {
-            const detail = r.reason instanceof ApiError ? r.reason.detail : "Validate failed";
-            toast.error(detail);
-          }
+        for (const f of res.failures) {
+          const detail = f.reason instanceof ApiError ? f.reason.detail : "Validate failed";
+          toast.error(detail);
         }
+        // Narrow the selection to the ids that actually failed so the user
+        // can retry only those.
+        setSelected(new Set(res.failedIds));
       }
     },
   });
 
   const rejectMut = useMutation({
-    mutationFn: async () => {
-      return Promise.allSettled(
-        [...selected].map((id) => patchOne(id, "rejected"))
-      );
-    },
-    onSettled: (results) => {
+    mutationFn: () => runBulk({ selected, stage: "rejected" }),
+    onSettled: (res) => {
       qc.invalidateQueries({ queryKey: queryKeys.jobApplications(jobId) });
-      const failures = (results ?? []).filter((r) => r.status === "rejected");
-      if (failures.length === 0) {
+      if (!res) return;
+      if (res.failedIds.length === 0) {
         toast.success(`Rejected ${selected.size} application${selected.size === 1 ? "" : "s"}`);
-        onClear();
+        setSelected(new Set());
       } else {
-        for (const r of failures) {
-          if (r.status === "rejected") {
-            const detail = r.reason instanceof ApiError ? r.reason.detail : "Reject failed";
-            toast.error(detail);
-          }
+        for (const f of res.failures) {
+          const detail = f.reason instanceof ApiError ? f.reason.detail : "Reject failed";
+          toast.error(detail);
         }
+        setSelected(new Set(res.failedIds));
       }
     },
   });
@@ -101,7 +117,12 @@ export function BulkActionsBar({ selected, applications, jobId, onClear }: Props
       >
         Reject
       </Button>
-      <Button size="sm" variant="ghost" onClick={onClear} disabled={pending}>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => setSelected(new Set())}
+        disabled={pending}
+      >
         Clear
       </Button>
     </div>

@@ -7,10 +7,12 @@ interface Props {
   applications: ApplicationRead[];
 }
 
-function colorForScore(score: number): string {
-  if (score >= 80) return "#16a34a";   // green-600
-  if (score >= 50) return "#ca8a04";   // yellow-600
-  return "#dc2626";                    // red-600
+// `fill="currentColor"` lets us drive the rect color from the rect's CSS color
+// (the Tailwind `text-*` class), which gives us automatic dark-mode handling.
+function classForScore(score: number): string {
+  if (score >= 80) return "text-green-600 dark:text-green-500";
+  if (score >= 50) return "text-yellow-600 dark:text-yellow-500";
+  return "text-red-600 dark:text-red-500";
 }
 
 export function ScoreDistributionStrip({ applications }: Props) {
@@ -33,7 +35,8 @@ export function ScoreDistributionStrip({ applications }: Props) {
             y={0}
             width={TICK_WIDTH}
             height={STRIP_HEIGHT}
-            fill={colorForScore(score)}
+            fill="currentColor"
+            className={classForScore(score)}
             opacity={app.score === null ? 0.5 : 1}
           >
             <title>{`Candidate #${app.candidate_id}: ${app.score ?? "—"}`}</title>

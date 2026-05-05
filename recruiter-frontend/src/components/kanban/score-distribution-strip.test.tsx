@@ -30,10 +30,13 @@ describe("ScoreDistributionStrip", () => {
     const { container } = render(
       <ScoreDistributionStrip applications={[mkApp(1, 90), mkApp(2, 60), mkApp(3, 30)]} />
     );
-    const fills = Array.from(container.querySelectorAll("rect")).map(
-      (r) => r.getAttribute("fill")
+    // All rects use fill="currentColor" so the band is encoded in the
+    // className (text-{green|yellow|red}-*); three distinct band classes.
+    const classes = Array.from(container.querySelectorAll("rect")).map(
+      (r) => r.getAttribute("class") ?? "",
     );
-    // Three distinct fills, one per band.
-    expect(new Set(fills).size).toBe(3);
+    expect(classes.some((c) => c.includes("text-green"))).toBe(true);
+    expect(classes.some((c) => c.includes("text-yellow"))).toBe(true);
+    expect(classes.some((c) => c.includes("text-red"))).toBe(true);
   });
 });

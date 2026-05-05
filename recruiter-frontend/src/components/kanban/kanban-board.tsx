@@ -112,7 +112,7 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
           selected={selection.selected}
           applications={applications}
           jobId={jobId}
-          onClear={selection.clear}
+          setSelected={selection.replace}
         />
       )}
     </>

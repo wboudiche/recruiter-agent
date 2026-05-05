@@ -3,7 +3,7 @@ import { useCallback, useState } from "react";
 export interface SelectionApi {
   selected: Set<number>;
   toggle: (id: number) => void;
-  selectMany: (ids: number[]) => void;
+  replace: (next: Set<number>) => void;
   clear: () => void;
 }
 
@@ -19,15 +19,11 @@ export function useKanbanSelection(): SelectionApi {
     });
   }, []);
 
-  const selectMany = useCallback((ids: number[]) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) next.add(id);
-      return next;
-    });
+  const replace = useCallback((next: Set<number>) => {
+    setSelected(new Set(next));
   }, []);
 
   const clear = useCallback(() => setSelected(new Set()), []);
 
-  return { selected, toggle, selectMany, clear };
+  return { selected, toggle, replace, clear };
 }

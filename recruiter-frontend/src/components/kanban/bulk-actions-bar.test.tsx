@@ -36,7 +36,12 @@ describe("BulkActionsBar", () => {
     const Wrapper = wrap();
     const { container } = render(
       <Wrapper>
-        <BulkActionsBar selected={new Set()} applications={[]} jobId={1} onClear={() => {}} />
+        <BulkActionsBar
+          selected={new Set()}
+          applications={[]}
+          jobId={1}
+          setSelected={() => {}}
+        />
       </Wrapper>
     );
     expect(container.firstChild).toBeNull();
@@ -50,7 +55,7 @@ describe("BulkActionsBar", () => {
           selected={new Set([1, 2])}
           applications={[mkApp(1), mkApp(2)]}
           jobId={1}
-          onClear={() => {}}
+          setSelected={() => {}}
         />
       </Wrapper>
     );
@@ -68,7 +73,7 @@ describe("BulkActionsBar", () => {
         return HttpResponse.json({ id: Number(params.id), stage: "validated" });
       }),
     );
-    let cleared = false;
+    let lastSet: Set<number> | null = null;
     const Wrapper = wrap();
     render(
       <Wrapper>
@@ -76,12 +81,40 @@ describe("BulkActionsBar", () => {
           selected={new Set([1, 2])}
           applications={[mkApp(1), mkApp(2)]}
           jobId={1}
-          onClear={() => { cleared = true; }}
+          setSelected={(s) => { lastSet = s; }}
         />
       </Wrapper>
     );
     fireEvent.click(screen.getByRole("button", { name: /validate/i }));
     await waitFor(() => expect(calls.sort()).toEqual([1, 2]));
-    await waitFor(() => expect(cleared).toBe(true));
+    await waitFor(() => expect(lastSet?.size).toBe(0));
+  });
+
+  it("partial failure narrows selection to the failed ids", async () => {
+    server.use(
+      http.patch("http://localhost:8000/api/applications/:id", ({ params }) => {
+        const id = Number(params.id);
+        // App 1 succeeds, app 2 fails.
+        if (id === 1) return HttpResponse.json({ id, stage: "validated" });
+        return HttpResponse.json({ detail: "boom" }, { status: 500 });
+      }),
+    );
+    let lastSet: Set<number> | null = null;
+    const Wrapper = wrap();
+    render(
+      <Wrapper>
+        <BulkActionsBar
+          selected={new Set([1, 2])}
+          applications={[mkApp(1), mkApp(2)]}
+          jobId={1}
+          setSelected={(s) => { lastSet = s; }}
+        />
+      </Wrapper>
+    );
+    fireEvent.click(screen.getByRole("button", { name: /validate/i }));
+    await waitFor(() => {
+      expect(lastSet).not.toBeNull();
+      expect([...(lastSet ?? new Set())]).toEqual([2]);
+    });
   });
 });

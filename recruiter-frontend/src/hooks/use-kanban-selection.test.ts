@@ -16,17 +16,19 @@ describe("useKanbanSelection", () => {
     expect(result.current.selected.has(1)).toBe(false);
   });
 
-  it("selectMany adds all (idempotent)", () => {
+  it("replace overwrites the selection", () => {
     const { result } = renderHook(() => useKanbanSelection());
-    act(() => result.current.selectMany([1, 2, 3]));
-    expect(result.current.selected.size).toBe(3);
-    act(() => result.current.selectMany([2, 3, 4]));
-    expect(result.current.selected.size).toBe(4);
+    act(() => result.current.toggle(1));
+    act(() => result.current.toggle(2));
+    act(() => result.current.replace(new Set([3, 4])));
+    expect(result.current.selected.has(1)).toBe(false);
+    expect(result.current.selected.has(2)).toBe(false);
+    expect([...result.current.selected].sort()).toEqual([3, 4]);
   });
 
   it("clear empties", () => {
     const { result } = renderHook(() => useKanbanSelection());
-    act(() => result.current.selectMany([1, 2, 3]));
+    act(() => result.current.replace(new Set([1, 2, 3])));
     act(() => result.current.clear());
     expect(result.current.selected.size).toBe(0);
   });
