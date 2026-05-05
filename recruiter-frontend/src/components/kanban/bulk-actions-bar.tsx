@@ -76,7 +76,7 @@ export function BulkActionsBar({ selected, applications, jobId, onClear }: Props
   const pending = validateMut.isPending || rejectMut.isPending;
 
   return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-background border shadow-lg rounded-full px-4 py-2 text-sm">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-background border shadow-lg rounded-full px-4 py-2 text-sm">
       <span className="font-medium">{selected.size} selected</span>
       <Button
         size="sm"
