@@ -82,7 +82,12 @@ export function SearchTab({ jobId }: Props) {
       <Input
         placeholder="senior Rust engineer Berlin"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          // Editing the query invalidates the previous "no results" message
+          // so it doesn't linger across distinct searches.
+          if (hasSearched) setHasSearched(false);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") onSearch();
         }}

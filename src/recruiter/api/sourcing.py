@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends
@@ -9,6 +10,8 @@ from recruiter.api.deps import get_session, require_user
 from recruiter.models import SettingsRow
 from recruiter.sourcing.provider import SearchError, SearchResult
 from recruiter.sourcing.search import search_one_source
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/api/sourcing", tags=["sourcing"], dependencies=[Depends(require_user)])
@@ -31,7 +34,7 @@ class SearchResultOut(BaseModel):
 
 
 class SearchErrorItem(BaseModel):
-    source: str
+    source: SourceLiteral
     reason: str
     transient: bool
 
@@ -71,6 +74,11 @@ async def search(
                 source=source, reason=str(outcome), transient=outcome.transient,
             ))
         elif isinstance(outcome, Exception):
+            logger.exception(
+                "sourcing.search unexpected error",
+                exc_info=outcome,
+                extra={"source": source},
+            )
             errors.append(SearchErrorItem(
                 source=source, reason=f"internal error: {type(outcome).__name__}", transient=True,
             ))
