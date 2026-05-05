@@ -1,14 +1,16 @@
 import { useDroppable } from "@dnd-kit/core";
 import { CandidateCard } from "./candidate-card";
+import type { Density } from "./kanban-density-toggle";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 interface Props {
   title: string;
   stage: ApplicationRead["stage"];
   applications: ApplicationRead[];
+  density?: Density;
 }
 
-export function KanbanColumn({ title, stage, applications }: Props) {
+export function KanbanColumn({ title, stage, applications, density = "comfortable" }: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${stage}`,
     data: { stage },
@@ -22,9 +24,9 @@ export function KanbanColumn({ title, stage, applications }: Props) {
         <h3 className="text-sm font-medium">{title}</h3>
         <span className="text-xs text-muted-foreground">{applications.length}</span>
       </header>
-      <div className="flex-1 space-y-2">
+      <div className={density === "compact" ? "flex-1 space-y-1" : "flex-1 space-y-2"}>
         {applications.map((app) => (
-          <CandidateCard key={app.id} application={app} />
+          <CandidateCard key={app.id} application={app} density={density} />
         ))}
       </div>
     </div>

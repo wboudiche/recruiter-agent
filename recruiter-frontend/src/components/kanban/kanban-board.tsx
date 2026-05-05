@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { KanbanColumn } from "./kanban-column";
+import type { Density } from "./kanban-density-toggle";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 const COLUMN_ORDER: { stage: ApplicationRead["stage"]; title: string }[] = [
@@ -26,9 +27,10 @@ interface Props {
   applications: ApplicationRead[];
   jobId?: number;
   showRejected?: boolean;
+  density?: Density;
 }
 
-export function KanbanBoard({ applications, jobId, showRejected = false }: Props) {
+export function KanbanBoard({ applications, jobId, showRejected = false, density = "comfortable" }: Props) {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();
 
@@ -94,6 +96,7 @@ export function KanbanBoard({ applications, jobId, showRejected = false }: Props
             title={c.title}
             stage={c.stage}
             applications={grouped.get(c.stage) ?? []}
+            density={density}
           />
         ))}
       </div>
