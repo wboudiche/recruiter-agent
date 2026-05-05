@@ -71,7 +71,7 @@ async def test_search_linkedin_returns_error_text_when_provider_unconfigured(
     ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
     handler = get_tool_handler("search_linkedin")
     result = await handler(ctx, {"query": "x"})
-    assert "not configured" in result["summary"].lower()
+    assert "isn't configured" in result["summary"].lower() or "not configured" in result["summary"].lower()
     assert ctx.frontend_events == []  # no event when nothing was searched
 
 
@@ -112,9 +112,10 @@ async def test_search_github_uses_github_client_not_provider(
         async def aclose(self): pass
 
     import recruiter.agent.tools as tools_mod
+    import recruiter.sourcing.search as search_mod
     async def _load_settings(_session): return fake_settings  # github_token_enc=None
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
-    monkeypatch.setattr(tools_mod, "GitHubSearchClient", _FakeGH)
+    monkeypatch.setattr(search_mod, "GitHubSearchClient", _FakeGH)
 
     ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
     handler = get_tool_handler("search_github")
