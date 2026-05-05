@@ -24,6 +24,7 @@ GATED = [
     ("GET",   "/api/settings"),
     ("PUT",   "/api/settings"),
     ("GET",   "/api/events"),
+    ("POST",  "/api/sourcing/search"),
 ]
 
 

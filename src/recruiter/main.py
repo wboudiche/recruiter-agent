@@ -4,7 +4,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from recruiter.api import (
-    applications, auth, candidates, chat, events, jobs, notifications, settings,
+    applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing,
 )
 from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
@@ -34,6 +34,7 @@ app.include_router(applications.router)
 app.include_router(notifications.router)
 app.include_router(settings.router)
 app.include_router(events.router)
+app.include_router(sourcing.router)
 
 
 @app.get("/health")
