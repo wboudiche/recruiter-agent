@@ -3,6 +3,7 @@ import { useDraggable } from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ScoreBadge } from "./score-badge";
+import { TimeInStageBadge } from "@/components/time-in-stage-badge";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 interface Props {
@@ -43,9 +44,10 @@ export function CandidateCard({
           </span>
           <ScoreBadge score={application.score} />
         </div>
-        <p className="text-xs text-muted-foreground capitalize">
-          {application.stage}
-        </p>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground capitalize">{application.stage}</span>
+          <TimeInStageBadge application={application} />
+        </div>
         {awaitingPaste && (
           <Badge
             variant="outline"
