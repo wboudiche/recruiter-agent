@@ -9,9 +9,18 @@ interface Props {
   stage: ApplicationRead["stage"];
   applications: ApplicationRead[];
   density?: Density;
+  selected?: Set<number>;
+  onShiftClick?: (id: number) => void;
 }
 
-export function KanbanColumn({ title, stage, applications, density = "comfortable" }: Props) {
+export function KanbanColumn({
+  title,
+  stage,
+  applications,
+  density = "comfortable",
+  selected,
+  onShiftClick,
+}: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${stage}`,
     data: { stage },
@@ -32,7 +41,13 @@ export function KanbanColumn({ title, stage, applications, density = "comfortabl
       )}
       <div className={density === "compact" ? "flex-1 space-y-1" : "flex-1 space-y-2"}>
         {applications.map((app) => (
-          <CandidateCard key={app.id} application={app} density={density} />
+          <CandidateCard
+            key={app.id}
+            application={app}
+            density={density}
+            selected={selected?.has(app.id) ?? false}
+            onShiftClick={onShiftClick}
+          />
         ))}
       </div>
     </div>

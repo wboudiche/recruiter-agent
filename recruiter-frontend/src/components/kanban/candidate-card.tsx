@@ -12,6 +12,8 @@ interface Props {
   candidateName?: string;
   draggable?: boolean;
   density?: Density;
+  selected?: boolean;
+  onShiftClick?: (id: number) => void;
 }
 
 export function CandidateCard({
@@ -19,6 +21,8 @@ export function CandidateCard({
   candidateName,
   draggable = true,
   density = "comfortable",
+  selected = false,
+  onShiftClick,
 }: Props) {
   const isDraggable = draggable && application.stage !== "extracting";
   const awaitingPaste = application.awaiting_paste;
@@ -33,15 +37,26 @@ export function CandidateCard({
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined;
 
+  function handleClick(e: React.MouseEvent) {
+    if (e.shiftKey && onShiftClick) {
+      e.preventDefault();
+      onShiftClick(application.id);
+    }
+  }
+
   return (
     <Card
       ref={setNodeRef}
       style={style}
-      className={`${compact ? "p-1.5" : "p-3"} ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""} ${awaitingPaste ? "border-yellow-500 border-2" : ""}`}
+      className={`${compact ? "p-1.5" : "p-3"} ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""} ${awaitingPaste ? "border-yellow-500 border-2" : ""}${selected ? " ring-2 ring-primary/50" : ""}`}
       {...(isDraggable ? listeners : {})}
       {...(isDraggable ? attributes : {})}
     >
-      <Link to={`/applications/${application.id}`} className="block space-y-1">
+      <Link
+        to={`/applications/${application.id}`}
+        onClick={handleClick}
+        className="block space-y-1"
+      >
         <div className="flex items-center justify-between">
           <span className={`font-medium ${compact ? "text-xs" : "text-sm"} truncate`}>
             {candidateName ?? `Candidate #${application.candidate_id}`}

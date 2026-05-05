@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { KanbanColumn } from "./kanban-column";
+import { BulkActionsBar } from "./bulk-actions-bar";
+import { useKanbanSelection } from "@/hooks/use-kanban-selection";
 import type { Density } from "./kanban-density-toggle";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
@@ -33,6 +35,7 @@ interface Props {
 export function KanbanBoard({ applications, jobId, showRejected = false, density = "comfortable" }: Props) {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();
+  const selection = useKanbanSelection();
 
   const grouped = useMemo(() => {
     const m = new Map<string, ApplicationRead[]>();
@@ -88,18 +91,30 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
   }
 
   return (
-    <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {columns.map((c) => (
-          <KanbanColumn
-            key={c.stage}
-            title={c.title}
-            stage={c.stage}
-            applications={grouped.get(c.stage) ?? []}
-            density={density}
-          />
-        ))}
-      </div>
-    </DndContext>
+    <>
+      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {columns.map((c) => (
+            <KanbanColumn
+              key={c.stage}
+              title={c.title}
+              stage={c.stage}
+              applications={grouped.get(c.stage) ?? []}
+              density={density}
+              selected={selection.selected}
+              onShiftClick={selection.toggle}
+            />
+          ))}
+        </div>
+      </DndContext>
+      {jobId !== undefined && (
+        <BulkActionsBar
+          selected={selection.selected}
+          applications={applications}
+          jobId={jobId}
+          onClear={selection.clear}
+        />
+      )}
+    </>
   );
 }
