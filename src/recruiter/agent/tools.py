@@ -11,11 +11,9 @@ from recruiter.agent.types import ToolDef
 from recruiter.agent.undo import UndoStore
 from typing import Literal
 
-from recruiter.crypto import settings_cipher
 from recruiter.models import Application, Candidate, Job, Stage, SettingsRow
-from recruiter.sourcing import provider as sourcing_provider
-from recruiter.sourcing.github import GitHubSearchClient
 from recruiter.sourcing.provider import SearchError, SearchResult
+from recruiter.sourcing.search import search_one_source
 
 
 @dataclass
@@ -150,12 +148,6 @@ async def _load_settings_for_tool(session) -> SettingsRow | None:
     return await session.get(SettingsRow, 1)
 
 
-def _decrypt_github_token(settings: SettingsRow) -> str | None:
-    if not settings.github_token_enc:
-        return None
-    return settings_cipher().decrypt(settings.github_token_enc)
-
-
 def _format_results_for_llm(results: list[SearchResult]) -> str:
     if not results:
         return "No results found."
@@ -175,20 +167,12 @@ async def _run_provider_search(
     tool_name: str,
 ) -> dict:
     settings = await _load_settings_for_tool(ctx.session)
-    if settings is None:
-        return {"summary": "Search is not configured. Set a provider in Settings → Sourcing."}
-    provider = sourcing_provider.resolve(settings)
-    if provider is None:
-        return {"summary": "Search is not configured. Set a provider in Settings → Sourcing."}
     try:
-        results = await provider.search(query, limit)
+        results = await search_one_source(source, query, limit, settings=settings)
     except SearchError as e:
         if e.transient:
             return {"summary": f"Search temporarily unavailable: {e}."}
-        return {"summary": f"Search isn't configured correctly: {e}. Set it in Settings → Sourcing."}
-    # Override per-card source from the provider's generic value.
-    for r in results:
-        r.source = source
+        return {"summary": f"{e}"}
     cards = [{"name": r.name, "url": r.url, "snippet": r.snippet, "source": r.source}
              for r in results]
     if cards:
@@ -205,7 +189,7 @@ async def _search_linkedin(ctx: "ToolContext", args: dict) -> dict:
         return {"summary": "query is required"}
     limit = max(1, min(int(args.get("limit") or 5), 10))
     return await _run_provider_search(
-        ctx, query=f"site:linkedin.com/in/ {query}", limit=limit,
+        ctx, query=query, limit=limit,
         source="linkedin", tool_name="search_linkedin",
     )
 
@@ -227,24 +211,9 @@ async def _search_github(ctx: "ToolContext", args: dict) -> dict:
     if not query:
         return {"summary": "query is required"}
     limit = max(1, min(int(args.get("limit") or 5), 30))
-    settings = await _load_settings_for_tool(ctx.session)
-    token = _decrypt_github_token(settings) if settings else None
-    client = GitHubSearchClient(token=token)
-    try:
-        results = await client.search_users(query, limit)
-    except SearchError as e:
-        if e.transient:
-            return {"summary": f"GitHub search temporarily unavailable: {e}."}
-        return {"summary": f"GitHub search misconfigured: {e}."}
-    finally:
-        await client.aclose()
-    cards = [{"name": r.name, "url": r.url, "snippet": r.snippet, "source": "github"}
-             for r in results]
-    if cards:
-        ctx.frontend_events.append(tool_search_results_event(
-            tool_name="search_github", source="github", results=cards,
-        ))
-    return {"summary": _format_results_for_llm(results)}
+    return await _run_provider_search(
+        ctx, query=query, limit=limit, source="github", tool_name="search_github",
+    )
 
 
 # JSON Schema definitions — input_schema=={"type":"object","properties":{}} for no-arg tools.
