@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { SearchTab } from "./search-tab";
 
 interface Props {
   jobId: number;
@@ -23,7 +24,7 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [tab, setTab] = useState<"url" | "upload" | "paste">("url");
+  const [tab, setTab] = useState<"url" | "upload" | "paste" | "search">("url");
 
   const submitJson = useMutation({
     mutationFn: (body: object) =>
@@ -86,10 +87,11 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
         </SheetHeader>
         <form onSubmit={onSubmit} className="space-y-4 mt-6">
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="url">URL</TabsTrigger>
               <TabsTrigger value="upload">Upload</TabsTrigger>
               <TabsTrigger value="paste">Paste</TabsTrigger>
+              <TabsTrigger value="search">Search</TabsTrigger>
             </TabsList>
             <TabsContent value="url" className="space-y-2 mt-4">
               <Label htmlFor="cand-url">URL (GitHub, LinkedIn, personal site)</Label>
@@ -119,19 +121,24 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
                 onChange={(e) => setContent(e.target.value)}
               />
             </TabsContent>
+            <TabsContent value="search" className="space-y-2 mt-4">
+              <SearchTab jobId={jobId} />
+            </TabsContent>
           </Tabs>
-          <Button
-            type="submit"
-            disabled={
-              (tab === "url" && !url) ||
-              (tab === "paste" && !content) ||
-              (tab === "upload" && !file) ||
-              submitJson.isPending ||
-              submitFile.isPending
-            }
-          >
-            {submitJson.isPending || submitFile.isPending ? "Adding…" : "Add candidate"}
-          </Button>
+          {tab !== "search" && (
+            <Button
+              type="submit"
+              disabled={
+                (tab === "url" && !url) ||
+                (tab === "paste" && !content) ||
+                (tab === "upload" && !file) ||
+                submitJson.isPending ||
+                submitFile.isPending
+              }
+            >
+              {submitJson.isPending || submitFile.isPending ? "Adding…" : "Add candidate"}
+            </Button>
+          )}
         </form>
       </SheetContent>
     </Sheet>
