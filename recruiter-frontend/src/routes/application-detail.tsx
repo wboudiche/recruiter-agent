@@ -1,8 +1,10 @@
+import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
 import { ChatPanel } from "@/components/applications/chat-panel";
 import { PasteProfileForm } from "@/components/applications/paste-profile-form";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
+import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
 
@@ -11,6 +13,16 @@ export default function ApplicationDetail() {
   const id = Number(appId);
   const application = useApplication(id);
   const candidate = useCandidate(application.data?.candidate_id);
+
+  useEffect(() => {
+    if (application.data && candidate.data) {
+      pushRecentApp({
+        id: application.data.id,
+        name: candidate.data.full_name ?? `Candidate #${application.data.candidate_id}`,
+        ts: Date.now(),
+      });
+    }
+  }, [application.data, candidate.data]);
 
   if (application.isLoading) return <p>Loading…</p>;
   if (application.isError)

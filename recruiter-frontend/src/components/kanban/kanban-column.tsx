@@ -1,14 +1,26 @@
 import { useDroppable } from "@dnd-kit/core";
 import { CandidateCard } from "./candidate-card";
+import type { Density } from "./kanban-density-toggle";
+import { ScoreDistributionStrip } from "./score-distribution-strip";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 interface Props {
   title: string;
   stage: ApplicationRead["stage"];
   applications: ApplicationRead[];
+  density?: Density;
+  selected?: Set<number>;
+  onShiftClick?: (id: number) => void;
 }
 
-export function KanbanColumn({ title, stage, applications }: Props) {
+export function KanbanColumn({
+  title,
+  stage,
+  applications,
+  density = "comfortable",
+  selected,
+  onShiftClick,
+}: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${stage}`,
     data: { stage },
@@ -22,9 +34,20 @@ export function KanbanColumn({ title, stage, applications }: Props) {
         <h3 className="text-sm font-medium">{title}</h3>
         <span className="text-xs text-muted-foreground">{applications.length}</span>
       </header>
-      <div className="flex-1 space-y-2">
+      {stage === "scored" && applications.length > 0 && (
+        <div className="px-2 mb-2">
+          <ScoreDistributionStrip applications={applications} />
+        </div>
+      )}
+      <div className={density === "compact" ? "flex-1 space-y-1" : "flex-1 space-y-2"}>
         {applications.map((app) => (
-          <CandidateCard key={app.id} application={app} />
+          <CandidateCard
+            key={app.id}
+            application={app}
+            density={density}
+            selected={selected?.has(app.id) ?? false}
+            onShiftClick={onShiftClick}
+          />
         ))}
       </div>
     </div>
