@@ -52,3 +52,22 @@ describe("SearchResultCard", () => {
     await waitFor(() => expect(received).toEqual({ kind: "url", url: RESULT.url }));
   });
 });
+
+describe("SearchResultCard — added state", () => {
+  it("button shows 'Added ✓' and stays disabled after a successful Add", async () => {
+    server.use(
+      http.post("http://localhost:8000/api/jobs/1/candidates", () =>
+        HttpResponse.json({ application_id: 99 }, { status: 202 }),
+      ),
+    );
+    const Wrapper = wrap();
+    render(<Wrapper><SearchResultCard result={RESULT} jobId={1} /></Wrapper>);
+    const btn = screen.getByRole("button", { name: /add/i });
+    fireEvent.click(btn);
+    await waitFor(() => {
+      const after = screen.getByRole("button", { name: /added/i });
+      expect(after).toBeDisabled();
+      expect(after.textContent).toMatch(/added/i);
+    });
+  });
+});

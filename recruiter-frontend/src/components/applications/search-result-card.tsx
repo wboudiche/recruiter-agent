@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ const SOURCE_LABEL: Record<SearchResult["source"], string> = {
 
 export function SearchResultCard({ result, jobId }: Props) {
   const qc = useQueryClient();
+  const [added, setAdded] = useState(false);
   const add = useMutation({
     mutationFn: () =>
       api(`/api/jobs/${jobId}/candidates`, {
@@ -33,6 +35,7 @@ export function SearchResultCard({ result, jobId }: Props) {
     onSuccess: () => {
       toast.success("Added to pipeline");
       qc.invalidateQueries({ queryKey: queryKeys.jobApplications(jobId) });
+      setAdded(true);
     },
     onError: (err) => {
       toast.error(err instanceof ApiError ? err.detail : "Add failed");
@@ -61,9 +64,9 @@ export function SearchResultCard({ result, jobId }: Props) {
           size="sm"
           variant="secondary"
           onClick={() => add.mutate()}
-          disabled={add.isPending}
+          disabled={add.isPending || added}
         >
-          {add.isPending ? "Adding…" : "Add"}
+          {added ? "Added ✓" : add.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
     </div>
