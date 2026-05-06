@@ -1,10 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from recruiter.api.candidates import get_llm
 from recruiter.api.deps import get_session, require_user
+from recruiter.llm.client import LLMClient
 from recruiter.models import Job, JobStatus
+from recruiter.pipeline.criteria_suggester import suggest_criteria
 from recruiter.schemas.job import CriteriaItem, JobCreate, JobRead, JobUpdate
+from recruiter.schemas.job_suggest import SuggestCriteriaRequest, SuggestCriteriaResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_user)])
 
@@ -26,6 +34,42 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
 async def list_jobs(session: AsyncSession = Depends(get_session)) -> list[JobRead]:
     rows = (await session.execute(select(Job).order_by(Job.created_at.desc()))).scalars().all()
     return [_to_read(j) for j in rows]
+
+
+@router.post("/criteria/suggest", response_model=SuggestCriteriaResponse)
+async def suggest_criteria_endpoint(
+    payload: SuggestCriteriaRequest,
+    session: AsyncSession = Depends(get_session),
+) -> SuggestCriteriaResponse:
+    """Suggest 3-6 weighted criteria from a job description.
+
+    Stateless — no DB writes. Returns 502 on any LLM-side failure to match
+    the upstream-error convention used elsewhere in the API.
+
+    Note: get_llm is resolved inside the function body rather than as a
+    Depends parameter so that Pydantic body validation fires first — FastAPI
+    0.136 resolves all Depends before validating the request body, which
+    would cause a 503 (settings-not-configured) to shadow the 422 on short
+    input.  We manually honour app.dependency_overrides[get_llm] so that
+    tests can still inject FakeLLMClient.
+    """
+    from recruiter.main import app as _app
+
+    override = _app.dependency_overrides.get(get_llm)
+    if override is not None:
+        llm: LLMClient = override()
+    else:
+        llm = await get_llm(session=session)
+    try:
+        items = await suggest_criteria(
+            title=payload.title,
+            description=payload.description,
+            llm=llm,
+        )
+    except Exception as exc:
+        logger.warning("criteria suggestion failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Criteria suggestion failed") from exc
+    return SuggestCriteriaResponse(criteria=items)
 
 
 @router.get("/{job_id}", response_model=JobRead)
