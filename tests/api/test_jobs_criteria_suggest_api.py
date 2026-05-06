@@ -38,10 +38,14 @@ async def test_suggest_criteria_happy_path(api_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_suggest_criteria_rejects_short_description(api_client: AsyncClient) -> None:
-    resp = await api_client.post(
-        "/api/jobs/criteria/suggest",
-        json={"title": "x", "description": "too short"},
-    )
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient()
+    try:
+        resp = await api_client.post(
+            "/api/jobs/criteria/suggest",
+            json={"title": "x", "description": "too short"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
     assert resp.status_code == 422  # Pydantic min_length=50
 
 

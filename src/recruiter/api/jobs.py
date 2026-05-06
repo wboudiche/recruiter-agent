@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,27 +39,8 @@ async def list_jobs(session: AsyncSession = Depends(get_session)) -> list[JobRea
 @router.post("/criteria/suggest", response_model=SuggestCriteriaResponse)
 async def suggest_criteria_endpoint(
     payload: SuggestCriteriaRequest,
-    session: AsyncSession = Depends(get_session),
+    llm: LLMClient = Depends(get_llm),
 ) -> SuggestCriteriaResponse:
-    """Suggest 3-6 weighted criteria from a job description.
-
-    Stateless — no DB writes. Returns 502 on any LLM-side failure to match
-    the upstream-error convention used elsewhere in the API.
-
-    Note: get_llm is resolved inside the function body rather than as a
-    Depends parameter so that Pydantic body validation fires first — FastAPI
-    0.136 resolves all Depends before validating the request body, which
-    would cause a 503 (settings-not-configured) to shadow the 422 on short
-    input.  We manually honour app.dependency_overrides[get_llm] so that
-    tests can still inject FakeLLMClient.
-    """
-    from recruiter.main import app as _app
-
-    override = _app.dependency_overrides.get(get_llm)
-    if override is not None:
-        llm: LLMClient = override()
-    else:
-        llm = await get_llm(session=session)
     try:
         items = await suggest_criteria(
             title=payload.title,
