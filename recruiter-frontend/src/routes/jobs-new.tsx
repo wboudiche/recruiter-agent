@@ -1,10 +1,21 @@
+// recruiter-frontend/src/routes/jobs-new.tsx
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useFieldArray, useForm } from "react-hook-form";
 import { useNavigate } from "react-router-dom";
 import { z } from "zod";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +40,12 @@ interface JobReadResp {
   id: number;
 }
 
+interface SuggestResponse {
+  criteria: Array<{ name: string; weight: number; description: string }>;
+}
+
+const DESCRIPTION_MIN_FOR_SUGGEST = 50;
+
 export default function JobsNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -37,6 +54,8 @@ export default function JobsNew() {
     defaultValues: { title: "", description: "", criteria: [] },
   });
   const criteria = useFieldArray({ control: form.control, name: "criteria" });
+  const description = form.watch("description") ?? "";
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const createJob = useMutation({
     mutationFn: (values: FormValues) =>
@@ -46,6 +65,42 @@ export default function JobsNew() {
       navigate(`/jobs/${data.id}`);
     },
   });
+
+  const suggestCriteria = useMutation({
+    mutationFn: (payload: { title: string; description: string }) =>
+      api<SuggestResponse>("/api/jobs/criteria/suggest", {
+        method: "POST",
+        json: payload,
+      }),
+    onSuccess: (resp) => {
+      criteria.replace(resp.criteria);
+    },
+    onError: () => {
+      toast.error("Couldn't suggest criteria — try again.");
+    },
+  });
+
+  const onSuggestClick = () => {
+    if (criteria.fields.length > 0) {
+      setConfirmOpen(true);
+      return;
+    }
+    suggestCriteria.mutate({
+      title: form.getValues("title"),
+      description,
+    });
+  };
+
+  const onConfirmReplace = () => {
+    setConfirmOpen(false);
+    suggestCriteria.mutate({
+      title: form.getValues("title"),
+      description,
+    });
+  };
+
+  const suggestDisabled =
+    description.length < DESCRIPTION_MIN_FOR_SUGGEST || suggestCriteria.isPending;
 
   return (
     <form
@@ -73,15 +128,27 @@ export default function JobsNew() {
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <Label>Custom criteria (optional)</Label>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => criteria.append({ name: "", weight: 0.5, description: "" })}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add criterion
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={suggestDisabled}
+              onClick={onSuggestClick}
+            >
+              <Sparkles className="h-4 w-4 mr-1" />
+              {suggestCriteria.isPending ? "Suggesting…" : "Suggest from JD"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => criteria.append({ name: "", weight: 0.5, description: "" })}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add criterion
+            </Button>
+          </div>
         </div>
         {criteria.fields.map((field, index) => (
           <div key={field.id} className="grid grid-cols-[1fr_100px_2fr_auto] gap-2 items-start">
@@ -108,6 +175,28 @@ export default function JobsNew() {
           Cancel
         </Button>
       </div>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Replace existing criteria?</DialogTitle>
+            <DialogDescription>
+              Replace {criteria.fields.length} existing{" "}
+              {criteria.fields.length === 1 ? "criterion" : "criteria"} with suggestions from
+              the job description? This can't be undone — but you can edit the suggestions
+              after.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setConfirmOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={onConfirmReplace}>
+              Replace
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }
