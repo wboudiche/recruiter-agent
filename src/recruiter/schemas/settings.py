@@ -27,6 +27,11 @@ class SettingsRead(BaseModel):
     search_engine_id: str | None = None
     has_search_api_key: bool = False
     has_github_token: bool = False
+    enrichment_enabled: bool = False
+    has_enrichment_twitter_api_key: bool = False
+    has_enrichment_youtube_api_key: bool = False
+    has_enrichment_stackexchange_key: bool = False
+    enrichment_sources: dict[str, bool] = {}
 
 
 class SettingsUpdate(BaseModel):
@@ -43,3 +48,8 @@ class SettingsUpdate(BaseModel):
     search_api_key: str | None = None
     search_engine_id: str | None = None
     github_token: str | None = None
+    enrichment_enabled: bool | None = None
+    enrichment_twitter_api_key: str | None = None
+    enrichment_youtube_api_key: str | None = None
+    enrichment_stackexchange_key: str | None = None
+    enrichment_sources: dict[str, bool] | None = None

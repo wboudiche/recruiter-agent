@@ -1,12 +1,17 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import selectinload
 
+from recruiter.api.candidates import ApplicationCreated, get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
+from recruiter.events import EventBus
+from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, Stage
+from recruiter.pipeline.orchestrator import process_application
+from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead
 
@@ -86,6 +91,7 @@ def _to_read(app_row: Application) -> ApplicationRead:
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
+        enrichment=app_row.enrichment,
     )
 
 
@@ -145,16 +151,6 @@ async def patch_application(
     return _to_read(app_row)
 
 
-from fastapi import BackgroundTasks
-from sqlalchemy.ext.asyncio import AsyncEngine
-
-from recruiter.api.candidates import ApplicationCreated, get_engine_dep, get_event_bus, get_llm
-from recruiter.events import EventBus
-from recruiter.llm.client import LLMClient
-from recruiter.models import Candidate
-from recruiter.pipeline.orchestrator import process_application
-from recruiter.pipeline.router import RoutedInput
-
 
 @router.post("/applications/{application_id}/retry", response_model=ApplicationCreated, status_code=202)
 async def retry_application(
@@ -174,6 +170,55 @@ async def retry_application(
     candidate = await session.get(Candidate, app_row.candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
+
+    raw_text = ""
+    if candidate.raw_extracted and isinstance(candidate.raw_extracted, dict):
+        raw_text = candidate.raw_extracted.get("text", "") or ""
+
+    routed = RoutedInput(
+        kind="paste",
+        text=raw_text,
+        source_url=candidate.source_url,
+        resume_path=candidate.resume_path,
+    )
+    background_tasks.add_task(
+        process_application,
+        application_id=application_id,
+        routed=routed,
+        engine=engine,
+        llm=llm,
+        bus=bus,
+    )
+    return ApplicationCreated(application_id=application_id)
+
+
+@router.post(
+    "/applications/{application_id}/re-enrich",
+    response_model=ApplicationCreated,
+    status_code=202,
+)
+async def re_enrich_application(
+    application_id: int,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient = Depends(get_llm),
+    bus: EventBus = Depends(get_event_bus),
+) -> ApplicationCreated:
+    """Clear the cached enrichment bundle and re-run the pipeline starting
+    at Stage.ENRICHING. The orchestrator will see `enrichment` is None and
+    re-fetch fresh."""
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+
+    candidate = await session.get(Candidate, app_row.candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+
+    app_row.enrichment = None
+    app_row.stage = Stage.ENRICHING
+    await session.commit()
 
     raw_text = ""
     if candidate.raw_extracted and isinstance(candidate.raw_extracted, dict):
