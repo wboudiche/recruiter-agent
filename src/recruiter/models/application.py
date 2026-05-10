@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 class Stage(str, Enum):
     SOURCED = "sourced"      # reserved for Phase 2 bulk; unused in Phase 1
     EXTRACTING = "extracting"
+    ENRICHING = "enriching"  # between EXTRACTING and SCORED
     SCORED = "scored"
     VALIDATED = "validated"
     INVITED = "invited"
@@ -34,6 +35,7 @@ class Application(Base):
     score: Mapped[int | None] = mapped_column(Integer)
     score_breakdown: Mapped[list[dict] | None] = mapped_column(JSON)
     score_rationale: Mapped[str | None] = mapped_column(String)
+    enrichment: Mapped[dict | None] = mapped_column(JSON)
     notes: Mapped[str | None] = mapped_column(String)
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

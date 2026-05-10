@@ -13,6 +13,7 @@ class JobCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1)
     criteria: list[CriteriaItem] = Field(default_factory=list)
+    enrichment_consent: bool = False
 
 
 class JobUpdate(BaseModel):
@@ -20,6 +21,7 @@ class JobUpdate(BaseModel):
     description: str | None = None
     criteria: list[CriteriaItem] | None = None
     status: str | None = None
+    enrichment_consent: bool | None = None
 
 
 class JobRead(BaseModel):
@@ -30,5 +32,6 @@ class JobRead(BaseModel):
     description: str
     criteria: list[CriteriaItem]
     status: str
+    enrichment_consent: bool = False
     created_at: datetime
     updated_at: datetime

@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import JSON, DateTime, Enum as SAEnum, String, func
+from sqlalchemy import Boolean, JSON, DateTime, Enum as SAEnum, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -23,6 +23,7 @@ class Job(Base):
         SAEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.OPEN,
     )
+    enrichment_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

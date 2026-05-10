@@ -29,6 +29,7 @@ class ApplicationRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     awaiting_paste: bool = False
+    enrichment: dict | None = None
 
 
 class ApplicationUpdate(BaseModel):

@@ -23,6 +23,7 @@ async def create_job(payload: JobCreate, session: AsyncSession = Depends(get_ses
         title=payload.title,
         description=payload.description,
         criteria=[c.model_dump() for c in payload.criteria],
+        enrichment_consent=payload.enrichment_consent,
     )
     session.add(job)
     await session.commit()
@@ -76,6 +77,8 @@ async def update_job(
         job.criteria = [c.model_dump() for c in payload.criteria]
     if payload.status is not None:
         job.status = JobStatus(payload.status)
+    if payload.enrichment_consent is not None:
+        job.enrichment_consent = payload.enrichment_consent
     await session.commit()
     await session.refresh(job)
     return _to_read(job)
@@ -88,6 +91,7 @@ def _to_read(job: Job) -> JobRead:
         description=job.description,
         criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
         status=job.status.value,
+        enrichment_consent=job.enrichment_consent,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
