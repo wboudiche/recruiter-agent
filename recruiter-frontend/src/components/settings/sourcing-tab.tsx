@@ -30,8 +30,15 @@ export function SourcingTab() {
 
   function save() {
     const body: Record<string, unknown> = {};
-    if (provider !== undefined && provider !== cur.search_provider)
+    // Always send the provider when nothing is configured yet so a user
+    // who fills the form without touching the dropdown still gets a
+    // saved provider value (the dropdown defaults to google_cse visually
+    // but the local state stays undefined until they interact with it).
+    if (provider !== undefined && provider !== cur.search_provider) {
       body.search_provider = provider;
+    } else if (cur.search_provider === null) {
+      body.search_provider = effProvider;
+    }
     if (apiKey) body.search_api_key = apiKey;
     if (cseId !== undefined && cseId !== (cur.search_engine_id ?? ""))
       body.search_engine_id = cseId;
