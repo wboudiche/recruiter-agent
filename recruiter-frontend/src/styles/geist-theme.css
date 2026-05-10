@@ -50,8 +50,14 @@
   --destructive-foreground: 0 0% 100%;
   --border: 0 0% 92%;
   --input: 0 0% 92%;
-  --ring: 0 0% 5%;
+  --ring: 212 100% 48%;
   --radius: 0.25rem;
+
+  /* Vercel-style status accents (used directly via hsl(var(--…))) */
+  --geist-blue: 212 100% 48%;
+  --geist-success: 142 76% 36%;
+  --geist-warning: 35 100% 50%;
+  --geist-error: 0 72% 51%;
 
   font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-feature-settings: "ss01", "cv11";
@@ -81,7 +87,12 @@ html.dark .geist-theme {
   --destructive-foreground: 0 0% 98%;
   --border: 0 0% 12%;
   --input: 0 0% 14%;
-  --ring: 0 0% 98%;
+  --ring: 212 100% 60%;
+
+  --geist-blue: 212 100% 60%;
+  --geist-success: 142 70% 45%;
+  --geist-warning: 35 100% 55%;
+  --geist-error: 0 72% 56%;
 }
 
 /* ----- Element refinements ----- */
@@ -120,8 +131,8 @@ html.dark .geist-theme {
 .geist-theme textarea:focus-visible,
 .geist-theme select:focus-visible {
   outline: none;
-  border-color: hsl(var(--foreground));
-  box-shadow: 0 0 0 1px hsl(var(--foreground)) !important;
+  border-color: hsl(var(--ring));
+  box-shadow: 0 0 0 1px hsl(var(--ring)) !important;
 }
 
 /* Headings: tighter tracking */
@@ -133,16 +144,22 @@ html.dark .geist-theme {
   font-weight: 600;
 }
 
-/* Links: subtle underline on hover, foreground color by default */
-.geist-theme a:not([class*="bg-"]):not([role="tab"]) {
-  color: inherit;
+/* Links: keep nav/UI links unchanged; only style explicit prose links via .geist-link */
+.geist-theme .geist-link {
+  color: hsl(var(--geist-blue));
   text-decoration: none;
-  border-bottom: 1px solid hsl(var(--border));
+  border-bottom: 1px solid transparent;
   transition: border-color 120ms ease;
 }
 
-.geist-theme a:not([class*="bg-"]):not([role="tab"]):hover {
-  border-bottom-color: hsl(var(--foreground));
+.geist-theme .geist-link:hover {
+  border-bottom-color: hsl(var(--geist-blue));
+}
+
+/* Focus rings: Vercel blue across all interactive elements */
+.geist-theme :focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 /* Card-like containers get a subtle border, no shadow */
