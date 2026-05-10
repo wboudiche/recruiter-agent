@@ -37,3 +37,36 @@ The bypass auto-creates a synthetic user with that email. **It only activates wh
 - Set `RECRUITER_SECURE_COOKIES=true` (HTTPS only).
 - Verify `RECRUITER_DEV_AUTH_BYPASS` is unset.
 - Update IdP redirect URI and allowed origins to the prod hostname.
+
+## Sourcing providers
+
+Web/LinkedIn search supports three providers; pick one in **Settings → Sourcing**.
+
+### Google Custom Search
+
+- Free 100 queries/day. Requires a Google Cloud project with a billing account attached (the trial 300$ counts).
+- Setup:
+  1. https://cse.google.com → New search engine → enable "Search the entire web". Copy the **Search engine ID (cx)**.
+  2. https://console.cloud.google.com/apis/library/customsearch.googleapis.com → Enable.
+  3. https://console.cloud.google.com/apis/credentials → Create credentials → API key. Copy the `AIza…`.
+  4. Settings → Sourcing → paste API key + CX → Save.
+
+### Brave Search
+
+- Free 2000 queries/month, no card required.
+- Setup:
+  1. https://brave.com/search/api/ → sign up → copy the API key (`brv_…`).
+  2. Settings → Sourcing → Provider: **Brave Search** → paste API key → Save.
+
+### SearXNG (self-hosted)
+
+- Unlimited; runs locally on your machine.
+- Setup:
+  1. `docker run --rm -p 8080:8080 -e BASE_URL=http://localhost:8080 searxng/searxng`
+  2. In the running container, edit `/etc/searxng/settings.yml` to ensure `search.formats` contains `json` (the default config in the image already has it).
+  3. Settings → Sourcing → Provider: **SearXNG (self-hosted)** → Instance URL: `http://localhost:8080` → Save.
+
+### GitHub (separate, for the GitHub tab)
+
+- Works without configuration (60 requests/hour anonymously).
+- Optional: Settings → Sourcing → paste a GitHub personal access token (`ghp_…`) to raise the limit to 5000/hour.
