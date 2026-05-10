@@ -6,21 +6,17 @@ import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 
-// Sources whose label visibly mentions an API-key field nearby.  For these
-// sources the API-key input's `<Label>` is the unique element that matches
-// `getByLabelText(/<key>/i)`, and clicking it toggles the source on/off.
-// Other sources use a standard checkbox + `<Label htmlFor>` pairing.
 const SOURCES: { key: string; label: string; help?: string }[] = [
-  { key: "github", label: "github (GitHub)", help: "Reuses the GitHub token from the Sourcing tab." },
-  { key: "stackoverflow", label: "stackoverflow (Stack Overflow)" },
-  { key: "hackernews", label: "hackernews (Hacker News)" },
-  { key: "reddit", label: "reddit (Reddit)" },
-  { key: "mastodon", label: "mastodon (Mastodon)" },
-  { key: "bluesky", label: "bluesky (Bluesky)" },
-  { key: "youtube", label: "video — see API-key field above" },
-  { key: "twitter", label: "X (formerly known as) — see API-key field above", help: "X API Basic tier required (~$200/month)" },
-  { key: "devto", label: "devto (Dev.to)" },
-  { key: "blog", label: "blog / website (LLM summary)" },
+  { key: "github", label: "GitHub", help: "Reuses the GitHub token from the Sourcing tab." },
+  { key: "stackoverflow", label: "Stack Overflow" },
+  { key: "hackernews", label: "Hacker News" },
+  { key: "reddit", label: "Reddit" },
+  { key: "mastodon", label: "Mastodon" },
+  { key: "bluesky", label: "Bluesky" },
+  { key: "youtube", label: "YouTube" },
+  { key: "twitter", label: "Twitter / X", help: "X API Basic tier required (~$200/month)" },
+  { key: "devto", label: "Dev.to" },
+  { key: "blog", label: "Blog / website (LLM summary)" },
 ];
 
 export function EnrichmentTab() {
@@ -93,10 +89,6 @@ export function EnrichmentTab() {
           placeholder={cur.has_enrichment_twitter_api_key ? "•••••• (set)" : "X API v2 Basic bearer"}
           value={twKey}
           onChange={(e) => setTwKey(e.target.value)}
-          // Clicking the API-key input also toggles the Twitter source on/off
-          // so the click target reachable via `getByLabelText(/twitter/i)` is
-          // tied to source state.  See the SOURCES note at top of file.
-          onClick={() => toggleSource("twitter")}
         />
         <p className="text-xs text-muted-foreground">X API Basic tier required (~$200/month).</p>
       </div>
@@ -109,7 +101,6 @@ export function EnrichmentTab() {
           placeholder={cur.has_enrichment_youtube_api_key ? "•••••• (set)" : "AIza…"}
           value={ytKey}
           onChange={(e) => setYtKey(e.target.value)}
-          onClick={() => toggleSource("youtube")}
         />
         <p className="text-xs text-muted-foreground">Free 10,000 units/day from Google Cloud.</p>
       </div>
@@ -137,16 +128,12 @@ export function EnrichmentTab() {
                 checked={effMap[s.key] ?? true}
                 onChange={() => toggleSource(s.key)}
               />
-              {/* For sources with adjacent API-key inputs (twitter, youtube)
-                  the visible label deliberately avoids the source-key word
-                  so the API-key input's <Label> remains the unique match for
-                  `getByLabelText(/<key>/i)` — clicking that input toggles
-                  the source via onClick.  Other sources use the key word in
-                  their label so test 1's regex finds them here. */}
-              <Label htmlFor={`source-${s.key}`} className="flex-1 font-normal">
-                {s.label}
-                {s.help && <span className="block text-xs text-muted-foreground">{s.help}</span>}
-              </Label>
+              <div className="flex-1">
+                <Label htmlFor={`source-${s.key}`} className="font-normal">
+                  {s.label}
+                </Label>
+                {s.help && <p className="text-xs text-muted-foreground">{s.help}</p>}
+              </div>
             </div>
           ))}
         </div>

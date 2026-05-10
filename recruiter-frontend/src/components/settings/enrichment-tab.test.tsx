@@ -9,10 +9,18 @@ import { EnrichmentTab } from "./enrichment-tab";
 
 const server = setupServer();
 
-const ALL_SOURCES = [
-  "github", "stackoverflow", "hackernews", "reddit", "mastodon",
-  "bluesky", "youtube", "twitter", "devto", "blog",
-];
+const SOURCE_LABELS: Record<string, string> = {
+  github: "GitHub",
+  stackoverflow: "Stack Overflow",
+  hackernews: "Hacker News",
+  reddit: "Reddit",
+  mastodon: "Mastodon",
+  bluesky: "Bluesky",
+  youtube: "YouTube",
+  twitter: "Twitter / X",
+  devto: "Dev.to",
+  blog: "Blog / website (LLM summary)",
+};
 
 function defaults(overrides = {}) {
   return {
@@ -21,7 +29,6 @@ function defaults(overrides = {}) {
     has_enrichment_youtube_api_key: false,
     has_enrichment_stackexchange_key: false,
     enrichment_sources: {},
-    // unrelated fields the SettingsRead schema requires:
     default_llm_provider: "anthropic", has_anthropic_api_key: false,
     local_llm_url: null, has_local_llm_api_key: false, model_overrides: {},
     has_google_oauth_tokens: false, has_smtp_config: false,
@@ -62,8 +69,8 @@ describe("EnrichmentTab", () => {
     mockRoutes(defaults(), cap);
     renderTab();
     await waitFor(() => expect(screen.getByLabelText(/Enable enrichment/i)).toBeInTheDocument());
-    for (const s of ALL_SOURCES) {
-      expect(screen.getByLabelText(new RegExp(s, "i"))).toBeInTheDocument();
+    for (const label of Object.values(SOURCE_LABELS)) {
+      expect(screen.getByLabelText(label, { exact: true })).toBeInTheDocument();
     }
   });
 
@@ -79,7 +86,7 @@ describe("EnrichmentTab", () => {
     const cap: { lastBody?: any } = {};
     mockRoutes(defaults({ enrichment_enabled: true }), cap);
     renderTab();
-    const twitter = await screen.findByLabelText(/twitter/i);
+    const twitter = await screen.findByLabelText(SOURCE_LABELS.twitter, { exact: true });
     await userEvent.click(twitter);  // off
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(cap.lastBody).toBeDefined());
