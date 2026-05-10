@@ -80,13 +80,13 @@ export function NotifyWizard({
         onOpenChange(o);
       }}
     >
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col gap-0 overflow-hidden">
+        <DialogHeader className="shrink-0 pb-4 border-b">
           <DialogTitle>
             Notify & invite — Step {step + 1} of {STEPS.length}: {STEPS[step]}
           </DialogTitle>
         </DialogHeader>
-        <div className="py-4">
+        <div className="flex-1 overflow-y-auto py-4 -mr-2 pr-2">
           {step === 0 && (
             <StepChannel
               value={channel}
@@ -118,7 +118,7 @@ export function NotifyWizard({
             />
           )}
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0 pt-4 border-t">
           {step > 0 && (
             <Button variant="outline" onClick={back} disabled={send.isPending}>
               Back
