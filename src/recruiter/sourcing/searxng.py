@@ -41,6 +41,10 @@ class SearXNGProvider:
             ) from e
         except httpx.HTTPError as e:
             raise SearchError(f"network failure: {e}", transient=True) from e
+        if r.status_code == 429:
+            raise SearchError("searxng rate limit", transient=True)
+        if r.status_code >= 500:
+            raise SearchError(f"searxng {r.status_code}", transient=True)
         if r.status_code != 200:
             raise SearchError(
                 f"searxng {r.status_code}: {r.text[:200]}",

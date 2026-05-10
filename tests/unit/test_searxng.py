@@ -91,6 +91,24 @@ async def test_search_raises_config_error_on_non_200() -> None:
 
 
 @pytest.mark.asyncio
+async def test_search_raises_transient_error_on_429() -> None:
+    handler = lambda req: httpx.Response(429, text="rate")
+    p = _make_provider(httpx.MockTransport(handler))
+    with pytest.raises(SearchError) as ei:
+        await p.search("x", 5)
+    assert ei.value.transient is True
+
+
+@pytest.mark.asyncio
+async def test_search_raises_transient_error_on_5xx() -> None:
+    handler = lambda req: httpx.Response(503, text="oops")
+    p = _make_provider(httpx.MockTransport(handler))
+    with pytest.raises(SearchError) as ei:
+        await p.search("x", 5)
+    assert ei.value.transient is True
+
+
+@pytest.mark.asyncio
 async def test_search_raises_when_response_is_not_json() -> None:
     handler = lambda req: httpx.Response(
         200, text="<!DOCTYPE html><html>...</html>",

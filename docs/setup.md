@@ -62,8 +62,26 @@ Web/LinkedIn search supports three providers; pick one in **Settings → Sourcin
 
 - Unlimited; runs locally on your machine.
 - Setup:
-  1. `docker run --rm -p 8080:8080 -e BASE_URL=http://localhost:8080 searxng/searxng`
-  2. In the running container, edit `/etc/searxng/settings.yml` to ensure `search.formats` contains `json` (the default config in the image already has it).
+  1. Create a host directory for the config:
+     ```
+     mkdir -p ~/searxng && cat > ~/searxng/settings.yml <<'YAML'
+     use_default_settings: true
+     search:
+       formats:
+         - html
+         - json
+     server:
+       secret_key: "change-me"
+     YAML
+     ```
+     The bare `searxng/searxng` image ships with `formats: [html]` only — JSON must be enabled explicitly or the provider will return non-JSON and the app will surface a clear error.
+  2. Run the container with that config mounted:
+     ```
+     docker run --rm -p 8080:8080 \
+       -v ~/searxng:/etc/searxng \
+       -e SEARXNG_BASE_URL=http://localhost:8080/ \
+       searxng/searxng
+     ```
   3. Settings → Sourcing → Provider: **SearXNG (self-hosted)** → Instance URL: `http://localhost:8080` → Save.
 
 ### GitHub (separate, for the GitHub tab)
