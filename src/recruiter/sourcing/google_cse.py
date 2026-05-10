@@ -1,20 +1,15 @@
 import httpx
 
 from recruiter.crypto import settings_cipher
-from recruiter.sourcing.provider import SearchError, SearchResult, register
+from recruiter.sourcing.provider import (
+    SearchError,
+    SearchResult,
+    parse_linkedin_name,
+    register,
+)
 
 
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
-
-
-def _parse_name(title: str | None) -> str | None:
-    """LinkedIn titles look like 'Alice Doe - Senior Rust | LinkedIn'.
-    Strip the '| LinkedIn' suffix and take the first ' - ' segment.
-    Returns None if the title is empty / missing."""
-    if not title:
-        return None
-    cleaned = title.split(" | ")[0].strip()
-    return cleaned.split(" - ")[0].strip() or None
 
 
 class GoogleCSEProvider:
@@ -61,7 +56,7 @@ class GoogleCSEProvider:
             link = it.get("link", "")
             if not link:
                 continue
-            name = _parse_name(it.get("title")) or link
+            name = parse_linkedin_name(it.get("title")) or link
             out.append(SearchResult(
                 name=name,
                 url=link,

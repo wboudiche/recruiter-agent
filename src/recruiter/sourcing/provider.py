@@ -49,3 +49,16 @@ def resolve(settings: Any) -> SearchProvider | None:
     if factory is None:
         return None
     return factory(settings)
+
+
+def parse_linkedin_name(title: str | None) -> str | None:
+    """Extract a person's name from a LinkedIn search-result title.
+
+    LinkedIn titles look like 'Alice Doe - Senior Rust | LinkedIn'.
+    Strip the '| LinkedIn' suffix and take the segment before the first
+    ' - '. Returns None if the title is empty or whitespace-only.
+    """
+    if not title or not title.strip():
+        return None
+    cleaned = title.split(" | ")[0].strip()
+    return cleaned.split(" - ")[0].strip() or None
