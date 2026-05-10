@@ -36,6 +36,7 @@ class Candidate(Base):
     )
     source_url: Mapped[str | None] = mapped_column(String(2048))
     resume_path: Mapped[str | None] = mapped_column(String(1024))
+    photo_url: Mapped[str | None] = mapped_column(String(2048))
     raw_extracted: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -13,7 +13,7 @@ from recruiter.models import Application, Candidate, Stage
 from recruiter.pipeline.orchestrator import process_application
 from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
-from recruiter.schemas.candidate import CandidateRead
+from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
 
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
@@ -45,6 +45,22 @@ async def get_candidate(
     candidate = await session.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
+    return CandidateRead.model_validate(candidate)
+
+
+@router.patch("/candidates/{candidate_id}", response_model=CandidateRead)
+async def update_candidate(
+    candidate_id: int,
+    payload: CandidateUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> CandidateRead:
+    candidate = await session.get(Candidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="candidate not found")
+    if payload.photo_url is not None:
+        candidate.photo_url = payload.photo_url or None
+    await session.commit()
+    await session.refresh(candidate)
     return CandidateRead.model_validate(candidate)
 
 

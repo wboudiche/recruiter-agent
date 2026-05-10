@@ -41,6 +41,7 @@ class CandidateRead(BaseModel):
     source_type: str | None
     source_url: str | None
     resume_path: str | None
+    photo_url: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,3 +53,7 @@ class CandidateCreateFromUrl(BaseModel):
 class CandidateCreateFromPaste(BaseModel):
     content: str
     source_url: str | None = None
+
+
+class CandidateUpdate(BaseModel):
+    photo_url: str | None = None
