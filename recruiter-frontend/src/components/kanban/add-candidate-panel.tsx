@@ -81,11 +81,14 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg">
-        <SheetHeader>
+      <SheetContent className="w-full sm:max-w-lg flex flex-col gap-0 overflow-hidden">
+        <SheetHeader className="shrink-0 pb-4 border-b">
           <SheetTitle>Add candidate</SheetTitle>
         </SheetHeader>
-        <form onSubmit={onSubmit} className="space-y-4 mt-6">
+        <form
+          onSubmit={onSubmit}
+          className="flex-1 overflow-y-auto space-y-4 pt-4 -mr-2 pr-2"
+        >
           <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
             <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="url">URL</TabsTrigger>
