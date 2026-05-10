@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EnrichmentTab } from "@/components/settings/enrichment-tab";
 import { LlmTab } from "@/components/settings/llm-tab";
@@ -6,9 +7,19 @@ import { ProfileTab } from "@/components/settings/profile-tab";
 import { SourcingTab } from "@/components/settings/sourcing-tab";
 
 export default function Settings() {
+  const [mode, setMode] = useState<"dark" | "light">("dark");
   return (
-    <div className="space-y-6">
-      <h2 className="text-xl font-semibold">Settings</h2>
+    <div className={`geist-theme ${mode === "dark" ? "dark" : ""} -mx-6 -my-4 px-6 py-6 min-h-[calc(100vh-4rem)]`}>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-semibold tracking-tight">Settings</h2>
+        <button
+          type="button"
+          onClick={() => setMode(mode === "dark" ? "light" : "dark")}
+          className="text-xs font-mono px-3 py-1.5 border border-[hsl(var(--border))] rounded-md hover:border-[hsl(var(--foreground))] transition-colors"
+        >
+          {mode === "dark" ? "◐ DARK" : "◑ LIGHT"}
+        </button>
+      </div>
       <Tabs defaultValue="llm">
         <TabsList>
           <TabsTrigger value="llm">LLM</TabsTrigger>

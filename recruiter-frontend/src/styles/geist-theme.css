@@ -1,0 +1,175 @@
+/* Geist (Vercel) theme — scoped under .geist-theme */
+
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist/Geist-Variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/geist/GeistMono-Variable.woff2") format("woff2");
+}
+
+/* ----- Light tokens (within scope) ----- */
+.geist-theme {
+  /* Vercel grayscale (HSL space) */
+  --geist-gray-50: 0 0% 98%;
+  --geist-gray-100: 0 0% 96%;
+  --geist-gray-200: 0 0% 92%;
+  --geist-gray-300: 0 0% 88%;
+  --geist-gray-400: 0 0% 78%;
+  --geist-gray-500: 0 0% 60%;
+  --geist-gray-600: 0 0% 45%;
+  --geist-gray-700: 0 0% 30%;
+  --geist-gray-800: 0 0% 18%;
+  --geist-gray-900: 0 0% 11%;
+  --geist-gray-1000: 0 0% 5%;
+
+  /* shadcn-compatible CSS variable overrides */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 5%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 5%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 5%;
+  --primary: 0 0% 5%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 5%;
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 5%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 0 0% 92%;
+  --input: 0 0% 92%;
+  --ring: 0 0% 5%;
+  --radius: 0.375rem;
+
+  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.011em;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ----- Dark tokens (within scope) ----- */
+.geist-theme.dark,
+html.dark .geist-theme {
+  --background: 0 0% 4%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 6%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 6%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 5%;
+  --secondary: 0 0% 11%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 11%;
+  --muted-foreground: 0 0% 60%;
+  --accent: 0 0% 11%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14%;
+  --input: 0 0% 14%;
+  --ring: 0 0% 98%;
+}
+
+/* ----- Element refinements ----- */
+
+/* Tabular numerals so monospaced numbers align in tables/badges */
+.geist-theme {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono-flavored bits: code, pre, kbd */
+.geist-theme code,
+.geist-theme pre,
+.geist-theme kbd,
+.geist-theme samp {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Tighter, sharper buttons */
+.geist-theme button,
+.geist-theme [role="button"] {
+  font-feature-settings: "ss01";
+  letter-spacing: -0.01em;
+}
+
+/* Inputs: 1px border, no shadow, dense */
+.geist-theme input,
+.geist-theme textarea,
+.geist-theme select {
+  background-color: hsl(var(--background));
+  border-color: hsl(var(--border));
+  box-shadow: none !important;
+}
+
+.geist-theme input:focus-visible,
+.geist-theme textarea:focus-visible,
+.geist-theme select:focus-visible {
+  outline: none;
+  border-color: hsl(var(--foreground));
+  box-shadow: 0 0 0 1px hsl(var(--foreground)) !important;
+}
+
+/* Headings: tighter tracking */
+.geist-theme h1,
+.geist-theme h2,
+.geist-theme h3,
+.geist-theme h4 {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+
+/* Links: subtle underline on hover, foreground color by default */
+.geist-theme a:not([class*="bg-"]):not([role="tab"]) {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid hsl(var(--border));
+  transition: border-color 120ms ease;
+}
+
+.geist-theme a:not([class*="bg-"]):not([role="tab"]):hover {
+  border-bottom-color: hsl(var(--foreground));
+}
+
+/* Card-like containers get a subtle border, no shadow */
+.geist-theme [class*="rounded"][class*="border"] {
+  box-shadow: none;
+}
+
+/* Badge density */
+.geist-theme [class*="badge"],
+.geist-theme [data-slot="badge"] {
+  font-feature-settings: "ss01";
+  letter-spacing: 0;
+  border-radius: 4px;
+}
+
+/* Scrollbar in the scope: thin and themed */
+.geist-theme ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.geist-theme ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.geist-theme ::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 4px;
+}
+.geist-theme ::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground));
+}
