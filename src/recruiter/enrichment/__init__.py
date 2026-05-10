@@ -7,4 +7,5 @@ from recruiter.enrichment import hackernews as _hackernews  # noqa: F401
 from recruiter.enrichment import mastodon as _mastodon  # noqa: F401
 from recruiter.enrichment import reddit as _reddit  # noqa: F401
 from recruiter.enrichment import stackoverflow as _stackoverflow  # noqa: F401
+from recruiter.enrichment import twitter as _twitter  # noqa: F401
 from recruiter.enrichment import youtube as _youtube  # noqa: F401
