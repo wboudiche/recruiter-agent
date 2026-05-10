@@ -8,7 +8,6 @@ from recruiter.sourcing.provider import (
     register,
 )
 
-
 GOOGLE_CSE_URL = "https://www.googleapis.com/customsearch/v1"
 
 

@@ -14,5 +14,5 @@ def test_parse_linkedin_name_extracts_name(title: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize("title", [None, "", "   "])
-def test_parse_linkedin_name_returns_none_for_empty(title) -> None:
+def test_parse_linkedin_name_returns_none_for_empty(title: str | None) -> None:
     assert parse_linkedin_name(title) is None
