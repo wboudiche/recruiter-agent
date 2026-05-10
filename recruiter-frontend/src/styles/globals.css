@@ -1,8 +1,8 @@
+@import "./geist-theme.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import "./geist-theme.css";
 
 @layer base {
   :root {
