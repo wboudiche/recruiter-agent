@@ -5,3 +5,4 @@
 from recruiter.sourcing import brave as _brave  # noqa: F401
 from recruiter.sourcing import google_cse as _google_cse  # noqa: F401
 from recruiter.sourcing import searxng as _searxng  # noqa: F401
+from recruiter.sourcing import serpapi as _serpapi  # noqa: F401
