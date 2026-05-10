@@ -32,6 +32,7 @@ const Schema = z.object({
   title: z.string().min(1, "Title is required").max(255),
   description: z.string().min(1, "Description is required"),
   criteria: z.array(Criterion),
+  enrichment_consent: z.boolean().default(false),
 });
 
 type FormValues = z.infer<typeof Schema>;
@@ -51,7 +52,7 @@ export default function JobsNew() {
   const queryClient = useQueryClient();
   const form = useForm<FormValues>({
     resolver: zodResolver(Schema),
-    defaultValues: { title: "", description: "", criteria: [] },
+    defaultValues: { title: "", description: "", criteria: [], enrichment_consent: false },
   });
   const criteria = useFieldArray({ control: form.control, name: "criteria" });
   const description = form.watch("description") ?? "";
@@ -165,6 +166,19 @@ export default function JobsNew() {
             </Button>
           </div>
         ))}
+      </div>
+
+      <div className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          id="enrichment-consent"
+          className="mt-1"
+          {...form.register("enrichment_consent")}
+        />
+        <Label htmlFor="enrichment-consent" className="text-sm leading-snug font-normal">
+          Process the candidate's public technical and social presence for scoring.
+          Required where applicable law (e.g., GDPR Art. 6 + 9) demands lawful basis.
+        </Label>
       </div>
 
       <div className="flex gap-2">

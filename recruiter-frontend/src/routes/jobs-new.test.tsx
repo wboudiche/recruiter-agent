@@ -130,3 +130,58 @@ describe("JobsNew — Suggest from JD", () => {
     expect(screen.queryByPlaceholderText("Name")).not.toBeInTheDocument();
   });
 });
+
+describe("JobsNew — enrichment consent", () => {
+  beforeEach(() => server.listen({ onUnhandledRequest: "error" }));
+  afterEach(() => {
+    server.resetHandlers();
+    server.close();
+  });
+
+  it("submits enrichment_consent=true when the checkbox is ticked", async () => {
+    const captured: { body?: { enrichment_consent?: boolean } } = {};
+    server.use(
+      http.post("http://localhost:8000/api/jobs", async ({ request }) => {
+        captured.body = (await request.json()) as { enrichment_consent?: boolean };
+        return HttpResponse.json({ id: 42 }, { status: 201 });
+      }),
+    );
+
+    renderJobsNew();
+    await userEvent.type(screen.getByLabelText(/title/i), "Rust");
+    await userEvent.type(
+      screen.getByLabelText(/description/i),
+      "a".repeat(60),
+    );
+    await userEvent.click(
+      screen.getByLabelText(/Process the candidate's public technical/i),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+    await waitFor(() => {
+      expect(captured.body?.enrichment_consent).toBe(true);
+    });
+  });
+
+  it("submits enrichment_consent=false when the checkbox is left unchecked", async () => {
+    const captured: { body?: { enrichment_consent?: boolean } } = {};
+    server.use(
+      http.post("http://localhost:8000/api/jobs", async ({ request }) => {
+        captured.body = (await request.json()) as { enrichment_consent?: boolean };
+        return HttpResponse.json({ id: 43 }, { status: 201 });
+      }),
+    );
+
+    renderJobsNew();
+    await userEvent.type(screen.getByLabelText(/title/i), "Rust");
+    await userEvent.type(
+      screen.getByLabelText(/description/i),
+      "a".repeat(60),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /create job/i }));
+
+    await waitFor(() => {
+      expect(captured.body?.enrichment_consent).toBe(false);
+    });
+  });
+});
