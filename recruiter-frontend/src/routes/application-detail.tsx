@@ -3,6 +3,10 @@ import { useParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
 import { ChatPanel } from "@/components/applications/chat-panel";
 import { PasteProfileForm } from "@/components/applications/paste-profile-form";
+import {
+  EnrichmentSection,
+  type Bundle as EnrichmentBundle,
+} from "@/components/candidate/enrichment-section";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
@@ -49,6 +53,12 @@ export default function ApplicationDetail() {
           />
         </header>
         <ScoreBreakdown application={application.data} />
+        <EnrichmentSection
+          applicationId={id}
+          enrichment={
+            (application.data.enrichment as EnrichmentBundle | null) ?? null
+          }
+        />
       </div>
       <aside className="rounded border overflow-hidden">
         {application.data.awaiting_paste ? (

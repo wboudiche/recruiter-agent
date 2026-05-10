@@ -27,6 +27,7 @@ export interface ApplicationRead {
   created_at: string;
   updated_at: string;
   awaiting_paste: boolean;
+  enrichment?: unknown | null;
 }
 
 export function useJobApplications(jobId: number) {

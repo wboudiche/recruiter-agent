@@ -43,3 +43,17 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
     isPending: patch.isPending,
   };
 }
+
+export function useReEnrich() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (applicationId: number) =>
+      api(`/api/applications/${applicationId}/re-enrich`, { method: "POST" }),
+    onSuccess: (_, applicationId) => {
+      qc.invalidateQueries({ queryKey: queryKeys.application(applicationId) });
+      toast.success("Re-enrichment queued");
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.detail : "Failed"),
+  });
+}
