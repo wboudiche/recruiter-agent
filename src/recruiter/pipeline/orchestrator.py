@@ -1,15 +1,35 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
+from recruiter.enrichment.pipeline import enrich
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, EventLog, Job, Stage
+from recruiter.models import Application, Candidate, EventLog, Job, SettingsRow, Stage
 from recruiter.pipeline.extractor import extract_candidate
 from recruiter.pipeline.router import RoutedInput
 from recruiter.pipeline.scorer import score_candidate
 from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.job import CriteriaItem
+
+
+def _has_fresh_bundle(app: Application) -> bool:
+    """True when the persisted enrichment bundle is still within TTL."""
+    if not app.enrichment:
+        return False
+    expires_at = app.enrichment.get("expires_at")
+    if not expires_at:
+        return False
+    try:
+        if isinstance(expires_at, datetime):
+            ts = expires_at
+        else:
+            ts = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts > datetime.now(UTC)
 
 
 async def process_application(
@@ -53,6 +73,41 @@ async def process_application(
         _apply_extracted(candidate, extracted, raw_text=text, source_url=routed.source_url, resume_path=routed.resume_path)
         await session.flush()
 
+        # ----- enrichment stage (additive; score is unchanged) -----
+        bundle = None
+        settings_row = await session.get(SettingsRow, 1)
+        if (
+            settings_row is not None
+            and settings_row.enrichment_enabled
+            and not _has_fresh_bundle(app)
+        ):
+            await bus.publish({"type": "stage", "application_id": app.id, "stage": Stage.ENRICHING.value})
+            app.stage = Stage.ENRICHING
+            await session.commit()
+            try:
+                bundle = await enrich(
+                    candidate=candidate, job=job, settings=settings_row, llm=llm
+                )
+                app.enrichment = bundle.model_dump(mode="json")
+                session.add(EventLog(
+                    application_id=app.id,
+                    event_type="application.enriched",
+                    payload={
+                        "results": len(bundle.results),
+                        "errors": len(bundle.errors),
+                    },
+                ))
+                await session.commit()
+            except Exception as exc:
+                session.add(EventLog(
+                    application_id=app.id,
+                    event_type="enrichment.failed",
+                    payload={"error": str(exc)},
+                ))
+                await session.commit()
+                # Non-fatal: scoring proceeds.
+
+        # ----- scoring (UNCHANGED — same arguments as before) -----
         criteria = [CriteriaItem.model_validate(c) for c in (job.criteria or [])]
         try:
             score = await score_candidate(
