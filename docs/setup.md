@@ -58,6 +58,13 @@ Web/LinkedIn search supports three providers; pick one in **Settings → Sourcin
   1. https://brave.com/search/api/ → sign up → copy the API key (`brv_…`).
   2. Settings → Sourcing → Provider: **Brave Search** → paste API key → Save.
 
+### SerpAPI (Google)
+
+- Returns Google SERPs without a Google billing account. Free 100 searches/month, no card required.
+- Setup:
+  1. https://serpapi.com → sign up → copy the API key from the dashboard.
+  2. Settings → Sourcing → Provider: **SerpAPI (Google)** → paste API key → Save.
+
 ### SearXNG (self-hosted)
 
 - Unlimited; runs locally on your machine.
