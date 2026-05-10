@@ -95,6 +95,37 @@ describe("SourcingTab — multi-provider", () => {
     expect(screen.queryByLabelText(/CSE ID/i)).not.toBeInTheDocument();
   });
 
+  it("switches to SerpAPI: shows API key, hides CSE ID + Instance URL", async () => {
+    const cap: any = {};
+    mockSettingsRoutes(defaultSettings(), cap);
+    renderTab();
+    await waitFor(() => expect(screen.getByLabelText(/CSE ID/i)).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
+    await userEvent.click(screen.getByRole("option", { name: /serpapi/i }));
+
+    expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/CSE ID/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Instance URL/i)).not.toBeInTheDocument();
+  });
+
+  it("save while SerpAPI is selected sends only search_provider + search_api_key", async () => {
+    const cap: any = {};
+    mockSettingsRoutes(defaultSettings(), cap);
+    renderTab();
+    await waitFor(() => expect(screen.getByLabelText(/CSE ID/i)).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
+    await userEvent.click(screen.getByRole("option", { name: /serpapi/i }));
+    await userEvent.type(screen.getByLabelText(/API key/i), "serp_xyz");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(cap.lastBody).toBeDefined());
+    expect(cap.lastBody.search_provider).toBe("serpapi");
+    expect(cap.lastBody.search_api_key).toBe("serp_xyz");
+    expect(cap.lastBody).not.toHaveProperty("search_engine_id");
+  });
+
   it("save while Brave is selected sends only search_provider + search_api_key", async () => {
     const cap: any = {};
     mockSettingsRoutes(defaultSettings(), cap);

@@ -13,12 +13,13 @@ import {
 import { ApiError } from "@/lib/api";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 
-type Provider = "google_cse" | "brave" | "searxng";
+type Provider = "google_cse" | "brave" | "searxng" | "serpapi";
 
 const PROVIDER_LABELS: Record<Provider, string> = {
   google_cse: "Google Custom Search",
   brave: "Brave Search",
   searxng: "SearXNG (self-hosted)",
+  serpapi: "SerpAPI (Google)",
 };
 
 export function SourcingTab() {
@@ -46,7 +47,8 @@ export function SourcingTab() {
   const persistedRelevant = effProvider === cur.search_provider;
   const effCseOrUrl = cseOrUrl ?? (persistedRelevant ? (cur.search_engine_id ?? "") : "");
 
-  const showApiKey = effProvider === "google_cse" || effProvider === "brave";
+  const showApiKey =
+    effProvider === "google_cse" || effProvider === "brave" || effProvider === "serpapi";
   const showCseId = effProvider === "google_cse";
   const showInstanceUrl = effProvider === "searxng";
 
@@ -85,6 +87,7 @@ export function SourcingTab() {
           <SelectContent>
             <SelectItem value="google_cse">{PROVIDER_LABELS.google_cse}</SelectItem>
             <SelectItem value="brave">{PROVIDER_LABELS.brave}</SelectItem>
+            <SelectItem value="serpapi">{PROVIDER_LABELS.serpapi}</SelectItem>
             <SelectItem value="searxng">{PROVIDER_LABELS.searxng}</SelectItem>
           </SelectContent>
         </Select>
@@ -105,6 +108,14 @@ export function SourcingTab() {
             </a>.
           </p>
         )}
+        {effProvider === "serpapi" && (
+          <p className="text-xs text-muted-foreground">
+            Returns Google SERPs without a Google billing account. Free 100 searches/month at{" "}
+            <a className="underline" href="https://serpapi.com" target="_blank" rel="noreferrer">
+              serpapi.com
+            </a>.
+          </p>
+        )}
         {effProvider === "searxng" && (
           <p className="text-xs text-muted-foreground">
             Run SearXNG via Docker. In <code>settings.yml</code> ensure{" "}
@@ -119,7 +130,15 @@ export function SourcingTab() {
           <Input
             id="sourcing-api-key"
             type="password"
-            placeholder={cur.has_search_api_key ? "•••••• (set)" : effProvider === "brave" ? "brv_…" : "AIza…"}
+            placeholder={
+              cur.has_search_api_key
+                ? "•••••• (set)"
+                : effProvider === "brave"
+                  ? "brv_…"
+                  : effProvider === "serpapi"
+                    ? "serpapi key"
+                    : "AIza…"
+            }
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />
