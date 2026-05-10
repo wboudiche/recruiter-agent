@@ -20,13 +20,13 @@ describe("ThemeProvider", () => {
     document.documentElement.classList.remove("dark");
   });
 
-  it("defaults to system when no stored preference", () => {
+  it("defaults to dark when no stored preference", () => {
     render(
       <ThemeProvider>
         <Probe />
       </ThemeProvider>,
     );
-    expect(screen.getByTestId("theme").textContent).toMatch(/system|light/);
+    expect(screen.getByTestId("theme").textContent).toBe("dark");
   });
 
   it("setTheme('dark') applies .dark class to <html> and persists", async () => {

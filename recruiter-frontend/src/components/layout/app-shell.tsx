@@ -8,7 +8,7 @@ import { SearchTrigger } from "@/components/command-palette/search-trigger";
 export function AppShell() {
   return (
     <CommandPaletteProvider>
-      <div className="min-h-screen flex flex-col">
+      <div className="geist-theme min-h-screen flex flex-col">
         <header className="border-b">
           <div className="container flex h-14 items-center justify-between">
             <Link to="/jobs" className="text-lg font-semibold">
