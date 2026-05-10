@@ -18,6 +18,11 @@ export interface SettingsRead {
   search_engine_id: string | null;
   has_search_api_key: boolean;
   has_github_token: boolean;
+  enrichment_enabled: boolean;
+  has_enrichment_twitter_api_key: boolean;
+  has_enrichment_youtube_api_key: boolean;
+  has_enrichment_stackexchange_key: boolean;
+  enrichment_sources: Record<string, boolean>;
 }
 
 export interface SmtpConfigInput {
@@ -43,6 +48,11 @@ export interface SettingsUpdate {
   search_api_key?: string;
   search_engine_id?: string;
   github_token?: string;
+  enrichment_enabled?: boolean;
+  enrichment_twitter_api_key?: string;
+  enrichment_youtube_api_key?: string;
+  enrichment_stackexchange_key?: string;
+  enrichment_sources?: Record<string, boolean>;
 }
 
 export function useSettings() {

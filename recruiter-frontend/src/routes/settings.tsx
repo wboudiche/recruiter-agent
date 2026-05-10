@@ -1,4 +1,5 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EnrichmentTab } from "@/components/settings/enrichment-tab";
 import { LlmTab } from "@/components/settings/llm-tab";
 import { NotificationsTab } from "@/components/settings/notifications-tab";
 import { ProfileTab } from "@/components/settings/profile-tab";
@@ -13,6 +14,7 @@ export default function Settings() {
           <TabsTrigger value="llm">LLM</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="sourcing">Sourcing</TabsTrigger>
+          <TabsTrigger value="enrichment">Enrichment</TabsTrigger>
           <TabsTrigger value="profile">Profile</TabsTrigger>
         </TabsList>
         <TabsContent value="llm" className="pt-6">
@@ -23,6 +25,9 @@ export default function Settings() {
         </TabsContent>
         <TabsContent value="sourcing" className="pt-6">
           <SourcingTab />
+        </TabsContent>
+        <TabsContent value="enrichment" className="pt-6">
+          <EnrichmentTab />
         </TabsContent>
         <TabsContent value="profile" className="pt-6">
           <ProfileTab />
