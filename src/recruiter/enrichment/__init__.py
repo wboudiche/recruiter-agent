@@ -1,5 +1,6 @@
 # Provider module imports get appended here as each @register-decorated
 # class lands. Empty until T5 adds the first provider (Hacker News).
+from recruiter.enrichment import blog as _blog  # noqa: F401
 from recruiter.enrichment import bluesky as _bluesky  # noqa: F401
 from recruiter.enrichment import devto as _devto  # noqa: F401
 from recruiter.enrichment import github as _github  # noqa: F401
