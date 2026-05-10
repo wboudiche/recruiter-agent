@@ -40,3 +40,15 @@ globalThis.EventSource = StubEventSource;
 
 // jsdom doesn't implement scrollIntoView; stub for ChatPanel auto-scroll and similar.
 Element.prototype.scrollIntoView = vi.fn();
+
+// jsdom doesn't implement the Pointer Capture API; Radix Select calls these
+// during open/close, so stub them out to keep <Select> tests functional.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = vi.fn();
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = vi.fn();
+}
