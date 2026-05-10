@@ -95,3 +95,56 @@ Web/LinkedIn search supports three providers; pick one in **Settings → Sourcin
 
 - Works without configuration (60 requests/hour anonymously).
 - Optional: Settings → Sourcing → paste a GitHub personal access token (`ghp_…`) to raise the limit to 5000/hour.
+
+## Candidate enrichment
+
+Enrichment fetches public profile data from up to 10 sources (GitHub, Stack Overflow,
+Hacker News, Reddit, Mastodon, Bluesky, Dev.to, YouTube, Twitter/X, blog/website)
+and surfaces it on the candidate detail page so the recruiter can review the
+candidate's public technical and social presence.
+
+**Important: enrichment never reaches the LLM scorer.** The score is computed from
+the resume only, identical to before. Enrichment is a research aid for the recruiter.
+
+### Enabling
+
+1. Settings → Enrichment → tick **Enable enrichment**.
+2. Per source, leave the checkbox ticked (default) or untick to skip that source.
+3. For paid / keyed sources:
+   - **Twitter / X**: requires X API v2 Basic (~$200/month). Paste the bearer token.
+   - **YouTube**: free 10k units/day from Google Cloud. Paste the API key.
+   - **Stack Exchange** (optional): raises the per-IP quota from 300/d to 10k/d.
+4. **GitHub**: reuses the GitHub token from the Sourcing tab — no separate field.
+
+### Per-job consent
+
+Each Job has an `enrichment_consent` checkbox. **Default off.**
+
+When `false`:
+- Only URLs the candidate explicitly listed in their resume are enriched.
+- No discovery searches run.
+- Twitter/X is skipped entirely.
+
+When `true`:
+- Discovery searches run (`"<name>" "<employer>" site:<domain>` per provider, via the
+  active sourcing provider). Costs roughly 8–15 sourcing API calls per candidate.
+- All providers including Twitter/X are eligible.
+
+The label reads:
+
+> Process the candidate's public technical and social presence for scoring.
+> Required where applicable law (e.g., GDPR Art. 6 + 9) demands lawful basis.
+
+### TTL & re-enrich
+
+Bundles are persisted on `Application.enrichment` with a 30-day TTL. Within TTL,
+retries reuse the cache. To refresh on demand, click **Re-enrich now** on the
+candidate detail page; this clears the bundle and re-runs the pipeline.
+
+### Failure modes
+
+- A failed source logs `enrichment.failed` and shows up in the per-source error
+  rows under the enrichment section, but never blocks scoring.
+- If the master toggle is off, the enrichment stage no-ops and the pipeline
+  proceeds as before.
+- If the per-job consent is off, only `candidate.links` are enriched.
