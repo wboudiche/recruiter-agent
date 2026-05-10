@@ -68,17 +68,22 @@ def consolidate(
     # Defensive copy so we don't mutate caller-owned objects.
     out = [r.model_copy(deep=True) for r in results]
 
-    confirmed_usernames: set[str] = set()
+    # Track usernames alongside the URL that contributed them, so a result
+    # whose profile_url is itself the only anchor for its username doesn't
+    # self-corroborate.
+    confirmed_username_sources: dict[str, set[str]] = {}
+
+    def _add_confirmed(un: str | None, source_url: str) -> None:
+        if not un:
+            return
+        confirmed_username_sources.setdefault(un.lower(), set()).add(source_url.lower())
+
     for u in anchor_urls:
-        un = _extract_username(u)
-        if un:
-            confirmed_usernames.add(un.lower())
+        _add_confirmed(_extract_username(u), u)
     # Provider-anchored (confidence 1.0) results add to confirmed pool too.
     for r in out:
         if r.confidence >= 1.0:
-            un = _extract_username(r.profile_url)
-            if un:
-                confirmed_usernames.add(un.lower())
+            _add_confirmed(_extract_username(r.profile_url), r.profile_url)
 
     anchor_email_set = {e.lower() for e in anchor_emails}
     anchor_url_set = {u.lower() for u in anchor_urls}
@@ -93,13 +98,17 @@ def consolidate(
         changed = False
         # Re-derive corroboration sets each pass — promotions in pass N let
         # pass N+1 cross-link further.
-        confirmed_now = set(confirmed_usernames)
+        confirmed_username_sources_now: dict[str, set[str]] = {
+            k: set(v) for k, v in confirmed_username_sources.items()
+        }
         confirmed_links: set[str] = set(anchor_url_set)
         for r in out:
             if r.confidence >= 0.8:
                 un = _extract_username(r.profile_url)
                 if un:
-                    confirmed_now.add(un.lower())
+                    confirmed_username_sources_now.setdefault(un.lower(), set()).add(
+                        r.profile_url.lower()
+                    )
                 confirmed_links.add(r.profile_url.lower())
 
         for idx, r in enumerate(out):
@@ -110,9 +119,13 @@ def consolidate(
             bonus = 0.0
             un = _extract_username(r.profile_url)
 
-            # Rule 2: username exact-matches a confirmed username (other platform).
-            if un and un.lower() in confirmed_now:
-                bonus += 0.2
+            # Rule 2: username exact-matches a confirmed username on a
+            # *different* URL (corroboration must come from another source,
+            # not the result corroborating itself).
+            if un:
+                sources = confirmed_username_sources_now.get(un.lower(), set())
+                if sources - {r.profile_url.lower()}:
+                    bonus += 0.2
 
             # Rule 3: email/website on the page matches a candidate email
             # or a 1.0-anchor link.
