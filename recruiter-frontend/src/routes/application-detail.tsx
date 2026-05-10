@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
+import { CandidateProfile } from "@/components/candidate/candidate-profile";
 import { ChatPanel } from "@/components/applications/chat-panel";
 import { PasteProfileForm } from "@/components/applications/paste-profile-form";
 import {
@@ -35,23 +36,22 @@ export default function ApplicationDetail() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 h-[calc(100vh-6.5rem)]">
-      <div className="space-y-6 overflow-y-auto">
-        <header className="space-y-2">
-          <h2 className="text-xl font-semibold">
-            {candidate.data?.full_name ??
-              `Candidate #${application.data.candidate_id}`}
-          </h2>
-          <p className="text-sm text-muted-foreground capitalize">
+      <div className="space-y-6 overflow-y-auto pr-2">
+        {candidate.data && <CandidateProfile candidate={candidate.data} />}
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            stage:
+          </span>
+          <span className="text-sm font-medium capitalize">
             {application.data.stage}
-          </p>
-          {candidate.data?.email && (
-            <p className="text-sm text-muted-foreground">{candidate.data.email}</p>
-          )}
-          <ActionBar
-            application={application.data}
-            candidateEmail={candidate.data?.email}
-          />
-        </header>
+          </span>
+          <div className="ml-auto">
+            <ActionBar
+              application={application.data}
+              candidateEmail={candidate.data?.email}
+            />
+          </div>
+        </div>
         <ScoreBreakdown application={application.data} />
         <EnrichmentSection
           applicationId={id}
