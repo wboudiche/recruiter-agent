@@ -112,3 +112,34 @@ async def test_search_clamps_count_to_brave_max() -> None:
     p = _make_provider(httpx.MockTransport(handler))
     await p.search("x", 999)
     assert seen["count"] == "20"
+
+
+def test_brave_registered_in_global_registry() -> None:
+    # Importing recruiter.sourcing must register "brave" via __init__.
+    import recruiter.sourcing  # noqa: F401  triggers the brave import
+    from recruiter.sourcing.provider import resolve
+
+    fake_settings = type("S", (), {
+        "search_provider": "brave",
+        # search_api_key_enc holds an encrypted blob; the factory will try
+        # to decrypt it. Provide a real-looking encrypted value below.
+    })()
+    # The factory needs a real encrypted blob — simulate using settings_cipher.
+    from recruiter.crypto import settings_cipher
+    enc = settings_cipher().encrypt("brv_dummy")
+    fake_settings.search_api_key_enc = enc
+    p = resolve(fake_settings)
+    assert isinstance(p, BraveSearchProvider)
+
+
+def test_brave_factory_raises_when_key_missing() -> None:
+    import recruiter.sourcing  # noqa: F401
+    from recruiter.sourcing.provider import resolve
+
+    fake_settings = type("S", (), {
+        "search_provider": "brave",
+        "search_api_key_enc": None,
+    })()
+    with pytest.raises(SearchError) as ei:
+        resolve(fake_settings)
+    assert ei.value.transient is False
