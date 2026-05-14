@@ -12,10 +12,19 @@ from recruiter.models import Base
 
 
 @pytest.fixture
-async def api_client_unauth(pg_dsn: str) -> AsyncIterator[AsyncClient]:
+async def api_client_unauth(pg_dsn: str, monkeypatch) -> AsyncIterator[AsyncClient]:
     """Unauthenticated client. Most tests should NOT use this — use
     api_client (which logs a dev-bypass user in) instead. Reserved for
-    auth tests that exercise the unauthenticated path."""
+    auth tests that exercise the unauthenticated path.
+
+    Clears both `RECRUITER_DEV_AUTH_BYPASS` and `RECRUITER_OIDC_ISSUER` so
+    that a developer's local `.env` doesn't silently activate dev bypass
+    inside tests that explicitly need the 401 path.
+    """
+    monkeypatch.setenv("RECRUITER_DEV_AUTH_BYPASS", "")
+    monkeypatch.setenv("RECRUITER_OIDC_ISSUER", "")
+    get_config.cache_clear()
+
     engine = create_async_engine(pg_dsn)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -34,6 +43,7 @@ async def api_client_unauth(pg_dsn: str) -> AsyncIterator[AsyncClient]:
     finally:
         app.dependency_overrides.clear()
         await engine.dispose()
+        get_config.cache_clear()
 
 
 @pytest.fixture
