@@ -15,6 +15,11 @@ from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
 
+# Authorization model: shared workspace. Any user authenticated via OIDC and
+# accepted by the domain allowlist (`auth.allowlist`) can read and mutate any
+# candidate or application — there is no per-record owner check by design.
+# If per-user ownership or role tiers (admin/recruiter/viewer) are ever needed,
+# add a column on Candidate/Application and a guard alongside `require_user`.
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
 
@@ -57,10 +62,12 @@ async def update_candidate(
     candidate = await session.get(Candidate, candidate_id)
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
-    if payload.photo_url is not None:
-        candidate.photo_url = payload.photo_url or None
+    # `mode="json"` serializes HttpUrl back to plain `str` so the value can
+    # be assigned to a String column without coupling the model to Pydantic types.
+    data = payload.model_dump(exclude_unset=True, mode="json")
+    if "photo_url" in data:
+        candidate.photo_url = data["photo_url"] or None
     await session.commit()
-    await session.refresh(candidate)
     return CandidateRead.model_validate(candidate)
 
 

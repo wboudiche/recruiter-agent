@@ -23,6 +23,27 @@ from recruiter.schemas.auth import UserRead
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+def _safe_next(value: str | None) -> str:
+    """Restrict post-login redirect targets to same-origin paths.
+
+    Rejects absolute URLs (`https://evil.tld/...`), protocol-relative URLs
+    (`//evil.tld`), Windows path traversal (`/\\evil`), header-injection
+    payloads (`\\r\\n`), and anything containing a scheme delimiter
+    (`javascript:`, `data:`). Falls back to `/`.
+    """
+    if not value or not isinstance(value, str):
+        return "/"
+    if "\r" in value or "\n" in value:
+        return "/"
+    if not value.startswith("/"):
+        return "/"
+    if value.startswith("//") or value.startswith("/\\"):
+        return "/"
+    if ":" in value:
+        return "/"
+    return value
+
+
 _NOT_AUTHORIZED_HTML = """\
 <!doctype html><meta charset="utf-8"><title>Not authorized</title>
 <style>body{font-family:system-ui;max-width:480px;margin:4em auto;padding:1em}</style>
@@ -54,7 +75,7 @@ async def login(
     verifier, challenge = generate_pkce()
 
     session.add(OAuthState(
-        state=state, nonce=nonce, pkce_verifier=verifier, next_url=next or "/",
+        state=state, nonce=nonce, pkce_verifier=verifier, next_url=_safe_next(next),
     ))
     await session.commit()
 
@@ -149,7 +170,7 @@ async def callback(
         ip=request.client.host if request.client else None,
     )
 
-    response = RedirectResponse(next_url or "/", status_code=302)
+    response = RedirectResponse(_safe_next(next_url), status_code=302)
     response.set_cookie(
         key="recruiter_session", value=token, httponly=True, samesite="strict",
         secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",

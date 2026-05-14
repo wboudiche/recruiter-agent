@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
 class ExperienceItem(BaseModel):
@@ -56,4 +56,14 @@ class CandidateCreateFromPaste(BaseModel):
 
 
 class CandidateUpdate(BaseModel):
-    photo_url: str | None = None
+    # HttpUrl rejects non-http(s) schemes (javascript:, data:, file:) so the
+    # value can never be a script-execution or local-file vector when rendered
+    # as `<img src>`. max_length caps payload size before the DB layer.
+    photo_url: HttpUrl | None = Field(default=None, max_length=2048)
+
+    @field_validator("photo_url")
+    @classmethod
+    def _len_cap(cls, v: HttpUrl | None) -> HttpUrl | None:
+        if v is not None and len(str(v)) > 2048:
+            raise ValueError("photo_url too long (max 2048 chars)")
+        return v

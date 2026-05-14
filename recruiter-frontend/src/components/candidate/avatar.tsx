@@ -12,9 +12,9 @@ const PALETTE = [
 ];
 
 const SIZES = {
-  sm: "h-8 w-8 text-xs",
-  md: "h-12 w-12 text-sm",
-  lg: "h-20 w-20 text-2xl",
+  sm: { cls: "h-8 w-8 text-xs", px: 32 },
+  md: { cls: "h-12 w-12 text-sm", px: 48 },
+  lg: { cls: "h-20 w-20 text-2xl", px: 80 },
 } as const;
 
 function initials(name: string | null | undefined): string {
@@ -43,16 +43,23 @@ interface AvatarProps {
 
 export function Avatar({ name, photoUrl, size = "md", className = "" }: AvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
-  const sizeCls = SIZES[size];
-  const useImage = photoUrl && !imgFailed;
+  const { cls, px } = SIZES[size];
+  // Defense-in-depth: even though the API now enforces HttpUrl, refuse to
+  // render any non-http(s) value (data:/javascript:/file:) at the boundary.
+  const safeUrl = photoUrl && /^https?:\/\//i.test(photoUrl) ? photoUrl : null;
+  const useImage = safeUrl && !imgFailed;
 
   if (useImage) {
     return (
       <img
-        src={photoUrl}
+        src={safeUrl}
         alt={name ?? "Candidate"}
+        width={px}
+        height={px}
+        loading="lazy"
+        decoding="async"
         onError={() => setImgFailed(true)}
-        className={`${sizeCls} rounded-full object-cover bg-muted ${className}`}
+        className={`${cls} rounded-full object-cover bg-muted ${className}`}
       />
     );
   }
@@ -60,7 +67,7 @@ export function Avatar({ name, photoUrl, size = "md", className = "" }: AvatarPr
   return (
     <span
       aria-label={name ?? "Candidate"}
-      className={`${sizeCls} rounded-full grid place-items-center font-semibold text-white bg-gradient-to-br ${paletteFor(name)} ${className}`}
+      className={`${cls} rounded-full grid place-items-center font-semibold text-white bg-gradient-to-br ${paletteFor(name)} ${className}`}
     >
       {initials(name)}
     </span>

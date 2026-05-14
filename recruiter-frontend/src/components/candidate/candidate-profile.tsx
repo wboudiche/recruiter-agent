@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card as UICard } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   CandidateRead,
@@ -53,6 +54,11 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
   const [photoUrl, setPhotoUrl] = useState(candidate.photo_url ?? "");
   const update = useUpdateCandidate(candidate.id);
 
+  function startEditing() {
+    setPhotoUrl(candidate.photo_url ?? "");
+    setEditing(true);
+  }
+
   function save() {
     update.mutate(
       { photo_url: photoUrl.trim() || null },
@@ -78,7 +84,7 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
         />
         <button
           type="button"
-          onClick={() => setEditing(true)}
+          onClick={startEditing}
           aria-label="Edit photo"
           className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full bg-card border shadow-sm hover:bg-accent transition-colors"
         >
@@ -160,7 +166,7 @@ function SkillsSection({ skills }: { skills: string[] }) {
   const hidden = skills.length - visible.length;
 
   return (
-    <Card title="Skills">
+    <Section title="Skills">
       <div className="flex flex-wrap gap-1.5">
         {visible.map((s, i) => (
           <span
@@ -180,13 +186,13 @@ function SkillsSection({ skills }: { skills: string[] }) {
           </button>
         )}
       </div>
-    </Card>
+    </Section>
   );
 }
 
 function ExperienceSection({ items }: { items: ExperienceItem[] }) {
   return (
-    <Card title="Experience">
+    <Section title="Experience">
       <ol className="space-y-4">
         {items.map((it, i) => (
           <li key={i} className="relative pl-4 border-l-2 border-primary/30">
@@ -209,13 +215,13 @@ function ExperienceSection({ items }: { items: ExperienceItem[] }) {
           </li>
         ))}
       </ol>
-    </Card>
+    </Section>
   );
 }
 
 function EducationSection({ items }: { items: EducationItem[] }) {
   return (
-    <Card title="Education">
+    <Section title="Education">
       <ul className="space-y-2">
         {items.map((it, i) => (
           <li key={i} className="flex items-start gap-2 text-sm">
@@ -237,41 +243,48 @@ function EducationSection({ items }: { items: EducationItem[] }) {
           </li>
         ))}
       </ul>
-    </Card>
+    </Section>
   );
 }
 
 function LinksSection({ items }: { items: LinkItem[] }) {
+  // Drop links that aren't plain http(s) — data:/javascript:/etc. could
+  // execute or open uncontrolled origins when clicked.
+  const safe = items.filter((l) => /^https?:\/\//i.test(l.url));
+  if (safe.length === 0) return null;
   return (
-    <Card title="Links">
+    <Section title="Links">
       <ul className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
-        {items.map((l, i) => (
-          <li key={i}>
-            <a
-              href={l.url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 hover:text-primary transition-colors"
-            >
-              {iconForUrl(l.url)}
-              {l.label || domainOf(l.url)}
-              <ExternalLink className="h-3 w-3 opacity-50" />
-            </a>
-          </li>
-        ))}
+        {safe.map((l, i) => {
+          const host = domainOf(l.url);
+          return (
+            <li key={i}>
+              <a
+                href={l.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 hover:text-primary transition-colors"
+              >
+                {iconForHost(host)}
+                {l.label || host}
+                <ExternalLink className="h-3 w-3 opacity-50" />
+              </a>
+            </li>
+          );
+        })}
       </ul>
-    </Card>
+    </Section>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border bg-card p-4">
+    <UICard className="p-4">
       <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
         {title}
       </h3>
       {children}
-    </div>
+    </UICard>
   );
 }
 
@@ -283,8 +296,7 @@ function domainOf(url: string): string {
   }
 }
 
-function iconForUrl(url: string) {
-  const host = domainOf(url);
+function iconForHost(host: string) {
   const cls = "h-3.5 w-3.5";
   if (host.includes("linkedin.com")) return <Linkedin className={cls} />;
   if (host.includes("github.com")) return <Github className={cls} />;

@@ -3,6 +3,7 @@ export const queryKeys = {
   job: (id: number) => ["jobs", id] as const,
   jobApplications: (jobId: number) => ["jobs", jobId, "applications"] as const,
   application: (id: number) => ["applications", id] as const,
+  candidate: (id: number) => ["candidates", id] as const,
   chat: (applicationId: number) => ["applications", applicationId, "chat"] as const,
   settings: () => ["settings"] as const,
   currentUser: () => ["auth", "me"] as const,

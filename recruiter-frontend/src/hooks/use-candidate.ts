@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
 
 export interface ExperienceItem {
   title: string | null;
@@ -45,7 +46,7 @@ export interface CandidateRead {
 
 export function useCandidate(candidateId: number | undefined) {
   return useQuery({
-    queryKey: ["candidate", candidateId],
+    queryKey: candidateId !== undefined ? queryKeys.candidate(candidateId) : ["candidates", "none"],
     queryFn: () => api<CandidateRead>(`/api/candidates/${candidateId}`),
     enabled: candidateId !== undefined && !Number.isNaN(candidateId),
   });
@@ -60,7 +61,9 @@ export function useUpdateCandidate(candidateId: number | undefined) {
         json: patch,
       }),
     onSuccess: (data) => {
-      qc.setQueryData(["candidate", candidateId], data);
+      if (candidateId !== undefined) {
+        qc.setQueryData(queryKeys.candidate(candidateId), data);
+      }
       toast.success("Candidate updated");
     },
     onError: (err) =>
