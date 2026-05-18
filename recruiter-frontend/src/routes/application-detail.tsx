@@ -9,16 +9,21 @@ import {
   type Bundle as EnrichmentBundle,
 } from "@/components/candidate/enrichment-section";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Spinner } from "@/components/ui/spinner";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
+import { useJob } from "@/hooks/use-job";
 
 export default function ApplicationDetail() {
   const { appId } = useParams<{ appId: string }>();
   const id = Number(appId);
   const application = useApplication(id);
   const candidate = useCandidate(application.data?.candidate_id);
+  // Job is only needed for the breadcrumb. We pass `enabled` via the
+  // application's job_id so the query waits for the application fetch.
+  const job = useJob(application.data?.job_id ?? Number.NaN);
 
   useEffect(() => {
     if (application.data && candidate.data) {
@@ -35,8 +40,20 @@ export default function ApplicationDetail() {
     return <p className="text-destructive">Failed to load.</p>;
   if (!application.data) return <p>Not found.</p>;
 
+  const candidateName =
+    candidate.data?.full_name ?? `Candidate #${application.data.candidate_id}`;
+  const jobTitle = job.data?.title ?? `Job #${application.data.job_id}`;
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 h-[calc(100vh-6.5rem)]">
+    <div className="flex flex-col gap-4 h-[calc(100vh-6.5rem)]">
+      <Breadcrumb
+        items={[
+          { label: "Jobs", to: "/jobs" },
+          { label: jobTitle, to: `/jobs/${application.data.job_id}` },
+          { label: candidateName },
+        ]}
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 flex-1 min-h-0">
       <div className="space-y-6 overflow-y-auto pr-2">
         {candidate.data && <CandidateProfile candidate={candidate.data} />}
         <div className="flex items-center gap-3 flex-wrap">
@@ -77,6 +94,7 @@ export default function ApplicationDetail() {
           <ChatPanel applicationId={id} jobId={application.data.job_id} />
         )}
       </aside>
+      </div>
     </div>
   );
 }

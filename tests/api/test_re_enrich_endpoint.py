@@ -55,13 +55,26 @@ async def test_re_enrich_clears_bundle_and_returns_202(api_client: AsyncClient) 
         r = await api_client.post(f"/api/applications/{app_id}/re-enrich")
         assert r.status_code == 202, r.text
 
+        # The route handler clears the bundle and flips stage to
+        # ENRICHING synchronously, then schedules the orchestrator's
+        # re-enrich entry point as a background task. With the new
+        # fast path (no re-extract / re-score), that task can finish
+        # before this assertion reads the row — so we accept either
+        # the intermediate ENRICHING state OR the post-completion
+        # SCORED state. Both are correct outcomes from the user's
+        # perspective.
         engine = app.dependency_overrides[get_engine_dep]()
         SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
         async with SessionLocal() as session:
             row = await session.get(Application, app_id)
             assert row is not None
-            assert row.enrichment is None
-            assert row.stage.value == "enriching"
+            assert row.stage.value in {"enriching", "scored"}, row.stage.value
+            # The seeded bundle ({"results": [...]}) is gone. After the
+            # background task, the bundle may be either None or the new
+            # fresh enrichment payload — both mean "the stale bundle
+            # was cleared".
+            if row.enrichment is not None:
+                assert row.enrichment.get("results") != [{"x": 1}]
     finally:
         app.dependency_overrides.pop(get_llm, None)
 

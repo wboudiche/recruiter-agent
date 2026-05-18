@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Plus, SlidersHorizontal } from "lucide-react";
+import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { AddCandidatePanel } from "@/components/kanban/add-candidate-panel";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
@@ -9,6 +10,7 @@ import {
   type Density,
 } from "@/components/kanban/kanban-density-toggle";
 import { EditCriteriaSheet } from "@/components/jobs/edit-criteria-sheet";
+import { JobActionsMenu } from "@/components/jobs/job-actions-menu";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
 
@@ -44,6 +46,12 @@ export default function JobDetail() {
 
   return (
     <div className="space-y-4">
+      <Breadcrumb
+        items={[
+          { label: "Jobs", to: "/jobs" },
+          { label: job.data.title },
+        ]}
+      />
       <header className="flex items-baseline justify-between">
         <div>
           <h2 className="text-xl font-semibold">{job.data.title}</h2>
@@ -72,6 +80,7 @@ export default function JobDetail() {
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
           </Button>
+          <JobActionsMenu job={job.data} />
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4 mr-1" />
             Add candidate

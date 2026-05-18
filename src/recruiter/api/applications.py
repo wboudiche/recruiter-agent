@@ -10,7 +10,10 @@ from recruiter.api.deps import get_session, require_user
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, Stage
-from recruiter.pipeline.orchestrator import process_application
+from recruiter.pipeline.orchestrator import (
+    process_application,
+    re_enrich_application as run_re_enrich,
+)
 from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
@@ -252,24 +255,18 @@ async def re_enrich_application(
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
 
+    # Clear the cached bundle and flip stage to ENRICHING synchronously
+    # so the UI can show the loader immediately. The orchestrator's
+    # re-enrich entry point will fetch fresh signals and restore the
+    # stage to SCORED. We do NOT re-run extract/score — that's a
+    # separate concern (the user can Reject + re-add for a full rerun).
     app_row.enrichment = None
     app_row.stage = Stage.ENRICHING
     await session.commit()
 
-    raw_text = ""
-    if candidate.raw_extracted and isinstance(candidate.raw_extracted, dict):
-        raw_text = candidate.raw_extracted.get("text", "") or ""
-
-    routed = RoutedInput(
-        kind="paste",
-        text=raw_text,
-        source_url=candidate.source_url,
-        resume_path=candidate.resume_path,
-    )
     background_tasks.add_task(
-        process_application,
+        run_re_enrich,
         application_id=application_id,
-        routed=routed,
         engine=engine,
         llm=llm,
         bus=bus,

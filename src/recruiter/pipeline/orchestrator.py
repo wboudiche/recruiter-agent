@@ -13,6 +13,80 @@ from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.job import CriteriaItem
 
 
+async def re_enrich_application(
+    *,
+    application_id: int,
+    engine: AsyncEngine,
+    llm: LLMClient,
+    bus: EventBus,
+) -> None:
+    """Re-run ONLY the enrichment step for an already-extracted candidate.
+
+    The full `process_application` re-runs fetch + extract + score in
+    addition to enrich, which is the wrong default for a "refresh
+    enrichment" user action — if extract fails (e.g. the raw text is
+    empty or the LLM hiccups) the candidate gets stuck in `enriching`
+    with no score change available.
+
+    This entry point loads the existing candidate, runs the enrichment
+    pipeline, persists the result, and restores the stage to SCORED
+    on success (or back to whatever it was on failure).
+    """
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        app = await session.get(Application, application_id)
+        if app is None:
+            return
+        candidate = await session.get(Candidate, app.candidate_id)
+        if candidate is None:
+            return
+        job = await session.get(Job, app.job_id)
+        if job is None:
+            return
+
+        prior_stage = app.stage
+        settings_row = await session.get(SettingsRow, 1)
+        if settings_row is None or not settings_row.enrichment_enabled:
+            # Enrichment globally disabled — nothing to do, restore stage.
+            app.stage = prior_stage if prior_stage != Stage.ENRICHING else Stage.SCORED
+            await session.commit()
+            return
+
+        await bus.publish({
+            "type": "stage", "application_id": app.id, "stage": Stage.ENRICHING.value,
+        })
+        app.stage = Stage.ENRICHING
+        await session.commit()
+
+        try:
+            bundle = await enrich(
+                candidate=candidate, job=job, settings=settings_row, llm=llm,
+            )
+            app.enrichment = bundle.model_dump(mode="json")
+            session.add(EventLog(
+                application_id=app.id,
+                event_type="application.enriched",
+                payload={"results": len(bundle.results), "errors": len(bundle.errors)},
+            ))
+        except Exception as exc:
+            session.add(EventLog(
+                application_id=app.id,
+                event_type="enrichment.failed",
+                payload={"error": str(exc) or type(exc).__name__},
+            ))
+
+        # Restore: scored candidates go back to scored regardless of
+        # enrichment success (it's a non-fatal step). Unscored candidates
+        # keep their prior stage so we don't lie about progress.
+        app.stage = Stage.SCORED if app.score is not None else prior_stage
+        await session.commit()
+
+    await bus.publish({
+        "type": "stage", "application_id": application_id,
+        "stage": (Stage.SCORED if app.score is not None else prior_stage).value,
+    })
+
+
 def _has_fresh_bundle(app: Application) -> bool:
     """True when the persisted enrichment bundle is still within TTL."""
     if not app.enrichment:
