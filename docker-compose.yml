@@ -3,7 +3,9 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: recruiter
-      POSTGRES_PASSWORD: recruiter
+      # NOTE: compose reads this from .env. Required (no default) so a
+      # forgotten .env fails loudly instead of silently using `recruiter`.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.example}
       POSTGRES_DB: recruiter
     ports:
       - "5432:5432"
@@ -20,8 +22,13 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      RECRUITER_DATABASE_URL: postgresql+asyncpg://recruiter:recruiter@postgres:5432/recruiter
-      RECRUITER_SETTINGS_KEY: dev-only-32-byte-key-replace-me!
+      # Built from POSTGRES_PASSWORD so we don't repeat the secret.
+      RECRUITER_DATABASE_URL: postgresql+asyncpg://recruiter:${POSTGRES_PASSWORD:?}@postgres:5432/recruiter
+      # The Fernet key encrypts every *_enc column in settings (LLM keys,
+      # API tokens, LinkedIn cookies, etc.). REQUIRED — `?` makes compose
+      # refuse to start if .env is missing it. Generate via:
+      #   python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+      RECRUITER_SETTINGS_KEY: ${RECRUITER_SETTINGS_KEY:?RECRUITER_SETTINGS_KEY is required — see .env.example}
       RECRUITER_RESUME_STORAGE_PATH: /app/var/resumes
       RECRUITER_LOG_LEVEL: INFO
       RECRUITER_OIDC_ISSUER: ""
@@ -30,10 +37,10 @@ services:
       # RECRUITER_DEV_AUTH_BYPASS in a local .env if you want the
       # password-less mode back.
       RECRUITER_DEV_AUTH_BYPASS: ""
-      # Seed "default account" — single bootstrap user. Override the
-      # password via .env in any real deployment.
-      RECRUITER_DEFAULT_ACCOUNT_EMAIL: admin@acme.com
-      RECRUITER_DEFAULT_ACCOUNT_PASSWORD: ${RECRUITER_DEFAULT_ACCOUNT_PASSWORD:-changeme}
+      # Seed "default account" — single bootstrap user, only used on the
+      # very first start. REQUIRED so no weak default ships in compose.
+      RECRUITER_DEFAULT_ACCOUNT_EMAIL: ${RECRUITER_DEFAULT_ACCOUNT_EMAIL:?RECRUITER_DEFAULT_ACCOUNT_EMAIL is required — see .env.example}
+      RECRUITER_DEFAULT_ACCOUNT_PASSWORD: ${RECRUITER_DEFAULT_ACCOUNT_PASSWORD:?RECRUITER_DEFAULT_ACCOUNT_PASSWORD is required — see .env.example}
       # Browser hits the same origin (http://localhost:8088); nginx proxies
       # /api to this container. Origin allowlist must include that origin.
       RECRUITER_ALLOWED_ORIGINS: http://localhost:8088

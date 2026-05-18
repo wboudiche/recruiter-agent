@@ -61,17 +61,29 @@ calls; a local OpenAI-compat endpoint also works).
 git clone <repo> recruiter-agent
 cd recruiter-agent
 
-# minimum env — secrets cipher key + admin credentials
+# Required env — the compose file refuses to start if any of these
+# is missing or empty.
 cp .env.example .env
-# edit .env: RECRUITER_SECRETS_KEY=<32-byte base64>
-#            RECRUITER_ADMIN_EMAIL=you@example.com
-#            RECRUITER_ADMIN_PASSWORD=<long random string>
+
+# Generate the Fernet key that encrypts your stored API keys / cookies.
+# Paste the output into .env as RECRUITER_SETTINGS_KEY=...
+python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+
+# Edit .env and set:
+#   POSTGRES_PASSWORD=<anything random>
+#   RECRUITER_SETTINGS_KEY=<output of the command above>
+#   RECRUITER_DEFAULT_ACCOUNT_EMAIL=you@example.com
+#   RECRUITER_DEFAULT_ACCOUNT_PASSWORD=<long random string>
 
 docker compose up -d --build
 # UI:  http://localhost:8088
 # API: http://localhost:8088/api
 # Docs: http://localhost:8088/docs
 ```
+
+**Back up your `RECRUITER_SETTINGS_KEY`.** If you lose it, every secret
+in the `settings` table becomes unrecoverable and you'll have to
+reconnect every external provider.
 
 Log in with the admin email + password from `.env`. Open **Settings → LLM** and
 paste your Anthropic key. Everything else (search, GitHub, LinkedIn, Apify) is
