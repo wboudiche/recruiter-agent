@@ -365,17 +365,25 @@ for dev override).
 
 ### Env vars (`.env`)
 
+All required vars have **no default in `docker-compose.yml`** — the
+file uses `${VAR:?…}` syntax, so a missing or empty value causes
+compose to refuse to start. That's deliberate: no weak fallback can
+ship in the repo.
+
 | Var | Required | Purpose |
 |---|---|---|
-| `DATABASE_URL` | yes (set by docker-compose) | Async Postgres DSN |
-| `RECRUITER_SECRETS_KEY` | **yes** | Base64-encoded 32-byte Fernet key used to encrypt every `*_enc` column. Lose this and your stored API keys become unrecoverable. |
-| `RECRUITER_ADMIN_EMAIL` | yes (first run) | Seeds the initial admin user |
-| `RECRUITER_ADMIN_PASSWORD` | yes (first run) | bcrypt-hashed on first start |
-| `RECRUITER_SESSION_TTL_DAYS` | no | Login session lifetime, default `7` |
-| `RECRUITER_LINKEDIN_LI_AT` | no | LinkedIn `li_at` cookie. If set, overrides whatever is stored in Settings. Mostly for dev. |
-| `RECRUITER_DEV_BYPASS_AUTH` | no | Skip auth entirely. **Never enable in shared environments.** |
-| `ANTHROPIC_API_KEY` | no | If set, used as the default LLM key (the Settings UI value takes precedence) |
-| `RECRUITER_OIDC_*` | no | Google OIDC sign-in — `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI` |
+| `POSTGRES_PASSWORD` | **yes** | Postgres role password. Used by the postgres container and threaded into the backend's DATABASE_URL. |
+| `RECRUITER_SETTINGS_KEY` | **yes** | Base64-encoded 32-byte Fernet key used to encrypt every `*_enc` column (LLM/search/Apify/GitHub/SMTP keys, LinkedIn cookie + password, OAuth tokens). Generate via `python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"`. **Back this up** — losing it makes every stored secret unrecoverable. |
+| `RECRUITER_DEFAULT_ACCOUNT_EMAIL` | yes (first run) | Seeds the initial admin user. After bootstrap, change via Settings → Profile. |
+| `RECRUITER_DEFAULT_ACCOUNT_PASSWORD` | yes (first run) | bcrypt-hashed on first start. Once the user row exists, this var is ignored. |
+| `RECRUITER_ALLOWED_ORIGINS` | yes | Comma-separated browser origins allowed to call the API (CSRF Origin allowlist). Compose default: `http://localhost:8088`. |
+| `RECRUITER_LINKEDIN_LI_AT` | no | LinkedIn `li_at` cookie. **If set, overrides whatever is stored in Settings** — useful for dev override. Most users configure via Settings → Sourcing → Connect LinkedIn instead. |
+| `RECRUITER_LOCAL_LLM_API_KEY` | no | Key for a local OpenAI-compat inference server, when not using Anthropic. |
+| `RECRUITER_DEV_AUTH_BYPASS` | no | Email address (e.g. `you@example.com`) that auto-logs-in without a password. **Never set in shared environments.** Default unset → real auth. |
+| `RECRUITER_OIDC_*` | no | Google OIDC sign-in — `RECRUITER_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URI`. Leave issuer empty to disable. |
+| `ANTHROPIC_API_KEY` | no | Optional fallback for the Anthropic key when the Settings UI value is unset. The Settings UI value takes precedence. |
+| `RECRUITER_LOG_LEVEL` | no | Default `INFO`. |
+| `RECRUITER_RESUME_STORAGE_PATH` | no | Filesystem path for uploaded CVs. Default `/app/var/resumes` inside the container. |
 
 ### Settings (UI: `/settings`)
 
@@ -538,10 +546,22 @@ profiles cost more.
 
 Every `*_enc` column (Anthropic key, search API key, GitHub PAT, Apify
 token, LinkedIn cookie, LinkedIn password if Remember, SMTP password,
-Google OAuth tokens) is Fernet-encrypted with `RECRUITER_SECRETS_KEY`.
+Google OAuth tokens) is Fernet-encrypted with `RECRUITER_SETTINGS_KEY`.
 
-If that env var is missing on next startup, the data is intact in the
-database but the app can't decrypt it. **Back up the key.**
+Generate the key once via:
+
+```bash
+python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+```
+
+Paste the output into `.env` as `RECRUITER_SETTINGS_KEY=…`. **Back it
+up somewhere offline.** If you lose it, the encrypted blobs in the DB
+are unrecoverable and you'll have to reconfigure every external
+provider from scratch.
+
+`docker-compose.yml` refuses to start when the key isn't set
+(`${RECRUITER_SETTINGS_KEY:?…}`), so the repo can't accidentally ship a
+weak default to a new clone.
 
 ### LinkedIn anti-bot
 
@@ -571,8 +591,8 @@ requests from unexpected origins.
 # database
 docker exec recruiter-agent-postgres-1 pg_dump -U recruiter recruiter > backup.sql
 
-# secrets key — KEEP THIS
-grep RECRUITER_SECRETS_KEY .env
+# secrets key — KEEP THIS (offline)
+grep RECRUITER_SETTINGS_KEY .env
 ```
 
 ---
