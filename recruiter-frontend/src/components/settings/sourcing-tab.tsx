@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { ApiError } from "@/lib/api";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
+import { LinkedInConnect } from "@/components/settings/linkedin-connect";
 
 type Provider = "google_cse" | "brave" | "searxng" | "serpapi";
 
@@ -29,6 +30,8 @@ export function SourcingTab() {
   const [apiKey, setApiKey] = useState("");
   const [cseOrUrl, setCseOrUrl] = useState<string | undefined>();
   const [ghToken, setGhToken] = useState("");
+  const [apifyKey, setApifyKey] = useState("");
+  const [apifyActorId, setApifyActorId] = useState<string | undefined>();
 
   // Reset typed inputs whenever the active provider changes so a stale
   // value typed under a previous provider can't leak into the next save.
@@ -64,10 +67,16 @@ export function SourcingTab() {
       body.search_engine_id = cseOrUrl;
     }
     if (ghToken) body.github_token = ghToken;
+    if (apifyKey) body.apify_api_key = apifyKey;
+    if (apifyActorId !== undefined && apifyActorId !== (cur.apify_actor_id ?? "")) {
+      body.apify_actor_id = apifyActorId;
+    }
     update.mutate(body, {
       onSuccess: () => {
         setApiKey("");
         setGhToken("");
+        setApifyKey("");
+        setApifyActorId(undefined);
         toast.success("Sourcing settings saved");
       },
       onError: (err) => {
@@ -185,9 +194,62 @@ export function SourcingTab() {
         </p>
       </div>
 
+      <div className="space-y-2">
+        <Label htmlFor="sourcing-apify">
+          Apify API token (optional, commercial LinkedIn extraction)
+        </Label>
+        <Input
+          id="sourcing-apify"
+          type="password"
+          placeholder={
+            cur.has_apify_api_key ? "•••••• (set)" : "apify_api_… (from apify.com)"
+          }
+          value={apifyKey}
+          onChange={(e) => setApifyKey(e.target.value)}
+        />
+        <p className="text-xs text-muted-foreground leading-snug">
+          When set, LinkedIn URL adds route through Apify first
+          (~$0.01/profile, reliable, no anti-bot fight) with the Playwright
+          path as fallback. Without it, Playwright is used directly. Sign
+          up at{" "}
+          <a
+            href="https://apify.com"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            apify.com
+          </a>
+          .
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="sourcing-apify-actor">
+          Apify actor (LinkedIn profile scraper)
+        </Label>
+        <Input
+          id="sourcing-apify-actor"
+          type="text"
+          placeholder="dev_fusion/linkedin-profile-scraper (default)"
+          value={apifyActorId ?? (cur.apify_actor_id ?? "")}
+          onChange={(e) => setApifyActorId(e.target.value)}
+        />
+        <p className="text-xs text-muted-foreground leading-snug">
+          Actor slug in <code>username/actor-name</code> form. Leave
+          empty to use the default. Some actors restrict API access by
+          Apify plan tier — if calls fail with{" "}
+          <em>"free plan…"</em>, swap to one that allows free-plan API
+          calls (e.g. <code>apify/linkedin-profile-scraper</code>,{" "}
+          <code>curious_coder/linkedin-profile-scraper</code>).
+        </p>
+      </div>
+
       <Button onClick={save} disabled={update.isPending}>
         {update.isPending ? "Saving…" : "Save"}
       </Button>
+
+      <LinkedInConnect />
     </div>
   );
 }

@@ -39,6 +39,12 @@ export function useSSE(path: string = "/api/events") {
       });
       // Best-effort: refetch any per-job applications list currently mounted.
       queryClient.invalidateQueries({ queryKey: ["jobs"], exact: false });
+      // A stage change after extraction means candidate fields (full_name,
+      // skills, experience, education, summary) just got populated by the
+      // background pipeline. The event doesn't carry the candidate_id, so
+      // we invalidate the whole candidate cache — it's small (one row per
+      // visible card) and avoids a stale application-detail page.
+      queryClient.invalidateQueries({ queryKey: ["candidates"], exact: false });
     }
 
     source.addEventListener("stage", handle);

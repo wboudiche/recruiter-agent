@@ -49,7 +49,14 @@ describe("SearchResultCard", () => {
     const Wrapper = wrap();
     render(<Wrapper><SearchResultCard result={RESULT} jobId={1} /></Wrapper>);
     fireEvent.click(screen.getByRole("button", { name: /add/i }));
-    await waitFor(() => expect(received).toEqual({ kind: "url", url: RESULT.url }));
+    await waitFor(() =>
+      expect(received).toEqual({
+        kind: "url",
+        url: RESULT.url,
+        name: RESULT.name,
+        snippet: RESULT.snippet,
+      }),
+    );
   });
 });
 

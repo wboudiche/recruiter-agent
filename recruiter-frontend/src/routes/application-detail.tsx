@@ -9,6 +9,7 @@ import {
   type Bundle as EnrichmentBundle,
 } from "@/components/candidate/enrichment-section";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
+import { Spinner } from "@/components/ui/spinner";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
@@ -66,14 +67,56 @@ export default function ApplicationDetail() {
             applicationId={id}
             sourceUrl={candidate.data?.source_url}
           />
-        ) : application.data.stage === "extracting" ? (
-          <div className="p-4 text-sm text-muted-foreground">
-            Chat is available once extraction finishes.
-          </div>
+        ) : application.data.stage === "extracting"
+          || application.data.stage === "enriching" ? (
+          <ExtractionLoader
+            stage={application.data.stage}
+            sourceUrl={candidate.data?.source_url ?? null}
+          />
         ) : (
           <ChatPanel applicationId={id} jobId={application.data.job_id} />
         )}
       </aside>
+    </div>
+  );
+}
+
+
+function ExtractionLoader({
+  stage,
+  sourceUrl,
+}: {
+  stage: "extracting" | "enriching";
+  sourceUrl: string | null;
+}) {
+  const host = (() => {
+    try {
+      return sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : null;
+    } catch {
+      return null;
+    }
+  })();
+  const headline =
+    stage === "enriching"
+      ? "Enriching profile…"
+      : `Extracting profile${host ? ` from ${host}` : ""}…`;
+  const subline =
+    stage === "enriching"
+      ? "Web context → skills synthesis → scoring"
+      : "Auto-fetch → LLM extraction → scoring";
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <Spinner size={32} className="text-[hsl(var(--ed-amber))]" />
+      <div className="space-y-2">
+        <p className="font-serif italic text-base text-foreground">{headline}</p>
+        <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+          {subline}
+        </p>
+        <p className="text-xs text-muted-foreground max-w-xs mx-auto leading-relaxed">
+          Usually takes 20–30 seconds. The card moves to <em>Scored</em>
+          automatically — no need to refresh.
+        </p>
+      </div>
     </div>
   );
 }

@@ -27,6 +27,8 @@ class SettingsRead(BaseModel):
     search_engine_id: str | None = None
     has_search_api_key: bool = False
     has_github_token: bool = False
+    has_apify_api_key: bool = False
+    apify_actor_id: str | None = None
     enrichment_enabled: bool = False
     has_enrichment_twitter_api_key: bool = False
     has_enrichment_youtube_api_key: bool = False
@@ -48,6 +50,11 @@ class SettingsUpdate(BaseModel):
     search_api_key: str | None = None
     search_engine_id: str | None = None
     github_token: str | None = None
+    # Empty string clears the stored Apify token; non-empty sets it.
+    apify_api_key: str | None = None
+    # Apify actor slug like `username/actor-name`. Empty string resets
+    # to the in-code default.
+    apify_actor_id: str | None = None
     enrichment_enabled: bool | None = None
     enrichment_twitter_api_key: str | None = None
     enrichment_youtube_api_key: str | None = None

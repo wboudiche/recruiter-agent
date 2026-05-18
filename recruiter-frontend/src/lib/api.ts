@@ -13,6 +13,9 @@ export class ApiError extends Error {
 
 interface ApiOptions extends RequestInit {
   json?: unknown;
+  /** When true, a 401 throws an ApiError instead of bouncing to /login.
+   * Used by the login form itself, which needs to render the 401 inline. */
+  noAuthRedirect?: boolean;
 }
 
 export async function api<T = unknown>(
@@ -31,11 +34,13 @@ export async function api<T = unknown>(
     credentials: "include",
   });
 
-  if (response.status === 401) {
+  if (response.status === 401 && !opts.noAuthRedirect) {
     const next = encodeURIComponent(
       window.location.pathname + window.location.search,
     );
-    window.location.href = `${BASE_URL}/api/auth/login?next=${next}`;
+    // In-app /login decides between password form and SSO based on
+    // /api/auth/methods; we no longer hard-redirect to the OIDC start.
+    window.location.href = `/login?next=${next}`;
     throw new ApiError(401, "redirecting to login");
   }
 

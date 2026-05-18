@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { classifyResultUrl } from "@/lib/url-classification";
 
 export interface SearchResult {
   name: string;
@@ -26,11 +27,25 @@ const SOURCE_LABEL: Record<SearchResult["source"], string> = {
 export function SearchResultCard({ result, jobId }: Props) {
   const qc = useQueryClient();
   const [added, setAdded] = useState(false);
+  // Block aggregator / job-board URLs at the UI level: adding them creates
+  // a candidate row the extractor can't populate (the page isn't a single
+  // person), and some of those sites (bayt, upwork, indeed, ...) also
+  // return 403 to scrapers anyway.
+  const classification = classifyResultUrl(result.url);
   const add = useMutation({
     mutationFn: () =>
       api(`/api/jobs/${jobId}/candidates`, {
         method: "POST",
-        json: { kind: "url", url: result.url },
+        // Forward the search-result hints so the backend can pre-fill
+        // `candidate.full_name` / `headline`. Critical for LinkedIn URLs,
+        // which can't be auto-scraped: without these, the card stays
+        // labelled "Candidate #N" until the user pastes the profile.
+        json: {
+          kind: "url",
+          url: result.url,
+          name: result.name,
+          snippet: result.snippet,
+        },
       }),
     onSuccess: () => {
       toast.success("Added to pipeline");
@@ -60,14 +75,23 @@ export function SearchResultCard({ result, jobId }: Props) {
         >
           {result.url}
         </a>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => add.mutate()}
-          disabled={add.isPending || added}
-        >
-          {added ? "Added ✓" : add.isPending ? "Adding…" : "Add"}
-        </Button>
+        {classification.kind === "profile" ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => add.mutate()}
+            disabled={add.isPending || added}
+          >
+            {added ? "Added ✓" : add.isPending ? "Adding…" : "Add"}
+          </Button>
+        ) : (
+          <span
+            className="shrink-0 border border-[hsl(var(--ed-amber)/0.4)] px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--ed-amber))]"
+            title={classification.reason}
+          >
+            {classification.reason}
+          </span>
+        )}
       </div>
     </div>
   );

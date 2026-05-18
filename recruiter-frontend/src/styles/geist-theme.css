@@ -1,240 +1,308 @@
-/* Bold theme — vivid violet primary, rich slate dark, saturated stage colors.
-   Scoped under .geist-theme (kept the class name so AppShell wiring is stable). */
+/* Editorial cinematic theme — oxblood ground, cream type, amber accent.
+   Scoped under .geist-theme so AppShell wiring stays stable. Fonts are
+   loaded from Google Fonts in index.html (Fraunces variable + Manrope). */
 
-@font-face {
-  font-family: "Geist";
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("/fonts/geist/Geist-Variable.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  font-style: normal;
-  font-weight: 100 900;
-  font-display: swap;
-  src: url("/fonts/geist/GeistMono-Variable.woff2") format("woff2");
-}
-
-/* ----- Light tokens ----- */
+/* ----- Palette ----- */
 .geist-theme {
-  /* Brand palette */
-  --brand-violet: 262 83% 58%;       /* #7C3AED — primary */
-  --brand-violet-fg: 0 0% 100%;
-  --brand-cyan: 199 89% 48%;         /* #0EA5E9 — secondary accent */
-  --brand-fuchsia: 292 84% 61%;      /* #D946EF — sparkle / AI accent */
+  /* Raw editorial colors (HSL triplets for shadcn-compatible vars) */
+  --ed-bg-deep: 8 12% 5%;            /* #0b0808 — near-black warmth */
+  --ed-bg: 8 14% 8%;                 /* slightly lifted off pure black */
+  --ed-wine: 350 52% 16%;            /* #3a1218 — oxblood */
+  --ed-cream: 36 56% 92%;            /* #f5ede0 — primary fg */
+  --ed-cream-dim: 36 18% 73%;        /* #c9bfae — muted fg */
+  --ed-amber: 41 47% 58%;            /* #c8a961 — accent */
+  --ed-amber-dim: 41 47% 58%;        /* same hue, used at low alpha */
+  --ed-hairline: 36 56% 92%;         /* cream at low alpha → border */
 
-  /* Stage / status palette */
-  --stage-extracting: 38 92% 50%;    /* amber */
-  --stage-enriching: 271 81% 56%;    /* purple */
-  --stage-scored: 217 91% 60%;       /* blue */
-  --stage-validated: 142 71% 45%;    /* green */
-  --stage-invited: 199 89% 48%;      /* cyan */
-  --stage-scheduled: 173 80% 40%;    /* teal */
-  --stage-rejected: 0 84% 60%;       /* red */
-  --stage-sourced: 220 9% 55%;       /* slate */
+  /* Stage / status palette (kept distinct so pipelines still read clearly) */
+  --stage-extracting: 38 92% 50%;
+  --stage-enriching:  271 81% 56%;
+  --stage-scored:     217 91% 60%;
+  --stage-validated:  142 71% 45%;
+  --stage-invited:    199 89% 48%;
+  --stage-scheduled:  173 80% 40%;
+  --stage-rejected:   0 84% 60%;
+  --stage-sourced:    36 18% 73%;
 
-  /* shadcn-compatible tokens */
-  --background: 0 0% 99%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: var(--brand-violet);
-  --primary-foreground: 0 0% 100%;
-  --secondary: 220 14% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 220 14% 96%;
-  --muted-foreground: 220 9% 46%;
-  --accent: 262 83% 95%;
-  --accent-foreground: 262 83% 30%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 220 13% 91%;
-  --input: 220 13% 91%;
-  --ring: 262 83% 58%;
-  --radius: 0.5rem;
+  /* shadcn tokens mapped onto the editorial palette */
+  --background: var(--ed-bg);
+  --foreground: var(--ed-cream);
+  --card: var(--ed-bg-deep);
+  --card-foreground: var(--ed-cream);
+  --popover: var(--ed-bg-deep);
+  --popover-foreground: var(--ed-cream);
+  --primary: var(--ed-cream);
+  --primary-foreground: var(--ed-bg-deep);
+  --secondary: 350 35% 12%;
+  --secondary-foreground: var(--ed-cream);
+  --muted: 8 14% 12%;
+  --muted-foreground: var(--ed-cream-dim);
+  --accent: var(--ed-amber);
+  --accent-foreground: var(--ed-bg-deep);
+  --destructive: 8 70% 50%;
+  --destructive-foreground: var(--ed-cream);
+  --border: 36 30% 25%;              /* low-chroma cream hairline */
+  --input: 36 30% 25%;
+  --ring: var(--ed-amber);
+  --radius: 0;                        /* hard editorial edges — no rounded corners */
 
-  font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  font-feature-settings: "ss01", "cv11";
-  letter-spacing: -0.011em;
+  font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: "ss01";
+  font-weight: 300;
+  letter-spacing: 0.005em;
   background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  position: relative;
+}
+
+/* Editorial backdrop: layered radial gradients + grain stay fixed
+   behind every page. The grain noise is a tiny SVG turbulence filter
+   inlined as a data URI so no extra request and no asset path to wire. */
+.geist-theme::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -2;
+  background:
+    radial-gradient(70% 80% at 12% 8%,  hsl(var(--ed-amber) / 0.10) 0%, transparent 55%),
+    radial-gradient(80% 70% at 92% 96%, hsl(var(--ed-wine)  / 0.65) 0%, transparent 60%),
+    linear-gradient(160deg, hsl(var(--ed-bg-deep)) 0%, hsl(var(--ed-bg)) 50%, hsl(var(--ed-bg-deep)) 100%);
+}
+
+.geist-theme::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.08;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.7 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ----- Typography: serif display, sans body ----- */
+.geist-theme h1,
+.geist-theme h2,
+.geist-theme h3 {
+  font-family: "Fraunces", "Times New Roman", serif;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   color: hsl(var(--foreground));
 }
 
-/* ----- Dark tokens ----- */
-.geist-theme.dark,
-html.dark .geist-theme {
-  --background: 222 47% 7%;          /* deep slate, not pure black */
-  --foreground: 210 20% 98%;
-  --card: 222 47% 10%;
-  --card-foreground: 210 20% 98%;
-  --popover: 222 47% 10%;
-  --popover-foreground: 210 20% 98%;
-  --primary: 262 90% 66%;            /* brighter violet on dark */
-  --primary-foreground: 0 0% 100%;
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 20% 98%;
-  --muted: 217 33% 17%;
-  --muted-foreground: 217 11% 65%;
-  --accent: 262 60% 25%;
-  --accent-foreground: 262 100% 90%;
-  --destructive: 0 72% 56%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 217 33% 18%;
-  --input: 217 33% 18%;
-  --ring: 262 90% 66%;
+.geist-theme h1 {
+  font-size: clamp(2.25rem, 4.5vw, 3.25rem);
+  line-height: 1.02;
+  font-variation-settings: "opsz" 96, "SOFT" 20;
+}
+.geist-theme h2 {
+  font-size: clamp(1.5rem, 2.2vw, 1.875rem);
+  line-height: 1.1;
+  font-variation-settings: "opsz" 48, "SOFT" 20;
+}
+.geist-theme h3 {
+  font-size: 1.25rem;
+  line-height: 1.2;
+  font-variation-settings: "opsz" 24;
+}
+.geist-theme h4 {
+  font-family: "Manrope", sans-serif;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: hsl(var(--ed-amber));
 }
 
-/* ----- Mono for code ----- */
-.geist-theme code,
-.geist-theme pre,
-.geist-theme kbd,
-.geist-theme samp {
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-feature-settings: "ss01", "cv11";
-}
-
-/* ----- Tabular numerics in scoring contexts ----- */
+/* Tabular numerics across all scoring/score contexts */
 .geist-theme {
   font-variant-numeric: tabular-nums;
 }
 
-/* ----- Headings: tight tracking, bold ----- */
-.geist-theme h1,
-.geist-theme h2,
-.geist-theme h3,
-.geist-theme h4 {
-  letter-spacing: -0.02em;
-  font-weight: 600;
-}
-
-.geist-theme h1 { font-size: 2rem; line-height: 1.15; }
-.geist-theme h2 { font-size: 1.5rem; line-height: 1.2; }
-
-/* ----- Inputs: clean, primary focus ring ----- */
+/* ----- Inputs / textareas / selects: hairline focus ring ----- */
 .geist-theme input,
 .geist-theme textarea,
 .geist-theme select {
-  background-color: hsl(var(--background));
-  border-color: hsl(var(--border));
+  background-color: hsl(var(--ed-bg-deep) / 0.6);
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
   box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.geist-theme input::placeholder,
+.geist-theme textarea::placeholder {
+  color: hsl(var(--foreground) / 0.35);
+  font-style: italic;
 }
 
 .geist-theme input:focus-visible,
 .geist-theme textarea:focus-visible,
 .geist-theme select:focus-visible {
   outline: none;
-  border-color: hsl(var(--ring));
-  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.35) !important;
+  border-color: hsl(var(--ed-amber));
+  box-shadow: 0 0 0 1px hsl(var(--ed-amber) / 0.4) !important;
 }
 
-/* ----- Tabs: filled-active pill, colorful ----- */
-.geist-theme [role="tablist"] {
-  background-color: hsl(var(--muted));
-  padding: 4px !important;
-  border-radius: 8px !important;
-  height: auto !important;
+/* ----- Buttons: cream→amber editorial baseline ----- */
+.geist-theme button:not([role="tab"]):not([role="checkbox"]):not([role="combobox"]):not([role="switch"]) {
+  border-radius: 0;
+  font-family: "Manrope", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  transition: background-color 200ms ease, color 200ms ease,
+              border-color 200ms ease, letter-spacing 250ms ease;
 }
 
-.geist-theme [role="tab"] {
-  background-color: transparent;
-  border-radius: 6px !important;
-  padding: 0.4rem 0.9rem !important;
-  color: hsl(var(--muted-foreground));
-  font-weight: 500;
-  transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
-}
-
-.geist-theme [role="tab"]:hover:not([data-state="active"]) {
-  color: hsl(var(--foreground));
-  background-color: hsl(var(--accent) / 0.5);
-}
-
-.geist-theme [role="tab"][data-state="active"] {
-  background-color: hsl(var(--primary)) !important;
-  color: hsl(var(--primary-foreground)) !important;
-  box-shadow: 0 1px 2px hsl(var(--primary) / 0.3) !important;
-}
-
-/* ----- Buttons: bolder, gradient on primary ----- */
-.geist-theme button:not([role="tab"]):not([role="checkbox"]):not([role="combobox"]) {
-  border-radius: 8px;
-  font-weight: 500;
-  transition: background-color 120ms ease, border-color 120ms ease,
-              transform 60ms ease, box-shadow 120ms ease;
-}
-
-.geist-theme button:not([role="tab"]):not([role="checkbox"]):not([role="combobox"]):active {
-  transform: translateY(0.5px);
-}
-
-/* Primary button: subtle violet→fuchsia gradient */
+/* Primary action: solid cream, switches to amber on hover.
+   Targets both <button> and <a> because shadcn's Button uses Radix
+   `asChild` to render a Link directly with the button class string. */
 .geist-theme button.bg-primary,
-.geist-theme button[class*="bg-primary"] {
-  background-image: linear-gradient(
-    135deg,
-    hsl(var(--brand-violet)) 0%,
-    hsl(var(--brand-fuchsia)) 100%
-  );
+.geist-theme button[class*="bg-primary"],
+.geist-theme a.bg-primary,
+.geist-theme a[class*="bg-primary"] {
+  background-color: hsl(var(--ed-cream)) !important;
+  background-image: none;
+  color: hsl(var(--ed-bg-deep)) !important;
   border: none;
-  color: white !important;
-  box-shadow: 0 1px 2px hsl(var(--brand-violet) / 0.35);
+  box-shadow: none;
+  text-decoration: none !important;
+  padding: 0.7rem 1.4rem;
+  font-family: "Manrope", sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: 0;
 }
-
 .geist-theme button.bg-primary:hover,
-.geist-theme button[class*="bg-primary"]:hover {
-  filter: brightness(1.05);
-  box-shadow: 0 2px 8px hsl(var(--brand-violet) / 0.45);
+.geist-theme button[class*="bg-primary"]:hover,
+.geist-theme a.bg-primary:hover,
+.geist-theme a[class*="bg-primary"]:hover {
+  background-color: hsl(var(--ed-amber)) !important;
+  filter: none;
+  letter-spacing: 0.22em;
+  color: hsl(var(--ed-bg-deep)) !important;
 }
 
-/* ----- Cards: subtle border, hover lift ----- */
+/* Outline / ghost buttons keep the hairline cream and gold-up on hover */
+.geist-theme button[class*="border-input"],
+.geist-theme button[class*="variant-outline"] {
+  background: transparent;
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+.geist-theme button[class*="border-input"]:hover,
+.geist-theme button[class*="variant-outline"]:hover {
+  border-color: hsl(var(--ed-amber));
+  color: hsl(var(--ed-amber));
+  background: transparent;
+}
+
+/* ----- Tabs: editorial underline rather than filled pill ----- */
+.geist-theme [role="tablist"] {
+  background-color: transparent;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  border-bottom: 1px solid hsl(var(--border));
+  height: auto !important;
+  gap: 8px;
+}
+.geist-theme [role="tab"] {
+  background-color: transparent !important;
+  border-radius: 0 !important;
+  padding: 0.5rem 1rem !important;
+  color: hsl(var(--muted-foreground)) !important;
+  font-family: "Manrope", sans-serif;
+  font-weight: 500;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  box-shadow: none !important;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+.geist-theme [role="tab"]:hover:not([data-state="active"]) {
+  color: hsl(var(--foreground)) !important;
+}
+.geist-theme [role="tab"][data-state="active"] {
+  background-color: transparent !important;
+  color: hsl(var(--foreground)) !important;
+  border-bottom-color: hsl(var(--ed-amber));
+}
+
+/* ----- Cards: hairline border, no rounded, subtle inner ground ----- */
 .geist-theme [class*="rounded"][class*="border"]:not([role]):not(button) {
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  background-color: hsl(var(--ed-bg-deep) / 0.55) !important;
+  border-color: hsl(var(--border)) !important;
+  border-radius: 0 !important;
+  transition: border-color 200ms ease;
+}
+.geist-theme [class*="rounded"][class*="border"]:not([role]):not(button):hover {
+  border-color: hsl(var(--ed-amber) / 0.55) !important;
 }
 
-/* ----- Stage / status utility classes ----- */
+/* ----- Stage / status pills — editorial muted with hairline ----- */
 .stage-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
+  gap: 0.4rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 0;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.66rem;
   font-weight: 600;
-  letter-spacing: 0;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
   white-space: nowrap;
+  border: 1px solid currentColor;
+  background: transparent !important;
 }
-
-.stage-extracting { color: hsl(var(--stage-extracting)); background: hsl(var(--stage-extracting) / 0.12); }
-.stage-enriching  { color: hsl(var(--stage-enriching));  background: hsl(var(--stage-enriching)  / 0.12); }
-.stage-scored     { color: hsl(var(--stage-scored));     background: hsl(var(--stage-scored)     / 0.12); }
-.stage-validated  { color: hsl(var(--stage-validated));  background: hsl(var(--stage-validated)  / 0.12); }
-.stage-invited    { color: hsl(var(--stage-invited));    background: hsl(var(--stage-invited)    / 0.12); }
-.stage-scheduled  { color: hsl(var(--stage-scheduled));  background: hsl(var(--stage-scheduled)  / 0.12); }
-.stage-rejected   { color: hsl(var(--stage-rejected));   background: hsl(var(--stage-rejected)   / 0.12); }
-.stage-sourced    { color: hsl(var(--stage-sourced));    background: hsl(var(--stage-sourced)    / 0.12); }
+.stage-extracting { color: hsl(var(--stage-extracting)); }
+.stage-enriching  { color: hsl(var(--stage-enriching)); }
+.stage-scored     { color: hsl(var(--stage-scored)); }
+.stage-validated  { color: hsl(var(--stage-validated)); }
+.stage-invited    { color: hsl(var(--stage-invited)); }
+.stage-scheduled  { color: hsl(var(--stage-scheduled)); }
+.stage-rejected   { color: hsl(var(--stage-rejected)); }
+.stage-sourced    { color: hsl(var(--stage-sourced)); }
 
 /* ----- Focus ring for keyboard nav ----- */
 .geist-theme :focus-visible {
-  outline: 2px solid hsl(var(--ring));
+  outline: 1px solid hsl(var(--ed-amber));
   outline-offset: 2px;
 }
 
-/* ----- Scrollbar ----- */
+/* ----- Scrollbar — slim cream→amber ----- */
 .geist-theme ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 .geist-theme ::-webkit-scrollbar-track {
   background: transparent;
 }
 .geist-theme ::-webkit-scrollbar-thumb {
   background-color: hsl(var(--border));
-  border-radius: 5px;
+  border-radius: 0;
 }
 .geist-theme ::-webkit-scrollbar-thumb:hover {
-  background-color: hsl(var(--muted-foreground));
+  background-color: hsl(var(--ed-amber));
+}
+
+/* ----- Links — amber underline ----- */
+.geist-theme a {
+  color: hsl(var(--foreground));
+  text-decoration-color: hsl(var(--ed-amber) / 0.6);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: color 200ms ease, text-decoration-color 200ms ease;
+}
+.geist-theme a:hover {
+  color: hsl(var(--ed-amber));
+  text-decoration-color: hsl(var(--ed-amber));
 }

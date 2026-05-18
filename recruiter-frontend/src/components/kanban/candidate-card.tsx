@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useDraggable } from "@dnd-kit/core";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
 import { ScoreBadge } from "./score-badge";
 import { TimeInStageBadge } from "@/components/time-in-stage-badge";
 import type { Density } from "./kanban-density-toggle";
@@ -67,12 +68,24 @@ export function CandidateCard({
           <span className="text-muted-foreground capitalize">{application.stage}</span>
           <TimeInStageBadge application={application} />
         </div>
-        {awaitingPaste && !compact && (
+        {!compact && awaitingPaste && (
           <Badge
             variant="outline"
             className="border-yellow-500 text-yellow-700 bg-yellow-50"
           >
             Needs profile
+          </Badge>
+        )}
+        {!compact && !awaitingPaste &&
+          (application.stage === "extracting" || application.stage === "enriching") && (
+          <Badge
+            variant="outline"
+            className="border-[hsl(var(--ed-amber)/0.4)] text-[hsl(var(--ed-amber))] gap-1.5"
+          >
+            <Spinner size={10} />
+            {application.stage === "enriching"
+              ? "Enriching profile…"
+              : "Extracting profile…"}
           </Badge>
         )}
       </Link>

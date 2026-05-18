@@ -63,7 +63,7 @@ describe("SourcingTab — multi-provider", () => {
     mockSettingsRoutes(defaultSettings(), cap);
     renderTab();
     await waitFor(() => expect(screen.getByLabelText(/CSE ID/i)).toBeInTheDocument());
-    expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/Instance URL/i)).not.toBeInTheDocument();
   });
 
@@ -76,7 +76,7 @@ describe("SourcingTab — multi-provider", () => {
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
     await userEvent.click(screen.getByRole("option", { name: /brave search/i }));
 
-    expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/CSE ID/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Instance URL/i)).not.toBeInTheDocument();
   });
@@ -91,7 +91,7 @@ describe("SourcingTab — multi-provider", () => {
     await userEvent.click(screen.getByRole("option", { name: /searxng/i }));
 
     expect(screen.getByLabelText(/Instance URL/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/API key/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^API key$/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/CSE ID/i)).not.toBeInTheDocument();
   });
 
@@ -104,7 +104,7 @@ describe("SourcingTab — multi-provider", () => {
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
     await userEvent.click(screen.getByRole("option", { name: /serpapi/i }));
 
-    expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^API key$/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/CSE ID/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/Instance URL/i)).not.toBeInTheDocument();
   });
@@ -117,7 +117,7 @@ describe("SourcingTab — multi-provider", () => {
 
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
     await userEvent.click(screen.getByRole("option", { name: /serpapi/i }));
-    await userEvent.type(screen.getByLabelText(/API key/i), "serp_xyz");
+    await userEvent.type(screen.getByLabelText(/^API key$/i), "serp_xyz");
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => expect(cap.lastBody).toBeDefined());
@@ -134,7 +134,7 @@ describe("SourcingTab — multi-provider", () => {
 
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
     await userEvent.click(screen.getByRole("option", { name: /brave search/i }));
-    await userEvent.type(screen.getByLabelText(/API key/i), "brv_xyz");
+    await userEvent.type(screen.getByLabelText(/^API key$/i), "brv_xyz");
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => expect(cap.lastBody).toBeDefined());
@@ -170,7 +170,7 @@ describe("SourcingTab — multi-provider", () => {
     // Switch to Brave, type a key.
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
     await userEvent.click(screen.getByRole("option", { name: /brave search/i }));
-    await userEvent.type(screen.getByLabelText(/API key/i), "brv_should_not_persist");
+    await userEvent.type(screen.getByLabelText(/^API key$/i), "brv_should_not_persist");
 
     // Switch to SearXNG and save.
     await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));

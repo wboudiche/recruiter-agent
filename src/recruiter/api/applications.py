@@ -92,11 +92,24 @@ def _to_read(app_row: Application) -> ApplicationRead:
         if app_row.score_breakdown
         else None
     )
+    # `awaiting_paste` is the UI's "manual paste required" flag. It's TRUE
+    # only for LinkedIn URLs that have been in EXTRACTING long enough that
+    # the background Playwright scrape has had time to either finish or
+    # fail. Within the first 90 seconds, the system is most likely still
+    # actively scraping — flagging awaiting_paste in that window would
+    # falsely tell the user to paste manually when auto-extraction is
+    # still in progress.
+    _now = datetime.now(timezone.utc)
+    _created = app_row.created_at
+    if _created is not None and _created.tzinfo is None:
+        _created = _created.replace(tzinfo=timezone.utc)
+    _age_seconds = (_now - _created).total_seconds() if _created else 0
     awaiting_paste = (
         app_row.stage == Stage.EXTRACTING
         and app_row.candidate is not None
         and app_row.candidate.source_url is not None
         and "linkedin.com" in app_row.candidate.source_url.lower()
+        and _age_seconds > 90
     )
     return ApplicationRead(
         id=app_row.id,

@@ -9,6 +9,7 @@ export interface ApplicationRead {
   stage:
     | "sourced"
     | "extracting"
+    | "enriching"
     | "scored"
     | "validated"
     | "invited"

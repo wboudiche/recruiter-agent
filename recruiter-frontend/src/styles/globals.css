@@ -5,56 +5,44 @@
 @tailwind utilities;
 
 @layer base {
+  /* Editorial palette is defined inside `.geist-theme`. Mirror the dark
+     tokens at the root so anything rendered outside the themed shell
+     (e.g. the /login route) still inherits sensible defaults. */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-    --radius: 0.5rem;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
+    --background: 8 14% 8%;
+    --foreground: 36 56% 92%;
+    --card: 8 12% 5%;
+    --card-foreground: 36 56% 92%;
+    --popover: 8 12% 5%;
+    --popover-foreground: 36 56% 92%;
+    --primary: 36 56% 92%;
+    --primary-foreground: 8 12% 5%;
+    --secondary: 350 35% 12%;
+    --secondary-foreground: 36 56% 92%;
+    --muted: 8 14% 12%;
+    --muted-foreground: 36 18% 73%;
+    --accent: 41 47% 58%;
+    --accent-foreground: 8 12% 5%;
+    --destructive: 8 70% 50%;
+    --destructive-foreground: 36 56% 92%;
+    --border: 36 30% 25%;
+    --input: 36 30% 25%;
+    --ring: 41 47% 58%;
+    --radius: 0;
   }
 
   * {
     @apply border-border;
   }
+  html, body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    color-scheme: dark;
+  }
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+    @apply antialiased;
+    font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-weight: 300;
+    letter-spacing: 0.005em;
   }
 }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AddCandidatePanel } from "@/components/kanban/add-candidate-panel";
 import { KanbanBoard } from "@/components/kanban/kanban-board";
@@ -8,6 +8,7 @@ import {
   KanbanDensityToggle,
   type Density,
 } from "@/components/kanban/kanban-density-toggle";
+import { EditCriteriaSheet } from "@/components/jobs/edit-criteria-sheet";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
 
@@ -29,6 +30,7 @@ export default function JobDetail() {
   const apps = useJobApplications(id);
   const [showRejected, setShowRejected] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [criteriaOpen, setCriteriaOpen] = useState(false);
   const [density, setDensity] = useState<Density>(readDensity);
 
   function changeDensity(d: Density) {
@@ -52,6 +54,20 @@ export default function JobDetail() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setCriteriaOpen(true)}
+            title={`${job.data.criteria?.length ?? 0} criteria`}
+          >
+            <SlidersHorizontal className="h-4 w-4 mr-1" />
+            Criteria
+            {job.data.criteria && job.data.criteria.length > 0 && (
+              <span className="ml-1 text-muted-foreground">
+                ({job.data.criteria.length})
+              </span>
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setShowRejected((s) => !s)}
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
@@ -69,6 +85,11 @@ export default function JobDetail() {
         density={density}
       />
       <AddCandidatePanel jobId={id} open={addOpen} onOpenChange={setAddOpen} />
+      <EditCriteriaSheet
+        job={job.data}
+        open={criteriaOpen}
+        onOpenChange={setCriteriaOpen}
+      />
     </div>
   );
 }

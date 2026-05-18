@@ -28,8 +28,23 @@ class Config(BaseSettings):
     # Dev escape hatch — only active when oidc_issuer is empty
     dev_auth_bypass: str = ""                    # e.g. "walid@acme.com"
 
+    # Seed "default account" — a single bootstrap user that can sign in with
+    # email + password, alongside OIDC. Useful for docker-compose deploys
+    # where setting up an IdP is overkill. Active when BOTH fields are set
+    # AND dev_auth_bypass is empty (otherwise everyone is logged in as that
+    # email regardless of credentials).
+    default_account_email: str = ""
+    default_account_password: str = ""
+
     # Comma-separated list for the Origin-header middleware
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    # LinkedIn `li_at` session cookie. When set, the LinkedIn URL fetcher
+    # uses headless Chromium to scrape the profile with this cookie
+    # injected; otherwise it falls back to the GitHub-by-name enricher.
+    # WARNING: this is the cookie of a real LinkedIn account — that
+    # account bears the ToS-violation and ban risk.
+    linkedin_li_at: str = ""
 
 
 @lru_cache(maxsize=1)

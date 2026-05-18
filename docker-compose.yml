@@ -9,6 +9,68 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recruiter -d recruiter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      RECRUITER_DATABASE_URL: postgresql+asyncpg://recruiter:recruiter@postgres:5432/recruiter
+      RECRUITER_SETTINGS_KEY: dev-only-32-byte-key-replace-me!
+      RECRUITER_RESUME_STORAGE_PATH: /app/var/resumes
+      RECRUITER_LOG_LEVEL: INFO
+      RECRUITER_OIDC_ISSUER: ""
+      # Dev bypass disabled by default in this compose so the seed admin
+      # login path is what you actually exercise. Re-enable by setting
+      # RECRUITER_DEV_AUTH_BYPASS in a local .env if you want the
+      # password-less mode back.
+      RECRUITER_DEV_AUTH_BYPASS: ""
+      # Seed "default account" — single bootstrap user. Override the
+      # password via .env in any real deployment.
+      RECRUITER_DEFAULT_ACCOUNT_EMAIL: admin@acme.com
+      RECRUITER_DEFAULT_ACCOUNT_PASSWORD: ${RECRUITER_DEFAULT_ACCOUNT_PASSWORD:-changeme}
+      # Browser hits the same origin (http://localhost:8088); nginx proxies
+      # /api to this container. Origin allowlist must include that origin.
+      RECRUITER_ALLOWED_ORIGINS: http://localhost:8088
+      RECRUITER_LOCAL_LLM_API_KEY: ${RECRUITER_LOCAL_LLM_API_KEY:-}
+      # LinkedIn `li_at` session cookie. When set, LinkedIn URLs are
+      # scraped via headless Chromium so the full profile (experience,
+      # education, skills) is extracted automatically. Empty (default) →
+      # falls back to the GitHub-by-name enricher / manual paste. The
+      # cookie belongs to a real LinkedIn account; setting it accepts
+      # the ToS + ban-risk implications.
+      RECRUITER_LINKEDIN_LI_AT: ${RECRUITER_LINKEDIN_LI_AT:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    volumes:
+      - resumes:/app/var/resumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/docs').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./recruiter-frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8088:80"
+    depends_on:
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:
+  resumes:

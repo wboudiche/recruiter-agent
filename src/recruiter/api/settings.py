@@ -42,6 +42,8 @@ def _to_read(row: SettingsRow) -> SettingsRead:
         search_engine_id=row.search_engine_id,
         has_search_api_key=bool(row.search_api_key_enc),
         has_github_token=bool(row.github_token_enc),
+        has_apify_api_key=bool(row.apify_api_key_enc),
+        apify_actor_id=row.apify_actor_id,
         enrichment_enabled=row.enrichment_enabled,
         has_enrichment_twitter_api_key=bool(row.enrichment_twitter_api_key_enc),
         has_enrichment_youtube_api_key=bool(row.enrichment_youtube_api_key_enc),
@@ -89,6 +91,15 @@ async def update_settings(
         row.search_engine_id = payload.search_engine_id
     if payload.github_token is not None:
         row.github_token_enc = cipher.encrypt(payload.github_token)
+    if payload.apify_api_key is not None:
+        row.apify_api_key_enc = (
+            cipher.encrypt(payload.apify_api_key)
+            if payload.apify_api_key
+            else None
+        )
+    if payload.apify_actor_id is not None:
+        # Empty string → reset to NULL (caller falls back to default).
+        row.apify_actor_id = payload.apify_actor_id.strip() or None
     if payload.enrichment_enabled is not None:
         row.enrichment_enabled = payload.enrichment_enabled
     if payload.enrichment_twitter_api_key is not None:

@@ -5,7 +5,6 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { useTheme } from "@/components/theme/theme-provider";
 import {
   readRecentApps,
   useCommandPalette,
@@ -28,7 +27,6 @@ interface PaletteItem {
 export function CommandPalette() {
   const { open, setOpen } = useCommandPalette();
   const navigate = useNavigate();
-  const { setTheme } = useTheme();
   const [query, setQuery] = useState("");
 
   // Reset the search input every time the palette closes so a stale filter
@@ -70,24 +68,6 @@ export function CommandPalette() {
       label: "Open settings",
       section: "Settings",
       run: () => { setOpen(false); navigate("/settings"); },
-    },
-    {
-      id: "act:theme-light",
-      label: "Switch to light theme",
-      section: "Theme",
-      run: () => { setOpen(false); setTheme("light"); },
-    },
-    {
-      id: "act:theme-dark",
-      label: "Switch to dark theme",
-      section: "Theme",
-      run: () => { setOpen(false); setTheme("dark"); },
-    },
-    {
-      id: "act:theme-system",
-      label: "Match system theme",
-      section: "Theme",
-      run: () => { setOpen(false); setTheme("system"); },
     },
   ];
 

@@ -7,7 +7,6 @@ import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { CommandPaletteProvider, useCommandPalette } from "./command-palette-context";
 import { CommandPalette } from "./command-palette";
-import { ThemeProvider } from "@/components/theme/theme-provider";
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -21,11 +20,9 @@ function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>
-      <ThemeProvider>
-        <MemoryRouter>
-          <CommandPaletteProvider>{children}</CommandPaletteProvider>
-        </MemoryRouter>
-      </ThemeProvider>
+      <MemoryRouter>
+        <CommandPaletteProvider>{children}</CommandPaletteProvider>
+      </MemoryRouter>
     </QueryClientProvider>
   );
 }

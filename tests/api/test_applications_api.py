@@ -26,10 +26,17 @@ async def test_list_applications_for_job(api_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_application_read_marks_linkedin_extracting_as_awaiting_paste(
-    api_client: AsyncClient,
+    api_client: AsyncClient, pg_dsn: str,
 ) -> None:
-    """A LinkedIn URL submission stays in extracting and should expose
-    awaiting_paste=True so the UI can prompt for a paste."""
+    """A LinkedIn URL submission that's been in extracting longer than the
+    auto-extraction grace window should expose awaiting_paste=True so the
+    UI prompts the user to paste. Within the grace window (Playwright
+    likely still running) the flag stays False."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
     app.dependency_overrides[get_llm] = lambda: FakeLLMClient()
     try:
         job_id = (
@@ -43,19 +50,64 @@ async def test_application_read_marks_linkedin_extracting_as_awaiting_paste(
         )
         application_id = create.json()["application_id"]
 
-        # Detail
-        detail = await api_client.get(f"/api/applications/{application_id}")
-        assert detail.status_code == 200
-        body = detail.json()
+        # Within the 90s grace window: still extracting, awaiting_paste=False.
+        fresh = (await api_client.get(f"/api/applications/{application_id}")).json()
+        assert fresh["stage"] == "extracting"
+        assert fresh["awaiting_paste"] is False
+
+        # Backdate created_at past the grace window and re-fetch.
+        engine = create_async_engine(pg_dsn)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE applications SET created_at = :ts WHERE id = :id"),
+                {"ts": datetime.now(timezone.utc) - timedelta(seconds=120),
+                 "id": application_id},
+            )
+        await engine.dispose()
+
+        body = (await api_client.get(f"/api/applications/{application_id}")).json()
         assert body["stage"] == "extracting"
         assert body["awaiting_paste"] is True
 
-        # Listing
-        listing = await api_client.get(f"/api/jobs/{job_id}/applications")
-        assert listing.status_code == 200
-        rows = listing.json()
-        assert len(rows) == 1
+        rows = (await api_client.get(f"/api/jobs/{job_id}/applications")).json()
         assert rows[0]["awaiting_paste"] is True
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_add_candidate_from_search_prefills_name_and_headline(
+    api_client: AsyncClient,
+) -> None:
+    """LinkedIn URLs can't be auto-scraped, so the originating search
+    result tuple is the only profile data we have at add-time. The handler
+    must persist `name` -> candidate.full_name and `snippet` -> headline
+    so the kanban card isn't stuck on "Candidate #N"."""
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient()
+    try:
+        job_id = (
+            await api_client.post(
+                "/api/jobs", json={"title": "T", "description": "D", "criteria": []}
+            )
+        ).json()["id"]
+        create = await api_client.post(
+            f"/api/jobs/{job_id}/candidates",
+            json={
+                "kind": "url",
+                "url": "https://www.linkedin.com/in/alice-doe/",
+                "name": "Alice Doe",
+                "snippet": "Senior Rust Engineer at Acme. Building distributed systems.",
+            },
+        )
+        assert create.status_code == 202
+        application_id = create.json()["application_id"]
+
+        detail = await api_client.get(f"/api/applications/{application_id}")
+        candidate_id = detail.json()["candidate_id"]
+        candidate = await api_client.get(f"/api/candidates/{candidate_id}")
+        body = candidate.json()
+        assert body["full_name"] == "Alice Doe"
+        assert "Senior Rust Engineer" in body["headline"]
     finally:
         app.dependency_overrides.pop(get_llm, None)
 
@@ -121,9 +173,12 @@ async def test_application_read_linkedin_after_paste_is_not_awaiting_paste(
         )
         application_id = create.json()["application_id"]
 
-        # Confirm starting state.
+        # Starting state: still inside the 90s auto-extraction grace
+        # window, so awaiting_paste is False even though stage=extracting.
+        # The thing we want to verify is the flip-to-False *after paste*
+        # — see the assertion at the end of the test.
         first = await api_client.get(f"/api/applications/{application_id}")
-        assert first.json()["awaiting_paste"] is True
+        assert first.json()["stage"] == "extracting"
 
         # Queue responses for the paste-triggered run, then submit paste.
         fake._structured.append(ExtractedCandidate(full_name="Alice", skills=["Rust"]))

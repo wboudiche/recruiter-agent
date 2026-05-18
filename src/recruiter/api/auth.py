@@ -2,11 +2,12 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
+from recruiter.api.rate_limit import limiter
 from recruiter.auth.allowlist import is_email_allowed, parse_allowed_domains
 from recruiter.auth.oidc import (
     OIDCClient,
@@ -19,7 +20,7 @@ from recruiter.auth.oidc import (
 from recruiter.auth.sessions import create_session, revoke_session
 from recruiter.config import get_config
 from recruiter.models import OAuthState, User
-from recruiter.schemas.auth import UserRead
+from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -199,3 +200,82 @@ async def logout(
 @router.get("/me", response_model=UserRead)
 async def me(user: User = Depends(require_user)) -> UserRead:
     return UserRead.model_validate(user)
+
+
+@router.get("/methods", response_model=AuthMethods)
+async def methods() -> AuthMethods:
+    """Report which login methods this deployment exposes.
+
+    The frontend's /login page uses this to decide whether to render the
+    password form, the SSO button, or both. Public endpoint (no auth) —
+    it leaks only the set of configured methods, which is non-sensitive.
+    """
+    cfg = get_config()
+    return AuthMethods(
+        oidc=bool(cfg.oidc_issuer),
+        password=bool(cfg.default_account_email and cfg.default_account_password),
+    )
+
+
+@router.post("/login/password")
+@limiter.limit("5/minute")
+async def login_password(
+    request: Request,
+    payload: PasswordLoginRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Sign in via the seed "default account" credentials.
+
+    Both email and password are compared constant-time against the values
+    in `RECRUITER_DEFAULT_ACCOUNT_EMAIL` / `_PASSWORD`. Both comparisons
+    always run (no short-circuit on email mismatch) so timing cannot be
+    used to enumerate the configured email.
+    """
+    cfg = get_config()
+    if not cfg.default_account_email or not cfg.default_account_password:
+        # Don't reveal whether OIDC is the only option — generic 404.
+        raise HTTPException(status_code=404, detail="password login not configured")
+
+    email_ok = secrets.compare_digest(
+        payload.email.strip().lower().encode("utf-8"),
+        cfg.default_account_email.strip().lower().encode("utf-8"),
+    )
+    pw_ok = secrets.compare_digest(
+        payload.password.encode("utf-8"),
+        cfg.default_account_password.encode("utf-8"),
+    )
+    if not (email_ok and pw_ok):
+        raise HTTPException(status_code=401, detail="invalid credentials")
+
+    canonical_email = cfg.default_account_email.strip().lower()
+    user = (await session.execute(
+        select(User)
+        .where(User.issuer == "default")
+        .where(User.sub == f"default:{canonical_email}")
+    )).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if user is None:
+        user = User(
+            email=canonical_email,
+            sub=f"default:{canonical_email}",
+            issuer="default",
+            name="Default Admin",
+            last_login_at=now,
+        )
+        session.add(user)
+    else:
+        user.last_login_at = now
+    await session.commit()
+
+    token = await create_session(
+        session, user_id=user.id, ttl_days=cfg.session_ttl_days,
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+
+    response = JSONResponse({"redirect": _safe_next(payload.next)})
+    response.set_cookie(
+        key="recruiter_session", value=token, httponly=True, samesite="strict",
+        secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",
+    )
+    return response

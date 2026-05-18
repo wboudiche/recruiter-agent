@@ -19,7 +19,7 @@ describe("App", () => {
   it("renders the app shell with header on /jobs", () => {
     render(<App noBrowserRouter />, { initialEntries: ["/jobs"] });
     expect(
-      screen.getByRole("link", { name: /Recruiter Agent/i }),
+      screen.getByRole("link", { name: /Recruiter.*Agent/i }),
     ).toBeInTheDocument();
   });
 

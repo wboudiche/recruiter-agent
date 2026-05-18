@@ -13,11 +13,13 @@ import { CandidateCard } from "./candidate-card";
 import type { Density } from "./kanban-density-toggle";
 import { ScoreDistributionStrip } from "./score-distribution-strip";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
+import type { CandidateRead } from "@/hooks/use-candidate";
 
 interface Props {
   title: string;
   stage: ApplicationRead["stage"];
   applications: ApplicationRead[];
+  candidates?: Map<number, CandidateRead>;
   density?: Density;
   selected?: Set<number>;
   onShiftClick?: (id: number) => void;
@@ -26,6 +28,11 @@ interface Props {
 const STAGE_META: Record<ApplicationRead["stage"], { icon: ReactNode; cls: string }> = {
   sourced:    { icon: <Sparkles      className="h-3.5 w-3.5" />, cls: "stage-sourced" },
   extracting: { icon: <ClipboardEdit className="h-3.5 w-3.5" />, cls: "stage-extracting" },
+  // Enriching is a brief mid-pipeline phase; the kanban board doesn't
+  // expose its own column, but type completeness requires an entry. We
+  // reuse extracting's styling because they belong to the same "still
+  // working on it" bucket from a user's POV.
+  enriching:  { icon: <ClipboardEdit className="h-3.5 w-3.5" />, cls: "stage-extracting" },
   scored:     { icon: <Star          className="h-3.5 w-3.5" />, cls: "stage-scored" },
   validated:  { icon: <CheckCircle2  className="h-3.5 w-3.5" />, cls: "stage-validated" },
   invited:    { icon: <Mail          className="h-3.5 w-3.5" />, cls: "stage-invited" },
@@ -37,6 +44,7 @@ export function KanbanColumn({
   title,
   stage,
   applications,
+  candidates,
   density = "comfortable",
   selected,
   onShiftClick,
@@ -70,6 +78,7 @@ export function KanbanColumn({
           <CandidateCard
             key={app.id}
             application={app}
+            candidateName={candidates?.get(app.candidate_id)?.full_name ?? undefined}
             density={density}
             selected={selected?.has(app.id) ?? false}
             onShiftClick={onShiftClick}

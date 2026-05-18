@@ -14,6 +14,7 @@ import { queryKeys } from "@/lib/query-keys";
 import { KanbanColumn } from "./kanban-column";
 import { BulkActionsBar } from "./bulk-actions-bar";
 import { useKanbanSelection } from "@/hooks/use-kanban-selection";
+import { useCandidatesByIds } from "@/hooks/use-candidates-by-ids";
 import type { Density } from "./kanban-density-toggle";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
@@ -36,6 +37,12 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();
   const selection = useKanbanSelection();
+
+  const candidateIds = useMemo(
+    () => applications.map((a) => a.candidate_id),
+    [applications],
+  );
+  const candidates = useCandidatesByIds(candidateIds);
 
   const grouped = useMemo(() => {
     const m = new Map<string, ApplicationRead[]>();
@@ -100,6 +107,7 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
               title={c.title}
               stage={c.stage}
               applications={grouped.get(c.stage) ?? []}
+              candidates={candidates}
               density={density}
               selected={selection.selected}
               onShiftClick={selection.toggle}

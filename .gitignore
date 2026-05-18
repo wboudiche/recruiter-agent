@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 .env
+.env.local
+recruiter-frontend/.env.local
 var/
 .pytest_cache/
 .ruff_cache/
@@ -9,3 +11,13 @@ var/
 *.egg-info/
 dist/
 build/
+
+# Node
+node_modules/
+
+# Dev tooling state
+.claude/
+.playwright-mcp/
+
+# Repo-level dev screenshots — real documentation images live under docs/
+/*.png

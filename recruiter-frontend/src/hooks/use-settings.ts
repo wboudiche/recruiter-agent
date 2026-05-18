@@ -18,6 +18,8 @@ export interface SettingsRead {
   search_engine_id: string | null;
   has_search_api_key: boolean;
   has_github_token: boolean;
+  has_apify_api_key: boolean;
+  apify_actor_id: string | null;
   enrichment_enabled: boolean;
   has_enrichment_twitter_api_key: boolean;
   has_enrichment_youtube_api_key: boolean;
@@ -48,6 +50,8 @@ export interface SettingsUpdate {
   search_api_key?: string;
   search_engine_id?: string;
   github_token?: string;
+  apify_api_key?: string;
+  apify_actor_id?: string;
   enrichment_enabled?: boolean;
   enrichment_twitter_api_key?: string;
   enrichment_youtube_api_key?: string;

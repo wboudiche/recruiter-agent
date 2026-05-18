@@ -18,8 +18,20 @@ async def fetch_webpage(
         try:
             response = await client.get(url)
             response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise ValueError(f"fetch failed: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            # Many job boards / aggregator sites return 403/429 to anything
+            # without a real browser fingerprint. Surface a message the user
+            # can act on rather than dumping the raw httpx error.
+            raise ValueError(
+                f"This page couldn't be fetched (HTTP {exc.response.status_code}). "
+                "The site likely blocks automated access — try the Paste tab "
+                "to add the candidate manually."
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError(
+                "This page couldn't be reached (network error). "
+                "Try the Paste tab to add the candidate manually."
+            ) from exc
 
     html = response.text
     extracted = trafilatura.extract(html, include_comments=False, include_tables=False) or ""

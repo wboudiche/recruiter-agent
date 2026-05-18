@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import { useJobs, type JobRead } from "@/hooks/use-jobs";
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
-  open:    { label: "Open",   cls: "stage-validated" },
+  open:    { label: "Open",   cls: "stage-extracting" },  // amber → editorial accent
   closed:  { label: "Closed", cls: "stage-rejected" },
-  draft:   { label: "Draft",  cls: "stage-extracting" },
+  draft:   { label: "Draft",  cls: "stage-sourced" },
 };
 
 function formatRelative(iso: string): string {
@@ -43,12 +43,15 @@ export default function JobsList() {
     );
   }
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8">
+      <div className="flex items-end justify-between border-b border-border pb-6">
         <div>
-          <h2 className="text-2xl font-semibold tracking-tight">Jobs</h2>
-          <p className="text-sm text-muted-foreground">
-            {data.length} {data.length === 1 ? "job" : "jobs"} active
+          <p className="text-[10px] uppercase tracking-[0.36em] text-[hsl(var(--ed-amber))] mb-2">
+            Open positions · {data.length.toString().padStart(2, "0")}
+          </p>
+          <h1 className="font-serif italic text-5xl leading-none">Jobs</h1>
+          <p className="text-sm text-muted-foreground mt-3 max-w-md">
+            Active hiring tracks, ordered by most recent activity.
           </p>
         </div>
         <Button asChild>
@@ -79,7 +82,7 @@ function JobCard({ job }: { job: JobRead }) {
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-start gap-3 min-w-0 flex-1">
-            <span className="mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500/15 to-fuchsia-500/15 text-violet-500 group-hover:from-violet-500/25 group-hover:to-fuchsia-500/25 transition-colors">
+            <span className="mt-1 grid h-9 w-9 shrink-0 place-items-center border border-[hsl(var(--ed-amber)/0.4)] text-[hsl(var(--ed-amber))] transition-colors group-hover:border-[hsl(var(--ed-amber))]">
               <Briefcase className="h-4 w-4" />
             </span>
             <div className="min-w-0">

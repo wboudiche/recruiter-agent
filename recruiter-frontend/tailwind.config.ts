@@ -10,6 +10,11 @@ const config: Config = {
       screens: { "2xl": "1800px" },
     },
     extend: {
+      fontFamily: {
+        sans: ['"Manrope"', "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ['"Fraunces"', '"Times New Roman"', "serif"],
+        mono: ['"Geist Mono"', "ui-monospace", "Menlo", "monospace"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

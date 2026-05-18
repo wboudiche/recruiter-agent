@@ -5,6 +5,7 @@ export type AgeingLevel = "fresh" | "warning" | "critical";
 const STAGE_TIMESTAMP: Record<ApplicationRead["stage"], keyof ApplicationRead | null> = {
   sourced: null,
   extracting: null,
+  enriching: null,
   scored: null,
   validated: "validated_at",
   invited: "invited_at",

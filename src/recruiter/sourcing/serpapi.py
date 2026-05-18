@@ -22,7 +22,11 @@ class SerpAPIProvider:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._api_key = api_key
-        self._client = httpx.AsyncClient(transport=transport, timeout=10.0)
+        # SerpAPI's free tier routinely takes 10-15s to return; 10s
+        # produces intermittent "network failure" toasts. 30s is generous
+        # enough to cover the worst case without making the UI feel
+        # unresponsive (the Search button shows "Searching…" throughout).
+        self._client = httpx.AsyncClient(transport=transport, timeout=30.0)
 
     async def aclose(self) -> None:
         await self._client.aclose()

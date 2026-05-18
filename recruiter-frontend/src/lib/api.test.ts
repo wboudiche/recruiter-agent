@@ -64,7 +64,7 @@ describe("api 401 handling", () => {
     }
   });
 
-  it("redirects to /api/auth/login on 401", async () => {
+  it("redirects to /login on 401", async () => {
     const fetchMock = vi.fn(async () =>
       new Response("unauth", { status: 401 }),
     );
@@ -88,7 +88,34 @@ describe("api 401 handling", () => {
     await expect(api("/api/jobs")).rejects.toThrow();
     expect(hrefSetter).toHaveBeenCalledTimes(1);
     const target = hrefSetter.mock.calls[0][0] as string;
-    expect(target).toContain("/api/auth/login");
+    expect(target).toMatch(/^\/login\?next=/);
     expect(target).toContain("next=" + encodeURIComponent("/jobs?x=1"));
+  });
+
+  it("noAuthRedirect surfaces 401 instead of redirecting", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "bad" }), { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const hrefSetter = vi.fn();
+    Object.defineProperty(window, "location", {
+      value: {
+        pathname: "/login",
+        search: "",
+        get href() {
+          return "";
+        },
+        set href(v: string) {
+          hrefSetter(v);
+        },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    await expect(
+      api("/api/auth/login/password", { method: "POST", noAuthRedirect: true }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(hrefSetter).not.toHaveBeenCalled();
   });
 });
