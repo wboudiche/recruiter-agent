@@ -26,6 +26,7 @@ class ApplicationRead(BaseModel):
     invited_at: datetime | None
     scheduled_at: datetime | None
     rejected_at: datetime | None
+    rejection_reason: str | None = None
     created_at: datetime
     updated_at: datetime
     awaiting_paste: bool = False
@@ -35,3 +36,7 @@ class ApplicationRead(BaseModel):
 class ApplicationUpdate(BaseModel):
     stage: Literal["scored", "validated", "rejected"] | None = None
     notes: str | None = None
+    # Free-text reason captured by the Reject dialog. Empty string clears
+    # it; None leaves the existing value alone. Cleared automatically
+    # when stage transitions away from rejected.
+    rejection_reason: str | None = None

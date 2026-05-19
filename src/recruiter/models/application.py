@@ -41,6 +41,10 @@ class Application(Base):
     invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Structured rejection reason captured by the Reject dialog. Cleared
+    # when stage transitions back out of rejected. Surfaced as a banner
+    # on the candidate detail page and as a tooltip on the kanban card.
+    rejection_reason: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

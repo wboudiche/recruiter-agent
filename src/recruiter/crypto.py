@@ -15,21 +15,48 @@ def settings_cipher() -> "SecretCipher":
     from recruiter.config import get_config
 
     raw = get_config().settings_key
-    if len(raw) == 64:
-        try:
-            key = bytes.fromhex(raw)
-        except ValueError as exc:
-            raise RuntimeError(
-                "RECRUITER_SETTINGS_KEY: 64-char value must be valid hex"
-            ) from exc
-    else:
-        key = raw.encode("utf-8")
+    key = _decode_key(raw)
     if len(key) != 32:
         raise RuntimeError(
-            "RECRUITER_SETTINGS_KEY must be 32 bytes (or 64 hex chars). "
-            "Generate with: python -c 'import secrets; print(secrets.token_hex(32))'"
+            "RECRUITER_SETTINGS_KEY must decode to 32 bytes. Provide one "
+            "of: a 32-character raw string, 64 hex characters, or a "
+            "urlsafe-base64-encoded 32-byte value (44 chars incl. '='). "
+            "Generate via:\n"
+            "  python -c 'import secrets,base64; "
+            "print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())'"
         )
     return SecretCipher(key)
+
+
+def _decode_key(raw: str) -> bytes:
+    """Decode the env var into 32 raw bytes. Tries (in order):
+
+      1. 44-char urlsafe-base64 (the Fernet-shaped format the README
+         tells users to generate — ends with '=' padding).
+      2. 64 hex chars.
+      3. 32-char raw ASCII (legacy / dev placeholder).
+
+    Returns whatever the first matching format decodes to, or the raw
+    UTF-8 bytes as a last resort so the caller's length check still
+    fires with a useful error.
+    """
+    s = (raw or "").strip()
+    # 1. urlsafe-base64 (Fernet-style). Tolerate missing/extra padding.
+    if len(s) in (43, 44) and all(
+        c.isalnum() or c in "-_=" for c in s
+    ):
+        try:
+            return base64.urlsafe_b64decode(s + "==="[: (-len(s)) % 4])
+        except Exception:
+            pass
+    # 2. hex.
+    if len(s) == 64:
+        try:
+            return bytes.fromhex(s)
+        except ValueError:
+            pass
+    # 3. raw 32-char ASCII.
+    return s.encode("utf-8")
 
 
 class SecretCipher:

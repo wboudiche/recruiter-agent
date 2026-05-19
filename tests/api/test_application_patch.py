@@ -90,6 +90,57 @@ async def test_patch_reject_with_notes(api_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_patch_reject_persists_structured_reason(api_client: AsyncClient) -> None:
+    """Reject dialog sends `rejection_reason` (not stuffed into notes).
+    Server stores it; read response surfaces it as a first-class field."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await _seed_scored_application(api_client)
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}",
+            json={
+                "stage": "rejected",
+                "rejection_reason": "Open to relocation but currently in Tunisia",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stage"] == "rejected"
+        assert body["rejection_reason"] == (
+            "Open to relocation but currently in Tunisia"
+        )
+        # notes is NOT polluted with a [REJECTED] prefix anymore.
+        assert body["notes"] is None or "[REJECTED]" not in (body["notes"] or "")
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_unreject_clears_rejection_reason(api_client: AsyncClient) -> None:
+    """Transitioning rejected → scored drops the stale reason so the
+    detail page doesn't keep showing it on a now-active candidate."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await _seed_scored_application(api_client)
+        # Reject with a reason
+        await api_client.patch(
+            f"/api/applications/{app_id}",
+            json={"stage": "rejected", "rejection_reason": "cold"},
+        )
+        # Unreject
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}", json={"stage": "scored"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stage"] == "scored"
+        assert body["rejection_reason"] is None
+        assert body["rejected_at"] is None
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
 async def test_patch_404_when_missing(api_client: AsyncClient) -> None:
     resp = await api_client.patch("/api/applications/9999", json={"stage": "validated"})
     assert resp.status_code == 404

@@ -127,6 +127,7 @@ def _to_read(app_row: Application) -> ApplicationRead:
         invited_at=app_row.invited_at,
         scheduled_at=app_row.scheduled_at,
         rejected_at=app_row.rejected_at,
+        rejection_reason=app_row.rejection_reason,
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
@@ -144,10 +145,13 @@ def _validate_transition(current: Stage, target: Stage) -> None:
             status_code=409,
             detail=f"cannot move from {current.value} to {target.value} after invitation sent",
         )
-    if target == Stage.SCORED and current != Stage.VALIDATED:
+    # Moving to SCORED is allowed from VALIDATED (unvalidate) and from
+    # REJECTED (unreject). Other source stages don't have a meaningful
+    # "back to scored" semantic and are blocked.
+    if target == Stage.SCORED and current not in {Stage.VALIDATED, Stage.REJECTED}:
         raise HTTPException(
             status_code=409,
-            detail=f"cannot unvalidate from stage {current.value}",
+            detail=f"cannot move from {current.value} to scored",
         )
     if target == Stage.VALIDATED and current != Stage.SCORED:
         raise HTTPException(
@@ -182,6 +186,16 @@ async def patch_application(
             app_row.rejected_at = now
         elif new_stage == Stage.SCORED:
             app_row.validated_at = None
+            # Moving back out of rejected → drop the stale reason so
+            # the UI doesn't keep showing it on a now-active candidate.
+            app_row.rejection_reason = None
+            app_row.rejected_at = None
+
+    # rejection_reason is captured by the Reject dialog and persisted
+    # alongside the stage transition. Empty string explicitly clears
+    # the value; None leaves whatever's there alone.
+    if payload.rejection_reason is not None:
+        app_row.rejection_reason = payload.rejection_reason or None
 
     await session.commit()
     await session.refresh(app_row)

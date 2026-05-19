@@ -7,6 +7,7 @@ import type { ApplicationRead } from "./use-job-applications";
 interface PatchPayload {
   stage?: "scored" | "validated" | "rejected";
   notes?: string;
+  rejection_reason?: string;
 }
 
 export function useApplicationMutations(applicationId: number, jobId?: number) {
@@ -38,8 +39,12 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
     reject: (reason: string) =>
       patch.mutate({
         stage: "rejected",
-        notes: reason ? `[REJECTED] ${reason}` : undefined,
+        // Empty string explicitly clears any prior reason; non-empty
+        // sets it. Stored as a first-class column, surfaced as a
+        // banner on the detail page.
+        rejection_reason: reason || "",
       }),
+    unreject: () => patch.mutate({ stage: "scored" }),
     isPending: patch.isPending,
   };
 }

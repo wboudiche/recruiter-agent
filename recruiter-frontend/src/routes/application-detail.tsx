@@ -8,6 +8,7 @@ import {
   EnrichmentSection,
   type Bundle as EnrichmentBundle,
 } from "@/components/candidate/enrichment-section";
+import { RejectionBanner } from "@/components/candidate/rejection-banner";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Spinner } from "@/components/ui/spinner";
@@ -70,6 +71,7 @@ export default function ApplicationDetail() {
             />
           </div>
         </div>
+        <RejectionBanner application={application.data} />
         <ScoreBreakdown application={application.data} />
         <EnrichmentSection
           applicationId={id}

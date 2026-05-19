@@ -25,6 +25,7 @@ export interface ApplicationRead {
   invited_at: string | null;
   scheduled_at: string | null;
   rejected_at: string | null;
+  rejection_reason?: string | null;
   created_at: string;
   updated_at: string;
   awaiting_paste: boolean;

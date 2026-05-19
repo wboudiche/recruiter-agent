@@ -40,11 +40,23 @@ async def test_methods_reports_password_when_configured(
 
 @pytest.mark.asyncio
 async def test_methods_reports_neither_when_unconfigured(
-    api_client_unauth: AsyncClient,
+    api_client_unauth: AsyncClient, monkeypatch,
 ) -> None:
-    r = await api_client_unauth.get("/api/auth/methods")
-    assert r.status_code == 200
-    assert r.json() == {"oidc": False, "password": False}
+    # Clear env so neither password nor OIDC looks configured —
+    # the developer's local .env will leak in otherwise.
+    # pydantic-settings reads from .env on instantiation, so deleting
+    # the OS env var isn't enough — set explicitly to empty to override
+    # whatever the developer's local .env declares.
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "")
+    from recruiter.config import get_config
+    get_config.cache_clear()
+    try:
+        r = await api_client_unauth.get("/api/auth/methods")
+        assert r.status_code == 200
+        assert r.json() == {"oidc": False, "password": False}
+    finally:
+        get_config.cache_clear()
 
 
 @pytest.mark.asyncio
@@ -107,13 +119,23 @@ async def test_login_password_wrong_email_401(
 
 @pytest.mark.asyncio
 async def test_login_password_not_configured_returns_404(
-    api_client_unauth: AsyncClient,
+    api_client_unauth: AsyncClient, monkeypatch,
 ) -> None:
-    r = await api_client_unauth.post(
-        "/api/auth/login/password",
-        json={"email": "admin@acme.com", "password": "anything"},
-    )
-    assert r.status_code == 404
+    # pydantic-settings reads from .env on instantiation, so deleting
+    # the OS env var isn't enough — set explicitly to empty to override
+    # whatever the developer's local .env declares.
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "")
+    from recruiter.config import get_config
+    get_config.cache_clear()
+    try:
+        r = await api_client_unauth.post(
+            "/api/auth/login/password",
+            json={"email": "admin@acme.com", "password": "anything"},
+        )
+        assert r.status_code == 404
+    finally:
+        get_config.cache_clear()
 
 
 @pytest.mark.asyncio
