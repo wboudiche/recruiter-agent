@@ -43,7 +43,11 @@ services:
       RECRUITER_DEFAULT_ACCOUNT_PASSWORD: ${RECRUITER_DEFAULT_ACCOUNT_PASSWORD:?RECRUITER_DEFAULT_ACCOUNT_PASSWORD is required — see .env.example}
       # Browser hits the same origin (http://localhost:8088); nginx proxies
       # /api to this container. Origin allowlist must include that origin.
-      RECRUITER_ALLOWED_ORIGINS: http://localhost:8088
+      # Comma-separated browser origins allowed to POST to the API (CSRF
+      # origin check). Default covers a localhost deploy; override in
+      # `.env` when the stack is reachable via a different hostname or
+      # remote IP.
+      RECRUITER_ALLOWED_ORIGINS: ${RECRUITER_ALLOWED_ORIGINS:-http://localhost:8088}
       RECRUITER_LOCAL_LLM_API_KEY: ${RECRUITER_LOCAL_LLM_API_KEY:-}
       # LinkedIn `li_at` session cookie. When set, LinkedIn URLs are
       # scraped via headless Chromium so the full profile (experience,
