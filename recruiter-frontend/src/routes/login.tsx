@@ -23,7 +23,7 @@ const STYLE = `
 }
 
 .ed-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   position: relative;
   overflow: hidden;
@@ -67,10 +67,12 @@ const STYLE = `
 
 .ed-shell {
   position: relative;
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  padding: 28px clamp(24px, 5vw, 72px);
+  /* Slimmer top/bottom so the form fits a 720-800px laptop viewport
+     without scrolling. */
+  padding: 14px clamp(24px, 5vw, 72px);
   gap: 0;
 }
 
@@ -109,7 +111,8 @@ const STYLE = `
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   align-items: center;
   gap: clamp(24px, 6vw, 96px);
-  padding: clamp(24px, 6vh, 72px) 0;
+  /* Vertical padding tracks viewport height but caps lower (was 72px). */
+  padding: clamp(12px, 3vh, 40px) 0;
 }
 
 .ed-left {
@@ -121,7 +124,7 @@ const STYLE = `
   letter-spacing: 0.32em;
   text-transform: uppercase;
   color: var(--ed-amber);
-  margin-bottom: 28px;
+  margin-bottom: 18px;
   display: inline-flex;
   align-items: center;
   gap: 12px;
@@ -139,8 +142,10 @@ const STYLE = `
   font-variation-settings: "opsz" 144, "SOFT" 30;
   font-style: italic;
   font-weight: 400;
-  font-size: clamp(64px, 11vw, 168px);
-  line-height: 0.88;
+  /* Capped from 168 → 112 so the four-line headline doesn't dominate
+     a typical laptop screen (720-800px tall). Min unchanged. */
+  font-size: clamp(56px, 8vw, 112px);
+  line-height: 0.92;
   letter-spacing: -0.035em;
   color: var(--ed-cream);
   margin: 0;
@@ -156,20 +161,20 @@ const STYLE = `
 }
 
 .ed-sub {
-  margin-top: 32px;
+  margin-top: 20px;
   max-width: 460px;
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--ed-cream-dim);
   font-weight: 300;
 }
 
 .ed-meta {
-  margin-top: 56px;
+  margin-top: 28px;
   display: grid;
   grid-template-columns: repeat(3, max-content);
-  gap: 40px;
-  font-size: 11px;
+  gap: 32px;
+  font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ed-cream-dim);
@@ -179,11 +184,11 @@ const STYLE = `
   font-family: "Fraunces", serif;
   font-style: italic;
   font-weight: 400;
-  font-size: 22px;
+  font-size: 20px;
   letter-spacing: 0;
   text-transform: none;
   color: var(--ed-cream);
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .ed-right {
@@ -195,7 +200,7 @@ const STYLE = `
 
 .ed-card {
   position: relative;
-  padding: 44px 40px 40px;
+  padding: 28px 32px;
   background: linear-gradient(180deg, rgba(11, 8, 8, 0.55) 0%, rgba(11, 8, 8, 0.75) 100%);
   border: 1px solid var(--ed-amber-dim);
   backdrop-filter: blur(14px) saturate(120%);
@@ -223,14 +228,14 @@ const STYLE = `
   font-family: "Fraunces", serif;
   font-style: italic;
   font-weight: 400;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.1;
   letter-spacing: -0.01em;
-  margin: 0 0 28px;
+  margin: 0 0 18px;
 }
 
 .ed-field {
-  margin-bottom: 22px;
+  margin-bottom: 14px;
 }
 .ed-field label {
   display: block;
@@ -274,7 +279,7 @@ const STYLE = `
 
 .ed-submit {
   width: 100%;
-  padding: 16px 24px;
+  padding: 13px 24px;
   background: var(--ed-cream);
   color: var(--ed-bg);
   border: none;
@@ -310,7 +315,7 @@ const STYLE = `
   display: flex;
   align-items: center;
   gap: 14px;
-  margin: 28px 0 18px;
+  margin: 18px 0 12px;
   color: var(--ed-cream-dim);
   font-size: 10px;
   letter-spacing: 0.4em;
@@ -325,7 +330,7 @@ const STYLE = `
 
 .ed-sso {
   width: 100%;
-  padding: 14px 24px;
+  padding: 11px 24px;
   background: transparent;
   color: var(--ed-cream);
   border: 1px solid var(--ed-hairline);
@@ -343,10 +348,10 @@ const STYLE = `
 }
 
 .ed-fineprint {
-  margin-top: 28px;
+  margin-top: 16px;
   font-family: "Fraunces", serif;
   font-style: italic;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--ed-cream-dim);
   line-height: 1.5;
 }
