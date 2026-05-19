@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Briefcase, ChevronRight, ListChecks, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,22 @@ function formatRelative(iso: string): string {
 
 export default function JobsList() {
   const { data, isLoading, isError } = useJobs();
+  const [showClosed, setShowClosed] = useState(false);
+
+  const { closedJobs, visibleJobs } = useMemo(() => {
+    const rows = data ?? [];
+    const open: JobRead[] = [];
+    const closed: JobRead[] = [];
+    for (const j of rows) {
+      const s = (j.status ?? "open").toLowerCase();
+      if (s === "closed") closed.push(j);
+      else open.push(j);
+    }
+    return {
+      closedJobs: closed,
+      visibleJobs: showClosed ? rows : open,
+    };
+  }, [data, showClosed]);
 
   if (isLoading) return <p className="text-muted-foreground">Loading…</p>;
   if (isError) return <p className="text-destructive">Failed to load jobs.</p>;
@@ -47,25 +64,59 @@ export default function JobsList() {
       <div className="flex items-end justify-between border-b border-border pb-6">
         <div>
           <p className="text-[10px] uppercase tracking-[0.36em] text-[hsl(var(--ed-amber))] mb-2">
-            Open positions · {data.length.toString().padStart(2, "0")}
+            {showClosed ? "All positions" : "Open positions"} ·{" "}
+            {visibleJobs.length.toString().padStart(2, "0")}
           </p>
           <h1 className="font-serif italic text-5xl leading-none">Jobs</h1>
           <p className="text-sm text-muted-foreground mt-3 max-w-md">
             Active hiring tracks, ordered by most recent activity.
           </p>
         </div>
-        <Button asChild>
-          <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
-            <Plus className="h-4 w-4" />
-            New job
-          </Link>
-        </Button>
+        <div className="flex items-center gap-3">
+          {closedJobs.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClosed((s) => !s)}
+              className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {showClosed
+                ? "Hide closed"
+                : `Show closed (${closedJobs.length})`}
+            </button>
+          )}
+          <Button asChild>
+            <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
+              <Plus className="h-4 w-4" />
+              New job
+            </Link>
+          </Button>
+        </div>
       </div>
-      <ul className="grid gap-3">
-        {data.map((job) => (
-          <JobCard key={job.id} job={job} />
-        ))}
-      </ul>
+      {visibleJobs.length === 0 ? (
+        <div className="rounded-xl border border-dashed p-10 text-center text-muted-foreground">
+          {showClosed ? (
+            <>No jobs match the current filter.</>
+          ) : (
+            <>
+              All jobs are closed.{" "}
+              <button
+                type="button"
+                onClick={() => setShowClosed(true)}
+                className="underline hover:text-foreground"
+              >
+                Show closed ({closedJobs.length})
+              </button>
+              .
+            </>
+          )}
+        </div>
+      ) : (
+        <ul className="grid gap-3">
+          {visibleJobs.map((job) => (
+            <JobCard key={job.id} job={job} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
