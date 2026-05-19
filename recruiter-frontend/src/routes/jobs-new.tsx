@@ -120,7 +120,16 @@ export default function JobsNew() {
 
       <div className="space-y-2">
         <Label htmlFor="description">Description (job description / JD)</Label>
-        <Textarea id="description" rows={10} {...form.register("description")} />
+        <Textarea
+          id="description"
+          {...form.register("description")}
+          // Auto-grow up to ~32rem (~half a tall screen), then scroll.
+          // Tailwind `field-sizing-content` is widely supported in
+          // Chrome/Edge/Safari 17+ (also in your dev Chromium); on
+          // older browsers we still have a generous min-height so the
+          // box never feels cramped, with vertical resize as a fallback.
+          className="min-h-[14rem] max-h-[32rem] resize-y leading-relaxed [field-sizing:content]"
+        />
         {form.formState.errors.description && (
           <p className="text-sm text-destructive">{form.formState.errors.description.message}</p>
         )}
@@ -151,19 +160,62 @@ export default function JobsNew() {
             </Button>
           </div>
         </div>
-        {criteria.fields.map((field, index) => (
-          <div key={field.id} className="grid grid-cols-[1fr_100px_2fr_auto] gap-2 items-start">
-            <Input placeholder="Name" {...form.register(`criteria.${index}.name`)} />
-            <Input
-              placeholder="0.5"
-              type="number"
-              step="0.1"
-              {...form.register(`criteria.${index}.weight`)}
+        {criteria.fields.length > 0 && (
+          <div className="flex items-center justify-end">
+            <TotalWeightIndicator
+              total={criteria.fields.reduce(
+                (sum, _, i) => sum + Number(form.watch(`criteria.${i}.weight`) ?? 0),
+                0,
+              )}
             />
-            <Input placeholder="Description" {...form.register(`criteria.${index}.description`)} />
-            <Button type="button" variant="ghost" size="icon" onClick={() => criteria.remove(index)}>
-              <Trash2 className="h-4 w-4" />
-            </Button>
+          </div>
+        )}
+        {criteria.fields.map((field, index) => (
+          <div
+            key={field.id}
+            className="space-y-2 border border-border p-3"
+          >
+            <div className="grid grid-cols-[1fr_110px_auto] gap-2 items-end">
+              <div className="space-y-1">
+                <Label htmlFor={`criteria-name-${index}`}>Name</Label>
+                <Input
+                  id={`criteria-name-${index}`}
+                  placeholder="e.g. PyTorch expertise"
+                  {...form.register(`criteria.${index}.name`)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor={`criteria-weight-${index}`}>Weight</Label>
+                <Input
+                  id={`criteria-weight-${index}`}
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  placeholder="0.25"
+                  {...form.register(`criteria.${index}.weight`)}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => criteria.remove(index)}
+                aria-label="Remove criterion"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor={`criteria-desc-${index}`}>Description</Label>
+              <Textarea
+                id={`criteria-desc-${index}`}
+                rows={2}
+                placeholder="What evidence in a candidate's profile should match this criterion?"
+                {...form.register(`criteria.${index}.description`)}
+                className="leading-relaxed"
+              />
+            </div>
           </div>
         ))}
       </div>
@@ -212,5 +264,22 @@ export default function JobsNew() {
         </DialogContent>
       </Dialog>
     </form>
+  );
+}
+
+
+function TotalWeightIndicator({ total }: { total: number }) {
+  // Backend normalises whatever weights we send, but surfacing the
+  // running total at all helps the user balance their criteria as they
+  // tweak them. Amber tint when the total drifts noticeably from 1.0.
+  const off = Math.abs(total - 1) > 0.01;
+  return (
+    <span
+      className={`text-xs ${
+        off ? "text-[hsl(var(--ed-amber))]" : "text-muted-foreground"
+      }`}
+    >
+      Total weight: {total.toFixed(2)}
+    </span>
   );
 }

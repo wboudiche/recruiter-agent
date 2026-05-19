@@ -77,7 +77,7 @@ describe("JobsNew — Suggest from JD", () => {
 
     // Add a manual criterion first.
     await userEvent.click(screen.getByRole("button", { name: /add criterion/i }));
-    const nameInput = await screen.findByPlaceholderText("Name");
+    const nameInput = await screen.findByPlaceholderText(/PyTorch expertise/i);
     await userEvent.type(nameInput, "MyCustom");
 
     await userEvent.click(screen.getByRole("button", { name: /suggest from jd/i }));
@@ -105,7 +105,7 @@ describe("JobsNew — Suggest from JD", () => {
     renderJobsNew();
     await userEvent.type(screen.getByLabelText(/description/i), "a".repeat(60));
     await userEvent.click(screen.getByRole("button", { name: /add criterion/i }));
-    await userEvent.type(await screen.findByPlaceholderText("Name"), "MyCustom");
+    await userEvent.type(await screen.findByPlaceholderText(/PyTorch expertise/i), "MyCustom");
 
     await userEvent.click(screen.getByRole("button", { name: /suggest from jd/i }));
     await userEvent.click(await screen.findByRole("button", { name: /replace/i }));
@@ -127,7 +127,7 @@ describe("JobsNew — Suggest from JD", () => {
     await userEvent.click(screen.getByRole("button", { name: /suggest from jd/i }));
 
     expect(await screen.findByText(/couldn't suggest criteria/i)).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Name")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/PyTorch expertise/i)).not.toBeInTheDocument();
   });
 });
 
