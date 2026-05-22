@@ -1,7 +1,11 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import select
 
 from recruiter.api import (
     applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing,
@@ -9,8 +13,45 @@ from recruiter.api import (
 from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
 from recruiter.config import get_config
+from recruiter.db import get_engine, get_session_factory
+from recruiter.models import User
 
-app = FastAPI(title="Recruiter Agent")
+_log = logging.getLogger(__name__)
+
+
+async def _seed_default_user() -> None:
+    cfg = get_config()
+    if not (cfg.default_account_email and cfg.default_account_password):
+        return
+    canonical_email = cfg.default_account_email.strip().lower()
+    sub = f"default:{canonical_email}"
+    engine = get_engine(cfg.database_url)
+    SessionLocal = get_session_factory(engine)
+    try:
+        async with SessionLocal() as session:
+            existing = (await session.execute(
+                select(User).where(User.issuer == "default").where(User.sub == sub)
+            )).scalar_one_or_none()
+            if existing is not None:
+                return
+            session.add(User(
+                email=canonical_email, sub=sub, issuer="default", name="Default Admin",
+            ))
+            await session.commit()
+            _log.info("seeded default user %s", canonical_email)
+    except Exception:
+        # Don't block startup if seeding fails (e.g. transient DB issue);
+        # the lazy path in auth.py still creates the row on first login.
+        _log.exception("default-user seeding failed")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await _seed_default_user()
+    yield
+
+
+app = FastAPI(title="Recruiter Agent", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
