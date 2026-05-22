@@ -49,7 +49,8 @@ class OpenAICompatLLMClient:
             json=body,
             headers=headers,
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            _raise_with_body(response)
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
@@ -110,7 +111,8 @@ class OpenAICompatLLMClient:
             json=body,
             headers={"Authorization": f"Bearer {self._api_key}"},
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            _raise_with_body(response)
         msg = response.json()["choices"][0]["message"]
 
         raw_tcs = msg.get("tool_calls") or []
@@ -126,6 +128,15 @@ class OpenAICompatLLMClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _raise_with_body(response: httpx.Response) -> None:
+    body = response.text[:500]
+    raise httpx.HTTPStatusError(
+        f"LLM call failed: HTTP {response.status_code} from {response.request.url} — {body}",
+        request=response.request,
+        response=response,
+    )
 
 
 def _strip_fences(text: str) -> str:
