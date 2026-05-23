@@ -1,666 +1,215 @@
 # Recruiter Agent
 
-An AI-assisted sourcing tool for individual recruiters and small teams. Paste a
-LinkedIn URL, drop a CV, or search by job description — the system extracts a
-structured candidate profile, enriches it from public web sources, and scores
-it against your job's weighted criteria. Everything runs locally in Docker
-against your own LLM, search, and (optional) commercial-scraping API keys.
-
----
-
-## Table of contents
-
-1. [What it does](#what-it-does)
-2. [Quick start](#quick-start)
-3. [Architecture](#architecture)
-4. [The candidate pipeline](#the-candidate-pipeline)
-5. [The recruiter agent](#the-recruiter-agent)
-6. [Configuration reference](#configuration-reference)
-7. [User guide](#user-guide)
-8. [Operational notes](#operational-notes)
-9. [Development](#development)
-
----
-
-## What it does
-
-You create a **Job** (title + description + weighted criteria). You add
-**Candidates** to the job from any of these inputs:
-
-- A LinkedIn URL
-- A GitHub URL
-- An arbitrary web page (personal site, blog, portfolio)
-- A pasted profile (when scraping is blocked)
-- An uploaded CV (`.pdf`, `.docx`)
-- A search-and-add flow (LinkedIn / GitHub / Web search → click *Add* on a result)
-
-For each candidate, the agent:
-
-1. **Fetches** the underlying source.
-2. **Extracts** name, headline, location, summary, experience, education, skills
-   (LLM-driven structured output).
-3. **Enriches** the profile with what it can find from links in the bio
-   (blog, GitHub, portfolio, Stack Exchange, YouTube) and stores summaries
-   per source.
-4. **Scores** the candidate (0-100) against each criterion you defined, with
-   a per-criterion rationale and a weighted overall score.
-5. **Surfaces** the result on a kanban with stages
-   `Extracting → Enriching → Scored → Validated → Invited → Scheduled → Rejected`.
-
-A real-time SSE stream pushes stage transitions to the UI so the kanban moves
-without manual refresh.
-
----
+AI-assisted sourcing for individual recruiters and small teams. Add a candidate
+from a URL, CV, paste, or search — the system extracts a structured profile,
+enriches it from public sources, and scores it against your job's weighted
+criteria. Everything runs locally in Docker against your own LLM and API keys.
 
 ## Quick start
 
-Requires Docker + an Anthropic API key (the only hard dependency for LLM
-calls; a local OpenAI-compat endpoint also works).
+Requires Docker. Default LLM is Anthropic; any OpenAI-compatible endpoint
+(LINAGORA gateway, OpenRouter, Ollama, vLLM) also works.
 
 ```bash
-git clone <repo> recruiter-agent
-cd recruiter-agent
-
-# Required env — the compose file refuses to start if any of these
-# is missing or empty.
+git clone <repo> recruiter-agent && cd recruiter-agent
 cp .env.example .env
 
-# Generate the Fernet key that encrypts your stored API keys / cookies.
+# Generate the Fernet key that encrypts your stored API keys + cookies.
 # Paste the output into .env as RECRUITER_SETTINGS_KEY=...
 python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 
-# Edit .env and set:
-#   POSTGRES_PASSWORD=<anything random>
-#   RECRUITER_SETTINGS_KEY=<output of the command above>
+# Edit .env and fill in (compose refuses to start if any are blank):
+#   POSTGRES_PASSWORD=<random>
+#   RECRUITER_SETTINGS_KEY=<output above>
 #   RECRUITER_DEFAULT_ACCOUNT_EMAIL=you@example.com
-#   RECRUITER_DEFAULT_ACCOUNT_PASSWORD=<long random string>
+#   RECRUITER_DEFAULT_ACCOUNT_PASSWORD=<random>
 
 docker compose up -d --build
-# UI:  http://localhost:8088
-# API: http://localhost:8088/api
+# UI:   http://localhost:8088
 # Docs: http://localhost:8088/docs
 ```
 
-**Back up your `RECRUITER_SETTINGS_KEY`.** If you lose it, every secret
-in the `settings` table becomes unrecoverable and you'll have to
-reconnect every external provider.
+Log in with the admin credentials from `.env`, then open **Settings → LLM**
+and paste your provider key. Everything else (Search, GitHub, LinkedIn, Apify,
+SMTP) is optional; the system runs in increasingly capable modes as you
+configure more keys.
 
-Log in with the admin email + password from `.env`. Open **Settings → LLM** and
-paste your Anthropic key. Everything else (search, GitHub, LinkedIn, Apify) is
-optional — the system runs in increasingly capable modes as you configure more
-keys.
-
----
+> **Back up `RECRUITER_SETTINGS_KEY`.** Losing it makes every stored secret
+> unrecoverable.
 
 ## Architecture
 
-### Stack at a glance
-
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                          Browser (React)                          │
-│  React 18 · Vite · TanStack Query · React Hook Form · Tailwind   │
-│  shadcn/ui · SSE subscription                                    │
+│              Browser — React 18 + Tailwind + SSE                  │
 └──────────────────────────────────────────────────────────────────┘
-                                  │
-                                  │  HTTPS · session cookie · SSE
-                                  ▼
+                              │
+                              ▼  HTTPS · session cookie
 ┌──────────────────────────────────────────────────────────────────┐
-│                           FastAPI (Python 3.12)                   │
-│  ┌─────┐ ┌─────┐ ┌────────┐ ┌──────┐ ┌──────┐ ┌─────────────┐    │
-│  │/jobs│ │/apps│ │/sourcing│ │/chat │ │/cands│ │/events (SSE)│    │
-│  └──┬──┘ └──┬──┘ └────┬────┘ └──┬───┘ └──┬───┘ └──────┬──────┘    │
-│     │       │         │         │         │            │           │
-│  ┌──┴───────┴─────────┴────┐  ┌─┴─────────┴──────────┐ │           │
-│  │  Pipeline orchestrator  │  │  Agent loop          │ │           │
-│  │ fetch → extract → enrich│  │  LLM ↔ 11 tools      │ │           │
-│  │ → score → persist       │  │  (read/search/action)│ │           │
-│  └────────────┬────────────┘  └──────────┬───────────┘ │           │
-│               │                          │             │           │
-│               └────── emit stage / chat events ────────┘           │
+│                  FastAPI (Python 3.12, async)                     │
+│  ┌─────────────────────────┐    ┌───────────────────────────┐    │
+│  │  Pipeline orchestrator   │    │  Conversational agent     │    │
+│  │  fetch → extract → enrich│    │  LLM loop ↔ 11 tools      │    │
+│  │  → score → persist       │    │  (read · search · action) │    │
+│  └────────────┬─────────────┘    └─────────────┬─────────────┘    │
+│               └────── emits stage / chat events ────┘             │
 └──────────────────────────────────────────────────────────────────┘
-                                  │
-        ┌─────────────────────────┼────────────────────────┐
-        ▼                         ▼                        ▼
-   ┌─────────┐              ┌──────────┐            ┌────────────┐
-   │ Postgres│              │ LLM      │            │ Sources    │
-   │ + JSONB │              │ Anthropic│            │ Apify      │
-   │ Alembic │              │  -or-    │            │ Playwright │
-   │         │              │ OpenAI   │            │ GitHub API │
-   │         │              │ compat   │            │ SerpAPI etc│
-   └─────────┘              └──────────┘            └────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+   ┌─────────┐         ┌───────────┐         ┌────────────┐
+   │ Postgres│         │ LLM       │         │ Sources    │
+   │ Alembic │         │ Anthropic │         │ Apify      │
+   │ JSONB   │         │   or      │         │ Playwright │
+   │         │         │ OpenAI    │         │ GitHub API │
+   │         │         │ compat    │         │ Search APIs│
+   └─────────┘         └───────────┘         └────────────┘
 ```
 
-### Backend layout (`src/recruiter/`)
-
-| Path | Responsibility |
-|---|---|
-| `api/` | FastAPI routers — `jobs.py`, `candidates.py`, `applications.py`, `auth.py`, `chat.py`, `events.py`, `notifications.py`, `settings.py`, `sourcing.py` |
-| `pipeline/` | Background processing — `orchestrator.py` drives `fetchers → extractor → enrichers → scorer` |
-| `pipeline/fetchers/` | `github.py`, `linkedin_playwright.py`, `linkedin_stub.py`, `webpage.py` |
-| `pipeline/enrichers/` | `linkedin_via_github.py`, `web.py` |
-| `pipeline/parsers/` | `pdf.py`, `docx.py`, `text.py` |
-| `sourcing/` | LinkedIn login + sourcing providers — `apify.py`, `linkedin_login.py`, `serpapi.py`, `google_cse.py`, `brave.py`, `searxng.py`, `github.py`, `search.py` |
-| `models/` | SQLAlchemy ORM — `Job`, `Application`, `Candidate`, `SettingsRow`, `User`, `AuthSession`, `ChatMessage`, `EventLog`, `Notification` |
-| `schemas/` | Pydantic models for API + structured-LLM-output validation |
-| `llm/` | Provider clients — `anthropic.py`, `openai_compat.py`, `client.py` (interface + fake) |
-| `auth/` | Local-password + OIDC (Google) — `local.py`, `oidc.py`, `session.py`, `password.py` |
-| `enrichment/` | Per-source enrichers (GitHub, blog/web, Twitter, YouTube, Stack Exchange) + orchestrator |
-| `agent/` | **Conversational tool-using agent** — `chat.py` (LLM loop), `tools.py` (11 registered tools), `events.py` (SSE event factories), `undo.py` (reversible action store), `types.py`. See [The recruiter agent](#the-recruiter-agent). |
-| `notifications/` | In-app + email notifications |
-| `events.py` | In-process pub/sub used by the SSE endpoint |
-| `crypto.py` | Fernet helpers for secret-at-rest encryption |
-| `config.py` | `pydantic-settings` — env-var driven runtime config |
-| `db.py` | Engine factory + session dependency |
-| `main.py` | FastAPI app assembly + middleware + lifespan |
-
-### Frontend layout (`recruiter-frontend/src/`)
-
-| Path | Responsibility |
-|---|---|
-| `routes/` | Top-level pages — `jobs-list`, `jobs-new`, `job-detail`, `application-detail`, `login`, `settings` |
-| `components/kanban/` | `kanban-board`, `kanban-column`, `candidate-card`, `add-candidate-panel`, score badges |
-| `components/candidate/` | `candidate-profile`, `enrichment-section`, `score-breakdown`, `action-bar` |
-| `components/applications/` | `chat-panel`, `paste-profile-form`, `search-result-card` |
-| `components/jobs/` | `edit-criteria-sheet` |
-| `components/settings/` | `sourcing-tab`, `linkedin-connect`, plus LLM / Profile / Enrichment / Notifications tabs |
-| `components/command-palette/` | ⌘K navigation |
-| `components/ui/` | shadcn/ui primitives + `spinner` |
-| `hooks/` | `use-jobs`, `use-job`, `use-job-applications`, `use-application`, `use-candidate`, `use-settings`, `use-chat`, `use-current-user`, `use-kanban-selection` |
-| `lib/api.ts` | Fetch wrapper with 401 → `/login` redirect + `ApiError` |
-| `lib/sse.ts` | SSE subscription → invalidates relevant React-Query keys on stage events |
-| `lib/query-keys.ts` | Centralised React-Query key factories |
-| `lib/time.ts` | Stage-relative timestamp + ageing colour |
-| `styles/` | Tailwind config + the editorial dark theme (`geist-theme.css`, `globals.css`) |
-
-### Database
-
-PostgreSQL 16. Schema is managed by Alembic; recent migrations cover
-encrypted-cookie storage, the Apify column, the configurable Apify actor,
-and the auto-reconnect credentials.
-
-Core tables: `users`, `auth_sessions`, `jobs`, `candidates`, `applications`,
-`chat_messages`, `event_logs`, `notifications`, `settings` (singleton).
-
-`applications.enrichment` is a JSONB blob keyed by source. `candidates.skills`,
-`candidates.experience`, `candidates.education` are JSONB arrays.
-
----
+**Backend** lives under `src/recruiter/` (`api/` routers, `pipeline/` for
+extraction/enrich/score, `sourcing/` for LinkedIn + search providers,
+`agent/` for the conversational agent, `models/` SQLAlchemy, `crypto.py`
+for at-rest secret encryption). **Frontend** is `recruiter-frontend/` (Vite +
+React + TanStack Query). DB schema is managed by Alembic.
 
 ## The candidate pipeline
 
-### Stages
+Each application moves through this finite-state machine:
 
 ```
-sourced ──► extracting ──► enriching ──► scored ──► validated ──► invited ──► scheduled
-                                            │
-                                            └────► rejected (from any stage)
+extracting → enriching → scored → validated → invited → scheduled
+                              ↘── rejected (terminal except unreject)
 ```
 
-`sourced` is reserved for bulk imports; today every candidate starts at
-`extracting`.
+Stages live on the kanban; SSE pushes transitions so the UI updates without
+refresh.
 
-### What runs at each stage
-
-**Fetch (transition `extracting` is entered)**
-
-| URL kind | Order tried | Notes |
-|---|---|---|
-| LinkedIn | 1. **Apify** (if API token + actor slug set) → 2. **Playwright with cookie** (if cookie set, with auto-reconnect via stored credentials if available) → 3. **GitHub-by-name enricher** (best-effort match) → 4. **Manual paste fallback** | Each path either returns rendered text or fails with `needs_paste=true` and a reason |
-| GitHub | GitHub REST API direct (`/users/<login>` + `/users/<login>/repos`) | No auth required; PAT raises rate limit to 5k/hr |
-| Other web | Trafilatura on the fetched HTML | Strips boilerplate, returns main content as text |
-| Uploaded file | `.pdf` → pdfminer.six; `.docx` → python-docx | Text content fed to extractor |
-
-**Extract**
-
-Anthropic Claude (or your configured LLM) is prompted with the fetched text
-plus a strict `ExtractedCandidate` Pydantic schema. Tool-use enforces
-JSON-shape compliance.
-
-**Enrich (transition `enriching`)**
-
-`enrichment/` discovers links in the candidate's profile/summary (URLs, GitHub
-handle hints, Stack Overflow IDs, YouTube channel mentions). Each enabled
-source is fetched and summarised. Results are cached for **30 days**;
-`Re-enrich now` on the detail page bypasses the cache.
-
-Enrichment sources, toggleable in **Settings → Enrichment**:
-`github`, `blog`, `web` (always on if enrichment enabled),
-`stackexchange`, `youtube`, `twitter` (require API keys).
-
-**Score**
-
-The LLM scores each criterion from 0-10, returning:
-- per-criterion score
-- per-criterion rationale
-- weighted overall score (0-100, computed server-side)
-- prose rationale
-
-**Stage transition**
-
-The orchestrator commits the candidate, sets `applications.stage = scored`,
-and emits a `stage` SSE event so the kanban updates without polling.
-
-### Failure modes — what happens when
-
-| Symptom | Cause | Fallback |
-|---|---|---|
-| Card stuck in **Extracting**, *"Extracting profile…"* badge | Pipeline running normally (< 90 s) | Wait |
-| Card stuck in **Extracting**, *"Needs profile"* yellow badge | LinkedIn URL → all extraction paths failed; > 90 s elapsed | Open detail page, paste profile content manually |
-| Score = 0, breakdown empty | Job has no criteria | Edit criteria on the job detail page |
-| Experience / education empty, only skills populated | Apify actor returned partial data, or fell back to GitHub-by-name enricher (GitHub repo languages != LinkedIn skills) | Try a different Apify actor, or rotate LinkedIn cookie |
-| All `start` dates `null` | The configured Apify actor doesn't emit dates | Swap to a different actor that does |
-| 500 on Add | Almost always a fetcher bug — every known path returns a typed error rather than raising | Check `docker compose logs backend`, file an issue |
-
----
+1. **Extracting** — fetch the source (LinkedIn via Apify or Playwright,
+   GitHub via API, web via httpx + trafilatura, CV via pdf/docx parser),
+   then call the LLM with a structured-output schema to pull name,
+   headline, location, summary, skills, experience, education, links.
+2. **Enriching** — fan out to per-source enrichers (GitHub repos, blog,
+   Twitter/X, YouTube, Stack Exchange) gated by `enrichment.consent`.
+3. **Scored** — for each criterion: LLM returns 0–100 with a per-criterion
+   rationale, plus a weighted overall and one-sentence overall rationale.
+4. **Validated / Invited / Scheduled / Rejected** — recruiter actions
+   tracked with timestamps.
 
 ## The recruiter agent
 
-The pipeline gets you a scored candidate; the **agent** is what lets you
-*reason about* and *act on* candidates conversationally. It's the chat
-panel on the right of every application detail page, but it's not a simple
-LLM chatbot — it's a tool-using agent with bounded authority over the
-application's state.
+Conversational LLM with 11 registered tools (read job/applications/criteria,
+search the kanban, draft/send invitations, reject/validate, fetch enrichment,
+re-enrich, edit criteria, etc.). Reversible actions go through an undo store
+so you can roll back a wrong call.
 
-### Loop
-
-```
-User message ──┐
-               ▼
-        ┌──────────────────────────────────┐
-        │ LLM ↔ tools  (Anthropic / local) │
-        │  - read tools     (cheap)        │ ◄─── streams `message_delta`,
-        │  - search tools   (LLM cost)     │      `tool_call_start`,
-        │  - action tools   (mutating)     │      `tool_call_result`
-        └──────────────────────────────────┘      back to the browser as
-                                                  SSE events
-                ▼
-        Final assistant turn
-        persisted as ChatMessage
-```
-
-The loop runs at most `MAX_STEPS_DEFAULT = 8` turns per user message —
-enough for *"find me three similar profiles, save a note, and reject the
-weakest one"* in a single interaction, but bounded so a confused model
-can't loop forever. Each step is one tool call or the final answer.
-
-### Tools the agent has
-
-All 11 tools are defined in [`src/recruiter/agent/tools.py`](src/recruiter/agent/tools.py).
-The handler dict + `ToolDef` list keep schemas and implementations together,
-which the LLM provider's tool-use mechanism consumes directly.
-
-**Read tools** (no side effects, called freely):
-
-| Tool | Purpose |
-|---|---|
-| `get_candidate` | Full extracted profile — name, headline, location, skills[], experience[], education[], summary, links |
-| `get_application` | Stage, score, score breakdown, notes, enrichment, awaiting_paste status |
-| `get_score_breakdown` | Just the per-criterion scores + rationales, formatted for chat reasoning |
-| `get_job` | Job title, description, criteria array — so the agent can reason about fit |
-| `list_other_applications_for_candidate` | This candidate's stage in *other* jobs — prevents poaching across pipelines |
-
-**Search tools** (LLM-driven, cost real money on every call):
-
-| Tool | Purpose |
-|---|---|
-| `search_linkedin` | Same sourcing provider as the *Add candidate → Search* tab, scoped to LinkedIn |
-| `search_github` | GitHub-by-keyword |
-| `search_web` | Generic web search |
-
-Results are returned as **structured candidate cards** (name + snippet +
-URL), so the agent can refer to them by index and the UI can render an
-*Add* button on each.
-
-**Action tools** (mutating, reversible via the undo store):
-
-| Tool | Purpose |
-|---|---|
-| `save_note` | Append a recruiter-private note to the application |
-| `validate_application` | Promote stage `scored → validated` |
-| `reject_application` | Promote any stage → `rejected` |
-
-Every action goes through `agent/undo.py`, which stores the inverse
-operation. The UI offers an **Undo** button on each rendered tool-call
-result for as long as the inverse is valid (typically until the next
-mutating action or page reload).
-
-### What you can ask it
-
-The chat sees the full candidate context plus the job criteria, so prompts
-like these work without you supplying any state:
-
-- *"How does Arunn compare to the criteria? Be specific about which
-  evidence in his profile matches."*
-- *"Find me three more candidates similar to this one but based in Europe."*
-- *"Save a note that I'm waiting on a referral check, then reject him for
-  now."*
-- *"Has this person applied to any other roles?"*
-- *"Draft three interview questions calibrated to his weakest criterion."*
-
-The agent will read what it needs, call search tools where appropriate,
-take actions if you authorise them, and return a final answer with the
-reasoning visible inline as expanded tool-call panes.
-
-### Why split the agent from the pipeline?
-
-- **The pipeline runs once per candidate** and produces deterministic
-  output (the score breakdown). It must work without LLM creativity.
-- **The agent runs on demand**, reads what the pipeline produced, and
-  helps the recruiter think + act. Different latency profile, different
-  cost profile, different failure modes.
-
-Both share the same LLM client, the same DB session, the same models.
-Splitting the responsibility means scoring is reproducible and the chat
-can evolve without destabilising the scoring step.
-
----
+Open the **Chat** panel on any candidate detail page.
 
 ## Configuration reference
 
-All configuration is either an **env var** (read at startup) or a **Settings
-row** (encrypted at rest, editable via the UI). Settings always win over env
-vars where both exist, **except** `RECRUITER_LINKEDIN_LI_AT` (env wins, useful
-for dev override).
+All config is either an **env var** (read at startup, in `.env`) or a
+**Settings row** (encrypted at rest, editable in `/settings`). Settings win
+over env vars where both exist — except `RECRUITER_LINKEDIN_LI_AT`, where
+env wins so dev overrides work.
 
-### Env vars (`.env`)
+### Env vars (required)
 
-All required vars have **no default in `docker-compose.yml`** — the
-file uses `${VAR:?…}` syntax, so a missing or empty value causes
-compose to refuse to start. That's deliberate: no weak fallback can
-ship in the repo.
+| Var | Purpose |
+|---|---|
+| `POSTGRES_PASSWORD` | Postgres role password. Threaded into the backend's DATABASE_URL. |
+| `RECRUITER_SETTINGS_KEY` | Fernet key encrypting every `*_enc` column. Generate with the command in Quick start. **Back this up.** |
+| `RECRUITER_DEFAULT_ACCOUNT_EMAIL` | Bootstrap admin login. Eager-seeded into `users` on startup if missing. |
+| `RECRUITER_DEFAULT_ACCOUNT_PASSWORD` | Bootstrap password. Compared byte-for-byte at login time. |
+| `RECRUITER_ALLOWED_ORIGINS` | Comma-separated browser origins (CSRF Origin allowlist). Default `http://localhost:8088`. |
 
-| Var | Required | Purpose |
-|---|---|---|
-| `POSTGRES_PASSWORD` | **yes** | Postgres role password. Used by the postgres container and threaded into the backend's DATABASE_URL. |
-| `RECRUITER_SETTINGS_KEY` | **yes** | Base64-encoded 32-byte Fernet key used to encrypt every `*_enc` column (LLM/search/Apify/GitHub/SMTP keys, LinkedIn cookie + password, OAuth tokens). Generate via `python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"`. **Back this up** — losing it makes every stored secret unrecoverable. |
-| `RECRUITER_DEFAULT_ACCOUNT_EMAIL` | yes (first run) | Seeds the initial admin user. After bootstrap, change via Settings → Profile. |
-| `RECRUITER_DEFAULT_ACCOUNT_PASSWORD` | yes (first run) | bcrypt-hashed on first start. Once the user row exists, this var is ignored. |
-| `RECRUITER_ALLOWED_ORIGINS` | yes | Comma-separated browser origins allowed to call the API (CSRF Origin allowlist). Compose default: `http://localhost:8088`. |
-| `RECRUITER_LINKEDIN_LI_AT` | no | LinkedIn `li_at` cookie. **If set, overrides whatever is stored in Settings** — useful for dev override. Most users configure via Settings → Sourcing → Connect LinkedIn instead. |
-| `RECRUITER_LOCAL_LLM_API_KEY` | no | Key for a local OpenAI-compat inference server, when not using Anthropic. |
-| `RECRUITER_DEV_AUTH_BYPASS` | no | Email address (e.g. `you@example.com`) that auto-logs-in without a password. **Never set in shared environments.** Default unset → real auth. |
-| `RECRUITER_OIDC_*` | no | Google OIDC sign-in — `RECRUITER_OIDC_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`, `_REDIRECT_URI`. Leave issuer empty to disable. |
-| `ANTHROPIC_API_KEY` | no | Optional fallback for the Anthropic key when the Settings UI value is unset. The Settings UI value takes precedence. |
-| `RECRUITER_LOG_LEVEL` | no | Default `INFO`. |
-| `RECRUITER_RESUME_STORAGE_PATH` | no | Filesystem path for uploaded CVs. Default `/app/var/resumes` inside the container. |
+### Env vars (optional)
 
-### Settings (UI: `/settings`)
+| Var | Purpose |
+|---|---|
+| `RECRUITER_LINKEDIN_LI_AT` | LinkedIn `li_at` cookie. If set, **overrides** Settings — useful for dev override. |
+| `RECRUITER_LOCAL_LLM_API_KEY` | Fallback key for a local OpenAI-compat endpoint. |
+| `RECRUITER_DEV_AUTH_BYPASS` | Email that auto-logs-in without password. **Never set in production.** |
+| `RECRUITER_OIDC_*` | Google OIDC sign-in (`ISSUER`, `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`). Empty issuer disables. |
+| `RECRUITER_LOG_LEVEL` | Default `INFO`. |
 
-**LLM tab**
-- Provider: `anthropic` (default) or `local` (OpenAI-compat endpoint)
-- Anthropic API key (encrypted)
-- Local LLM URL + optional API key
-- Model overrides (advanced — pin model per task)
-- Monthly spend cap (USD, soft warning)
+### Settings (UI tabs)
 
-**Sourcing tab**
-- **Search provider**: SerpAPI (default), Google CSE, Brave, SearXNG
-- **Search API key** (encrypted), CSE engine ID, or SearXNG instance URL
-- **GitHub PAT** (optional, raises GitHub API rate limit 60 → 5,000/hr)
-- **Apify API token** (encrypted) — when set, LinkedIn URLs route through Apify first
-- **Apify actor** — slug like `username/actor-name`. Default
-  `dev_fusion/linkedin-profile-scraper`. See *LinkedIn extraction strategies* below.
-- **LinkedIn auto-extraction** — Connect via credentials *or* paste-cookie modal
+| Tab | What it holds |
+|---|---|
+| **LLM** | Provider (Anthropic / local) · provider key · base URL · model id (e.g. `openai/gpt-oss-120b:free` for LINAGORA, `claude-sonnet-4-6` for Anthropic) · monthly spend cap. |
+| **Sourcing** | Search provider (SerpAPI / Google CSE / Brave / SearXNG) + key · GitHub PAT · Apify token + actor slug · LinkedIn (cookie paste, or email+password with optional "Remember"). |
+| **Enrichment** | Master toggle + per-source toggles (Twitter, YouTube, Stack Exchange) + API keys. |
+| **Notifications** | SMTP host/port/user/password/from (encrypted). Required to send invite emails. Use port `587` with STARTTLS, not 25 (relay-only). |
+| **Profile** | Recruiter name + email (used as the From: on outbound mail). |
 
-**Enrichment tab**
-- Master toggle `enrichment_enabled`
-- Per-source toggles (twitter, youtube, stackexchange)
-- Per-source API keys (encrypted)
+### LinkedIn extraction order
 
-**Profile tab**
-- Recruiter name + email (used as the From: on outbound mail)
-- SMTP configuration (encrypted) — required for invite emails
+Each LinkedIn URL tries strategies until one works:
 
-**Notifications tab**
-- In-app preferences
+1. **Apify** (commercial scrape) — fastest. Needs token + actor slug.
+   Tested actors: `supreme_coder/linkedin-profile-scraper` ($3/1k, free
+   plan friendly), `dev_fusion/linkedin-profile-scraper` (best output,
+   paid plan only).
+2. **Playwright + stealth** — headless Chromium with your `li_at` cookie.
+   Free but throttled by LinkedIn's anti-bot.
+3. **GitHub-by-name fallback** — searches GitHub for the snippet name.
+   Useful for engineers, useless otherwise.
+4. **Manual paste** — after 90s of failed auto-extraction the UI prompts
+   for a paste.
 
-### LinkedIn extraction strategies
+## Day-to-day flows
 
-The pipeline tries strategies in this order, falling through on failure:
+**Create a job** — `/jobs/new`. Paste a JD; the LLM proposes 3-6 weighted
+criteria you can edit before creating the job.
 
-1. **Apify** (commercial scrape API) — fastest + most reliable when working.
-   Requires an API token and an actor slug. Different actors have different
-   pricing, output shapes, and plan-tier restrictions. The renderer in
-   `apify.py` already handles the common variations.
+**Add candidates** — on a job's kanban, click **Add candidate**:
+- *URL* — LinkedIn / GitHub / personal site
+- *Upload* — PDF or DOCX
+- *Paste* — copy-paste profile text
+- *Search* — pick LinkedIn / GitHub / Web, optionally use **Suggest from JD**
+  to generate the query from the job description, then click *Add* on a result.
 
-   Currently tested actors:
-   - `supreme_coder/linkedin-profile-scraper` ($3/1k, no LinkedIn cookies required, ~$5/month free credit). Doesn't emit dates.
-   - `curious_coder/linkedin-profile-scraper` (your-cookies version, $4/1k).
-   - `dev_fusion/linkedin-profile-scraper` (best output, paid Apify plan only for API).
+**Score → Validate → Invite** — once the candidate is *Scored*, click
+**Validate**. From the validated stage, click **Notify & invite** to open a
+4-step wizard (channel → slots → LLM-drafted email → confirm) that sends an
+SMTP invite with an ICS attachment and moves the candidate to *Invited*.
 
-2. **Playwright with stealth** — headless Chromium driving LinkedIn with your
-   `li_at` cookie. Free but throttled by LinkedIn's anti-bot.
-   The cookie is captured one of three ways via the *Connect LinkedIn* modal:
-   - **Paste cookie** (open LinkedIn devtools → copy `li_at` cookie value)
-   - **Email + password** (we drive the login flow once; password is consumed
-     immediately and not persisted by default)
-   - **Email + password + "Remember"** checkbox (password is persisted
-     encrypted; auto-reconnect runs when the cookie is rejected by LinkedIn)
+**Edit a candidate** — pencil icon next to the name opens an inline form for
+name, email, phone, headline, location, summary. (Skills / experience /
+education / links remain LLM-extracted, not editable.)
 
-3. **GitHub-by-name enricher** — searches GitHub for the snippet name and
-   uses the matched user's profile as the source. Useful for engineering
-   roles when LinkedIn is blocked; useless for non-engineers.
-
-4. **Manual paste** — the candidate detail page's right pane shows a
-   textarea + a deep link to the LinkedIn profile. Open in your browser,
-   Cmd-A / Cmd-C the page, paste, submit.
-
-A LinkedIn URL fails over silently between strategies. Once `awaiting_paste`
-is true on the application (after the 90-second auto-extraction grace
-window), the UI prompts the user to paste.
-
----
-
-## User guide
-
-### 1. Create a job
-
-`Jobs → New job`. Type a title and paste the job description. Click
-**Suggest from JD** — the LLM proposes weighted criteria (typically 3-5
-criteria summing to ~1.0). Tweak names, weights, descriptions; the criteria
-sheet is also reachable later via the **Criteria** button on the job detail
-page.
-
-A job with no criteria scores every candidate 0/0. The system warns you
-about this when scoring runs.
-
-### 2. Add candidates
-
-Click **Add candidate** on the job detail page. Four tabs:
-
-- **URL** — paste a LinkedIn / GitHub / personal-site URL.
-- **Upload** — drop a `.pdf` or `.docx` CV.
-- **Paste** — paste profile text directly (skips the fetcher entirely).
-- **Search** — query LinkedIn / GitHub / Web. Each result has an **Add**
-  button. The search pre-fills the candidate's name and search snippet so
-  even if scraping fails you have something to work with.
-
-The card appears in the **Extracting** column with the amber *"Extracting
-profile…"* badge and a live loader on the detail page. After 20-30 seconds
-it moves to **Scored** with a numeric score (0-100).
-
-### 3. Triage on the kanban
-
-- Cards are stacked by score within each column (highest first).
-- Score badge colour: red < 50, yellow 50-79, green ≥ 80.
-- **Show rejected** toggles the rejected pile.
-- **Comfortable / Compact** density swaps card layout.
-- Click any card to open the detail page.
-
-### 4. Review the detail page
-
-Top: name, headline, photo (if available), location.
-
-**Score breakdown** — per-criterion score 0-10, weight, rationale.
-The job criteria are the *only* thing the scorer uses; if they don't match
-what you actually care about, edit them on the job page.
-
-**Enrichment** — discovered links per source (blog, GitHub, etc.) with the
-LLM's per-source summary. Cached for 30 days; **Re-enrich now** bypasses
-the cache.
-
-**Agent chat** (right pane, only after extraction finishes) — the
-conversational agent described in [The recruiter agent](#the-recruiter-agent).
-It can read the full profile, search for similar candidates, save notes,
-and validate / reject the application on your behalf — see that section
-for the full tool list and example prompts.
-
-### 5. Move the candidate forward
-
-- **Validate** — promote to Validated (your shortlist).
-- **Reject** — drop to Rejected.
-- **Invite** (once configured: SMTP + a recruiter email signature) — drafts
-  an email to the candidate using their extracted info; you review and send.
-- **Schedule** (after invite) — once they reply with availability, you mark
-  it scheduled.
-
-Stage transitions emit SSE events; the kanban updates without refresh on
-every connected tab.
-
-### 6. (Optional) Re-extract a stuck candidate
-
-If a card is stuck in `extracting` with the *Needs profile* badge:
-
-1. Open the LinkedIn URL in your normal browser.
-2. Select-all / copy.
-3. Paste into the textarea on the detail page → **Submit**.
-4. The candidate re-enters the pipeline as if it were a `Paste`-tab add.
-
-Or just **Reject** and re-add — useful when you've since configured Apify
-or rotated the LinkedIn cookie.
-
----
-
-## Operational notes
-
-### Storage costs
-
-The Apify path costs ~$0.01-0.05 per LinkedIn profile depending on actor +
-plan. Playwright is free but uses your LinkedIn account's reputation
-budget. Enrichment hits external sites at most once per profile then caches
-for 30 days. LLM cost is dominated by the score step; long candidate
-profiles cost more.
-
-### Secrets
-
-Every `*_enc` column (Anthropic key, search API key, GitHub PAT, Apify
-token, LinkedIn cookie, LinkedIn password if Remember, SMTP password,
-Google OAuth tokens) is Fernet-encrypted with `RECRUITER_SETTINGS_KEY`.
-
-Generate the key once via:
-
-```bash
-python -c "import secrets,base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
-```
-
-Paste the output into `.env` as `RECRUITER_SETTINGS_KEY=…`. **Back it
-up somewhere offline.** If you lose it, the encrypted blobs in the DB
-are unrecoverable and you'll have to reconfigure every external
-provider from scratch.
-
-`docker-compose.yml` refuses to start when the key isn't set
-(`${RECRUITER_SETTINGS_KEY:?…}`), so the repo can't accidentally ship a
-weak default to a new clone.
-
-### LinkedIn anti-bot
-
-After 50-100 profile fetches per LinkedIn cookie session, LinkedIn starts
-serving the *"Limited public profile"* view or, with heavier use, redirect-
-loops the URL entirely. Rotation (paste a fresh `li_at`) or auto-reconnect
-generally restores access. The Apify path bypasses this risk by using their
-infrastructure.
-
-The system gracefully degrades when LinkedIn fights back: redirect loops
-and timeouts are caught as `ApifyError` / `PlaywrightError`, surface as
-`needs_paste=True` with a clear `reason`, and the candidate falls through
-to manual paste rather than crashing.
-
-### Authentication
-
-Local email + password (bcrypt) and Google OIDC. Sessions are stored as
-SHA-256 hashes in `auth_sessions`. The session cookie is `HttpOnly`,
-`SameSite=Lax`, `Secure` in HTTPS deployments.
-
-CSRF protection: an Origin/Referer check rejects POST/PATCH/DELETE
-requests from unexpected origins.
-
-### Backup
-
-```bash
-# database
-docker exec recruiter-agent-postgres-1 pg_dump -U recruiter recruiter > backup.sql
-
-# secrets key — KEEP THIS (offline)
-grep RECRUITER_SETTINGS_KEY .env
-```
-
----
+**Reject** — opens a dialog for a structured reason; visible as a banner on
+the candidate detail page until you Unreject.
 
 ## Development
 
-### Running tests
-
 ```bash
-# backend
-uv run pytest tests/
+# Backend
+uv sync && uv run pytest                     # tests
+uv run alembic upgrade head                  # migrations
 
-# frontend
-cd recruiter-frontend && npx vitest run
-```
-
-Backend tests use an ephemeral Postgres + dependency overrides for the LLM
-(via `FakeLLMClient`) and the Playwright / Apify fetchers (via monkeypatched
-stubs). Most paths are tested end-to-end at the HTTP layer.
-
-### Hot-reload (without Docker)
-
-```bash
-# backend
-uv sync --extra dev
-uv run alembic upgrade head
-uv run uvicorn recruiter.main:app --reload
-
-# frontend
+# Frontend
 cd recruiter-frontend
 npm install
-npm run dev  # http://localhost:5173, proxied to :8000
+npm run dev                                  # vite at :5173, proxies /api
+npm test                                     # vitest (component)
+npm run e2e                                  # playwright (full app)
 ```
 
-### Adding a new search provider
+The e2e suite assumes `docker compose up -d` is already running. Tests are
+self-discovering — they pick any job/application that exists rather than
+hard-coding IDs.
 
-Implement `SearchProvider` in `src/recruiter/sourcing/provider.py`, register
-in `search.py`, add a UI option in `recruiter-frontend/src/components/settings/sourcing-tab.tsx`,
-update the `Provider` literal in both `schemas/settings.py` and
-the React hook.
+## Security notes
 
-### Adding a new Apify actor
-
-Most actors work via the configurable slug — no code change. If the actor
-uses unfamiliar JSON keys, extend the key-probe arrays in
-`src/recruiter/sourcing/apify.py::_render_profile_text`. The renderer already
-handles bare strings, `{name, text, title, value, label}` objects, and the
-`{year, month}` date variant.
-
-### Migrations
-
-```bash
-uv run alembic revision --autogenerate -m "describe change"
-# edit the generated file under alembic/versions/
-uv run alembic upgrade head
-```
-
-### Project conventions
-
-- Async-everywhere on the backend (SQLAlchemy 2.x async, FastAPI async
-  handlers, `httpx.AsyncClient`).
-- Pydantic v2 for all API schemas and structured-LLM outputs.
-- shadcn/ui + Tailwind on the frontend; no design-system imports from
-  outside the repo.
-- One responsibility per `api/` module; orchestration lives in `pipeline/`.
-
----
+- All secrets in the DB are encrypted with Fernet under
+  `RECRUITER_SETTINGS_KEY`. Back that key up.
+- Session cookies are HttpOnly, SameSite=Strict, SHA-256-hashed at rest.
+  Login is rate-limited (`5/minute`).
+- A CSRF Origin allowlist gates every mutating endpoint; configure via
+  `RECRUITER_ALLOWED_ORIGINS`.
+- `RECRUITER_DEV_AUTH_BYPASS` is dev-only — never set in production.
+- Uploaded CVs are stored under `var/resumes/`; the volume is gitignored.
 
 ## License
 
-Internal / proprietary unless otherwise noted in the repo.
+See `LICENSE`.
