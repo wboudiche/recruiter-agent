@@ -9,3 +9,8 @@ coverage/
 *.tsbuildinfo
 vite.config.d.ts
 vite.config.js
+
+# playwright transient output
+test-results/
+playwright-report/
+.playwright-mcp/

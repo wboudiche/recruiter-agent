@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "test": "vitest --run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
     "lint": "tsc --noEmit",
     "gen:types": "./scripts/gen-types.sh"
   },
@@ -39,6 +41,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.1",
     "@testing-library/user-event": "^14.5.2",
