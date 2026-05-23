@@ -8,9 +8,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from recruiter.api.candidates import get_llm
 from recruiter.api.deps import get_session, require_user
 from recruiter.crypto import settings_cipher
-from recruiter.models import SettingsRow
+from recruiter.llm.client import LLMClient
+from recruiter.models import Job, SettingsRow
+from recruiter.pipeline.query_suggester import suggest_search_query
+from recruiter.schemas.job import CriteriaItem
+from recruiter.schemas.job_suggest import (
+    SuggestSearchQueryRequest,
+    SuggestSearchQueryResponse,
+)
 from recruiter.sourcing.linkedin_login import (
     login_and_extract_cookie,
     validate_cookie,
@@ -92,6 +100,31 @@ async def search(
         else:
             results.extend(_to_out(r) for r in outcome)
     return SearchResponse(results=results, errors=errors)
+
+
+@router.post("/jobs/{job_id}/query/suggest", response_model=SuggestSearchQueryResponse)
+async def suggest_query_endpoint(
+    job_id: int,
+    payload: SuggestSearchQueryRequest,
+    session: AsyncSession = Depends(get_session),
+    llm: LLMClient = Depends(get_llm),
+) -> SuggestSearchQueryResponse:
+    job = await session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    criteria = [CriteriaItem.model_validate(c) for c in (job.criteria or [])]
+    try:
+        query = await suggest_search_query(
+            title=job.title,
+            description=job.description or "",
+            criteria=criteria,
+            sources=payload.sources,
+            llm=llm,
+        )
+    except Exception as exc:
+        logger.warning("search-query suggestion failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Query suggestion failed") from exc
+    return SuggestSearchQueryResponse(query=query)
 
 
 # ---------- LinkedIn cookie management ------------------------------------

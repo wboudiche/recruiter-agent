@@ -22,3 +22,16 @@ class SuggestedCriterion(BaseModel):
 
 class SuggestedCriteria(BaseModel):
     criteria: list[SuggestedCriterion]
+
+
+class SuggestSearchQueryRequest(BaseModel):
+    sources: list[str] = Field(min_length=1)
+
+
+class SuggestSearchQueryResponse(BaseModel):
+    query: str
+
+
+# Internal LLM-output schema.
+class SuggestedSearchQuery(BaseModel):
+    query: str = Field(min_length=1, max_length=512)
