@@ -70,6 +70,18 @@ async def update_candidate(
     data = payload.model_dump(exclude_unset=True, mode="json")
     if "photo_url" in data:
         candidate.photo_url = data["photo_url"] or None
+    if "full_name" in data:
+        candidate.full_name = (data["full_name"] or "").strip() or None
+    if "email" in data:
+        candidate.email = (data["email"] or "").strip() or None
+    if "headline" in data:
+        candidate.headline = (data["headline"] or "").strip() or None
+    if "phone" in data:
+        candidate.phone = (data["phone"] or "").strip() or None
+    if "location" in data:
+        candidate.location = (data["location"] or "").strip() or None
+    if "summary" in data:
+        candidate.summary = (data["summary"] or "").strip() or None
     await session.commit()
     return CandidateRead.model_validate(candidate)
 

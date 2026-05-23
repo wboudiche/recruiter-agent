@@ -52,10 +52,20 @@ export function useCandidate(candidateId: number | undefined) {
   });
 }
 
+export interface CandidatePatch {
+  photo_url?: string | null;
+  full_name?: string | null;
+  email?: string | null;
+  headline?: string | null;
+  phone?: string | null;
+  location?: string | null;
+  summary?: string | null;
+}
+
 export function useUpdateCandidate(candidateId: number | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: { photo_url?: string | null }) =>
+    mutationFn: (patch: CandidatePatch) =>
       api<CandidateRead>(`/api/candidates/${candidateId}`, {
         method: "PATCH",
         json: patch,
@@ -64,6 +74,9 @@ export function useUpdateCandidate(candidateId: number | undefined) {
       if (candidateId !== undefined) {
         qc.setQueryData(queryKeys.candidate(candidateId), data);
       }
+      // Identity edits (name/email/headline) affect application views too —
+      // the kanban card title, the Notify-button gating, etc.
+      qc.invalidateQueries({ queryKey: ["applications"] });
       toast.success("Candidate updated");
     },
     onError: (err) =>

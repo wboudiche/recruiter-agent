@@ -8,6 +8,7 @@ import {
   Linkedin,
   Mail,
   MapPin,
+  Pencil,
   Phone,
   Twitter,
   X,
@@ -15,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card as UICard } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   CandidateRead,
   EducationItem,
@@ -50,19 +52,49 @@ export function CandidateProfile({ candidate }: Props) {
 }
 
 function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<"photo" | "identity" | null>(null);
   const [photoUrl, setPhotoUrl] = useState(candidate.photo_url ?? "");
+  const [fullName, setFullName] = useState(candidate.full_name ?? "");
+  const [email, setEmail] = useState(candidate.email ?? "");
+  const [headline, setHeadline] = useState(candidate.headline ?? "");
+  const [phone, setPhone] = useState(candidate.phone ?? "");
+  const [location, setLocation] = useState(candidate.location ?? "");
+  const [summary, setSummary] = useState(candidate.summary ?? "");
   const update = useUpdateCandidate(candidate.id);
 
-  function startEditing() {
+  function startEditingPhoto() {
     setPhotoUrl(candidate.photo_url ?? "");
-    setEditing(true);
+    setEditing("photo");
+  }
+
+  function startEditingIdentity() {
+    setFullName(candidate.full_name ?? "");
+    setEmail(candidate.email ?? "");
+    setHeadline(candidate.headline ?? "");
+    setPhone(candidate.phone ?? "");
+    setLocation(candidate.location ?? "");
+    setSummary(candidate.summary ?? "");
+    setEditing("identity");
   }
 
   function save() {
     update.mutate(
       { photo_url: photoUrl.trim() || null },
-      { onSuccess: () => setEditing(false) },
+      { onSuccess: () => setEditing(null) },
+    );
+  }
+
+  function saveIdentity() {
+    update.mutate(
+      {
+        full_name: fullName.trim() || null,
+        email: email.trim() || null,
+        headline: headline.trim() || null,
+        phone: phone.trim() || null,
+        location: location.trim() || null,
+        summary: summary.trim() || null,
+      },
+      { onSuccess: () => setEditing(null) },
     );
   }
 
@@ -70,7 +102,7 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
     setPhotoUrl("");
     update.mutate(
       { photo_url: null },
-      { onSuccess: () => setEditing(false) },
+      { onSuccess: () => setEditing(null) },
     );
   }
 
@@ -84,7 +116,7 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
         />
         <button
           type="button"
-          onClick={startEditing}
+          onClick={startEditingPhoto}
           aria-label="Edit photo"
           className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full bg-card border shadow-sm hover:bg-accent transition-colors"
         >
@@ -92,9 +124,20 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
         </button>
       </div>
       <div className="flex-1 min-w-0">
-        <h1 className="text-2xl font-semibold tracking-tight truncate">
-          {candidate.full_name ?? `Candidate #${candidate.id}`}
-        </h1>
+        <div className="flex items-start gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight truncate">
+            {candidate.full_name ?? `Candidate #${candidate.id}`}
+          </h1>
+          <button
+            type="button"
+            onClick={startEditingIdentity}
+            aria-label="Edit profile details"
+            title="Edit name, email, phone, headline, location, summary"
+            className="mt-1 grid h-6 w-6 place-items-center rounded-md border shadow-sm hover:bg-accent transition-colors shrink-0"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        </div>
         {candidate.headline && (
           <p className="text-base text-muted-foreground mt-0.5">{candidate.headline}</p>
         )}
@@ -121,7 +164,7 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
             </span>
           )}
         </div>
-        {editing && (
+        {editing === "photo" && (
           <div className="mt-3 flex items-center gap-2 max-w-xl">
             <Input
               type="url"
@@ -147,12 +190,63 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
               size="sm"
               variant="ghost"
               onClick={() => {
-                setEditing(false);
+                setEditing(null);
                 setPhotoUrl(candidate.photo_url ?? "");
               }}
             >
               <X className="h-4 w-4" />
             </Button>
+          </div>
+        )}
+        {editing === "identity" && (
+          <div className="mt-3 grid gap-2 max-w-xl">
+            <Input
+              placeholder="Full name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              autoFocus
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                type="email"
+                placeholder="email@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Input
+                placeholder="Phone"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </div>
+            <Input
+              placeholder="Headline (e.g. Senior DevOps engineer)"
+              value={headline}
+              onChange={(e) => setHeadline(e.target.value)}
+            />
+            <Input
+              placeholder="Location (e.g. Tunis, Tunisia)"
+              value={location}
+              onChange={(e) => setLocation(e.target.value)}
+            />
+            <Textarea
+              placeholder="Summary — short professional bio"
+              value={summary}
+              onChange={(e) => setSummary(e.target.value)}
+              rows={4}
+            />
+            <div className="flex items-center gap-2">
+              <Button size="sm" onClick={saveIdentity} disabled={update.isPending}>
+                Save
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </Button>
+            </div>
           </div>
         )}
       </div>

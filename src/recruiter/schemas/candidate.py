@@ -60,6 +60,12 @@ class CandidateUpdate(BaseModel):
     # value can never be a script-execution or local-file vector when rendered
     # as `<img src>`. max_length caps payload size before the DB layer.
     photo_url: HttpUrl | None = Field(default=None, max_length=2048)
+    full_name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=320)
+    headline: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=64)
+    location: str | None = Field(default=None, max_length=255)
+    summary: str | None = Field(default=None, max_length=4096)
 
     @field_validator("photo_url")
     @classmethod
