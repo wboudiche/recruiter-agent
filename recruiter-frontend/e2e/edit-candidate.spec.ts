@@ -16,6 +16,28 @@ async function findAnyApplicationId(page: import("@playwright/test").Page): Prom
 }
 
 test.describe("candidate edit", () => {
+  // Shared between the mutating test and the afterEach restore. Each test
+  // sets this before any failure point; afterEach only runs if it's set.
+  let mutated: { candidateId: number; originalEmail: string | null } | null =
+    null;
+
+  test.afterEach(async ({ page }) => {
+    if (mutated === null) return;
+    const { candidateId, originalEmail } = mutated;
+    mutated = null;
+    const resp = await page.request.patch(
+      `/api/candidates/${candidateId}`,
+      { data: { email: originalEmail } },
+    );
+    // If the restore itself fails we want to know — silent pollution would
+    // compound across runs (each subsequent run reads the polluted email
+    // as 'original' and restores to that).
+    expect(
+      resp.ok(),
+      `restore PATCH /api/candidates/${candidateId} failed with ${resp.status()}`,
+    ).toBeTruthy();
+  });
+
   test("pencil button opens the edit form with all six text fields", async ({ page }) => {
     await login(page);
     const appId = await findAnyApplicationId(page);
@@ -39,12 +61,13 @@ test.describe("candidate edit", () => {
     test.skip(appId === null, "no application in local DB");
     await page.goto(`/applications/${appId}`);
 
-    // Capture the candidate ID so we can restore via API afterward without
-    // re-running the LLM extraction. The detail URL is the application, but
-    // the PATCH is against the candidate — so we fetch it.
+    // Capture candidate id + original email BEFORE any mutation, so the
+    // afterEach restore knows what to write back even if the test below
+    // throws mid-way.
     const appResp = await page.request.get(`/api/applications/${appId}`);
     const candidateId = (await appResp.json()).candidate_id as number;
     const before = await (await page.request.get(`/api/candidates/${candidateId}`)).json();
+    mutated = { candidateId, originalEmail: before.email ?? null };
 
     const testEmail = `e2e-edit-${Date.now()}@example.test`;
     await page.getByRole("button", { name: "Edit profile details" }).click();
@@ -59,10 +82,5 @@ test.describe("candidate edit", () => {
       expect(r.ok()).toBeTruthy();
       expect((await r.json()).email).toBe(testEmail);
     }).toPass({ timeout: 10_000 });
-
-    // Restore so we don't pollute local state across runs.
-    await page.request.patch(`/api/candidates/${candidateId}`, {
-      data: { email: before.email },
-    });
   });
 });
