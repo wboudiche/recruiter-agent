@@ -1,6 +1,6 @@
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,10 @@ async def _load_or_create(session: AsyncSession) -> SettingsRow:
 
 
 def _to_read(row: SettingsRow) -> SettingsRead:
+    # Decrypt the SMTP blob to surface non-secret fields (host/port/user/
+    # from_email/use_starttls) so the UI can pre-fill on next open. The
+    # password is intentionally NOT included in the read shape.
+    smtp_cfg = get_smtp_config(row)
     return SettingsRead(
         default_llm_provider=row.default_llm_provider,
         has_anthropic_api_key=bool(row.anthropic_api_key_enc),
@@ -35,6 +39,11 @@ def _to_read(row: SettingsRow) -> SettingsRead:
         model_overrides=row.model_overrides or {},
         has_google_oauth_tokens=bool(row.google_oauth_tokens_enc),
         has_smtp_config=bool(row.smtp_config_enc),
+        smtp_host=smtp_cfg.host if smtp_cfg else None,
+        smtp_port=smtp_cfg.port if smtp_cfg else None,
+        smtp_user=smtp_cfg.user if smtp_cfg else None,
+        smtp_from_email=smtp_cfg.from_email if smtp_cfg else None,
+        smtp_use_starttls=smtp_cfg.use_starttls if smtp_cfg else None,
         recruiter_name=row.recruiter_name,
         recruiter_email=row.recruiter_email,
         monthly_llm_spend_cap_usd=row.monthly_llm_spend_cap_usd,
@@ -76,7 +85,19 @@ async def update_settings(
     if payload.model_overrides is not None:
         row.model_overrides = payload.model_overrides
     if payload.smtp_config is not None:
-        row.smtp_config_enc = cipher.encrypt(json.dumps(payload.smtp_config.model_dump()))
+        # If the client omits/blank the password, retain whatever's already
+        # stored. Lets the UI re-save SMTP host/port/user/from changes
+        # without re-typing the password every time.
+        smtp_payload = payload.smtp_config.model_dump()
+        if not smtp_payload.get("password"):
+            existing = get_smtp_config(row)
+            if existing is None or not existing.password:
+                raise HTTPException(
+                    status_code=422,
+                    detail="SMTP password is required on first configuration",
+                )
+            smtp_payload["password"] = existing.password
+        row.smtp_config_enc = cipher.encrypt(json.dumps(smtp_payload))
     if payload.recruiter_name is not None:
         row.recruiter_name = payload.recruiter_name
     if payload.recruiter_email is not None:

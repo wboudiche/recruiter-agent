@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,20 @@ export function NotificationsTab() {
   const [fromEmail, setFromEmail] = useState("");
   const [useStartTls, setUseStartTls] = useState(true);
 
+  // Pre-fill once when settings data first arrives. We don't keep
+  // re-syncing — that would clobber unsaved edits if the query refetches.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    if (!hydrated && settings.data) {
+      setHost(settings.data.smtp_host ?? "");
+      setPort(String(settings.data.smtp_port ?? 587));
+      setUser(settings.data.smtp_user ?? "");
+      setFromEmail(settings.data.smtp_from_email ?? "");
+      setUseStartTls(settings.data.smtp_use_starttls ?? true);
+      setHydrated(true);
+    }
+  }, [hydrated, settings.data]);
+
   if (settings.isLoading) return <p>Loading…</p>;
   if (!settings.data) return <p>No settings.</p>;
 
@@ -24,7 +38,9 @@ export function NotificationsTab() {
           host,
           port: Number(port),
           user,
-          password,
+          // Omit the field entirely when blank → backend keeps the
+          // stored password instead of overwriting it with "".
+          ...(password ? { password } : {}),
           from_email: fromEmail,
           use_starttls: useStartTls,
         },
@@ -33,7 +49,8 @@ export function NotificationsTab() {
     );
   }
 
-  const canSave = host && port && fromEmail;
+  const canSave =
+    host && port && fromEmail && (password || settings.data.has_smtp_config);
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -41,7 +58,8 @@ export function NotificationsTab() {
         <h3 className="font-medium">SMTP + ICS</h3>
         {settings.data.has_smtp_config && (
           <p className="text-sm text-muted-foreground">
-            SMTP config is set. Submit again to overwrite.
+            SMTP is configured. Leave the password field blank to keep the
+            stored one; fill it in to overwrite.
           </p>
         )}
         <div className="space-y-2">

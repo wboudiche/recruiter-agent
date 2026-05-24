@@ -5,7 +5,9 @@ class SmtpConfigInput(BaseModel):
     host: str
     port: int
     user: str
-    password: str
+    # Optional on update — if omitted/empty the backend keeps the previously
+    # encrypted password instead of overwriting it with "".
+    password: str | None = None
     from_email: str
     use_starttls: bool = True
 
@@ -20,6 +22,14 @@ class SettingsRead(BaseModel):
     model_overrides: dict
     has_google_oauth_tokens: bool
     has_smtp_config: bool
+    # Non-secret SMTP fields exposed so the form can pre-fill on next open.
+    # Password is intentionally never exposed — has_smtp_config tells the UI
+    # whether a password is on file.
+    smtp_host: str | None = None
+    smtp_port: int | None = None
+    smtp_user: str | None = None
+    smtp_from_email: str | None = None
+    smtp_use_starttls: bool | None = None
     recruiter_name: str | None
     recruiter_email: str | None
     monthly_llm_spend_cap_usd: int | None

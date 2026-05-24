@@ -11,6 +11,11 @@ export interface SettingsRead {
   model_overrides: Record<string, unknown>;
   has_google_oauth_tokens: boolean;
   has_smtp_config: boolean;
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_user: string | null;
+  smtp_from_email: string | null;
+  smtp_use_starttls: boolean | null;
   recruiter_name: string | null;
   recruiter_email: string | null;
   monthly_llm_spend_cap_usd: number | null;
@@ -31,7 +36,8 @@ export interface SmtpConfigInput {
   host: string;
   port: number;
   user: string;
-  password: string;
+  // Optional on update: omit to keep the stored password unchanged.
+  password?: string;
   from_email: string;
   use_starttls?: boolean;
 }
