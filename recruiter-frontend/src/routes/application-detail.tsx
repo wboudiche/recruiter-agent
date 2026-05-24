@@ -62,7 +62,9 @@ export default function ApplicationDetail() {
             stage:
           </span>
           <span className="text-sm font-medium capitalize">
-            {application.data.stage}
+            {application.data.awaiting_paste
+              ? "needs paste"
+              : application.data.stage}
           </span>
           <div className="ml-auto">
             <ActionBar
@@ -71,6 +73,19 @@ export default function ApplicationDetail() {
             />
           </div>
         </div>
+        {application.data.awaiting_paste && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+            <p className="font-medium text-amber-200">
+              Auto-extraction couldn’t fetch this profile.
+            </p>
+            <p className="text-muted-foreground mt-1">
+              LinkedIn requires either an Apify API token (Settings → Sourcing) or a
+              connected LinkedIn cookie/credentials to scrape automatically. Until
+              one is configured, paste the profile manually using the form on the
+              right — open the source URL, copy the page, and submit.
+            </p>
+          </div>
+        )}
         <RejectionBanner application={application.data} />
         <ScoreBreakdown application={application.data} />
         <EnrichmentSection

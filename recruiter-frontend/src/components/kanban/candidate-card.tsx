@@ -65,7 +65,9 @@ export function CandidateCard({
           <ScoreBadge score={application.score} />
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-muted-foreground capitalize">{application.stage}</span>
+          <span className="text-muted-foreground capitalize">
+            {awaitingPaste ? "needs paste" : application.stage}
+          </span>
           <TimeInStageBadge application={application} />
         </div>
         {!compact && awaitingPaste && (
