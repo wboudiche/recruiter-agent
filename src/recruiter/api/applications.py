@@ -83,6 +83,11 @@ async def update_candidate(
     if "summary" in data:
         candidate.summary = (data["summary"] or "").strip() or None
     await session.commit()
+    # `updated_at` carries `onupdate=func.now()`. After commit the
+    # in-memory value is stale; without an explicit refresh, Pydantic's
+    # lazy attribute read triggers a sync DB hit and crashes with
+    # MissingGreenlet in this async context.
+    await session.refresh(candidate)
     return CandidateRead.model_validate(candidate)
 
 
