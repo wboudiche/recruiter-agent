@@ -25,8 +25,11 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # `--extra dev` pulls pytest + pytest-asyncio + testcontainers,
+      # which live in [project.optional-dependencies.dev] in pyproject.toml.
+      # Without it `uv run pytest` fails with "No such file or directory".
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --extra dev
 
       # Backend tests use testcontainers to start their own postgres,
       # so the runner just needs Docker — which GitHub Actions provides.
