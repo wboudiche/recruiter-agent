@@ -35,5 +35,7 @@ async def test_fetch_webpage_raises_on_http_error() -> None:
         return httpx.Response(404)
 
     transport = httpx.MockTransport(handler)
-    with pytest.raises(ValueError, match="fetch failed"):
+    # The fetcher rewrites raw httpx errors into a recruiter-facing
+    # message; assert on the HTTP status that's preserved in the text.
+    with pytest.raises(ValueError, match="HTTP 404"):
         await fetch_webpage("https://nope.example", transport=transport)
