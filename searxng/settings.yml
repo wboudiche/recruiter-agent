@@ -1,0 +1,23 @@
+# Minimal SearXNG config for recruiter-agent.
+#
+# - use_default_settings: true → inherit the image's full default settings.yml
+#   (engines, locales, security headers, ratelimiter, etc.) and only override
+#   the keys below.
+# - search.formats: include json so the recruiter-agent SearXNG provider can
+#   request format=json. The default image ships with html only, which makes
+#   API requests 403.
+# - server.secret_key: required by SearXNG. Generate per-deployment via:
+#     openssl rand -hex 32
+#   and store in .env as SEARXNG_SECRET. The compose file passes that env var
+#   into the container, where it overrides this YAML key at startup.
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  # SearXNG honours $SEARXNG_SECRET at runtime; this YAML key is the fallback
+  # when the env var is unset. Don't ship the fallback in production.
+  secret_key: "change-me"

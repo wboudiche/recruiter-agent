@@ -82,6 +82,27 @@ services:
       backend:
         condition: service_healthy
 
+  # Self-hosted SearXNG — free metasearch, no third-party key, runs on the
+  # same docker network so the backend resolves it as `http://searxng:8080`.
+  # Settings → Sourcing should set Search provider = `searxng` and SearXNG
+  # URL = `http://searxng:8080` to use it.
+  searxng:
+    image: searxng/searxng:latest
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      # Override the YAML fallback secret. Generate via:
+      #   openssl rand -hex 32
+      # Falls back to the YAML placeholder if unset — works locally but
+      # do not ship that in production.
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me}
+      # Tell SearXNG it's reachable at this name on the internal network;
+      # without it some engines fail their self-test.
+      SEARXNG_BASE_URL: http://searxng:8080/
+    expose:
+      - "8080"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   resumes:
