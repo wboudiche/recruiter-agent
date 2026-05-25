@@ -34,9 +34,14 @@ const SOURCE_LABEL: Record<Source, string> = {
   web: "Web",
 };
 
+const LIMIT_MIN = 1;
+const LIMIT_MAX = 30;
+const LIMIT_DEFAULT = 5;
+
 export function SearchTab({ jobId }: Props) {
   const [selected, setSelected] = useState<Set<Source>>(new Set());
   const [query, setQuery] = useState("");
+  const [limitPerSource, setLimitPerSource] = useState<number>(LIMIT_DEFAULT);
   const [hasSearched, setHasSearched] = useState(false);
   const search = useMutation({
     mutationFn: (body: { sources: Source[]; query: string; limit_per_source: number }) =>
@@ -68,10 +73,16 @@ export function SearchTab({ jobId }: Props) {
 
   function onSearch() {
     if (selected.size === 0 || !query.trim()) return;
+    // Clamp on submit, not on input, so a user typing '12' isn't blocked
+    // mid-keystroke when the field briefly holds '1'.
+    const clamped = Math.min(
+      LIMIT_MAX,
+      Math.max(LIMIT_MIN, Math.floor(limitPerSource) || LIMIT_DEFAULT),
+    );
     search.mutate({
       sources: [...selected],
       query: query.trim(),
-      limit_per_source: 5,
+      limit_per_source: clamped,
     });
   }
 
@@ -80,7 +91,7 @@ export function SearchTab({ jobId }: Props) {
 
   return (
     <div className="space-y-3 mt-4">
-      <div className="flex gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         {SOURCES.map((s) => (
           <Button
             key={s}
@@ -92,6 +103,27 @@ export function SearchTab({ jobId }: Props) {
             {SOURCE_LABEL[s]}
           </Button>
         ))}
+        <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+          <span>Per source:</span>
+          <Input
+            type="number"
+            min={LIMIT_MIN}
+            max={LIMIT_MAX}
+            step={1}
+            value={limitPerSource}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setLimitPerSource(Number.isFinite(n) ? n : LIMIT_DEFAULT);
+            }}
+            onBlur={() =>
+              setLimitPerSource((cur) =>
+                Math.min(LIMIT_MAX, Math.max(LIMIT_MIN, Math.floor(cur) || LIMIT_DEFAULT)),
+              )
+            }
+            className="w-16 h-8 text-sm"
+            aria-label={`Results per source (${LIMIT_MIN}–${LIMIT_MAX})`}
+          />
+        </label>
       </div>
 
       <div className="flex items-center gap-2">
