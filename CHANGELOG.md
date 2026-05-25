@@ -4,6 +4,53 @@ All notable user-facing changes are recorded here. The format is loosely based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows semantic versioning post-1.0.
 
+## v0.1.0-alpha.1 — 2026-05-25
+
+Post-alpha polish: free-by-default search, more honest UI feedback, and a
+handful of latent bug fixes surfaced by real use.
+
+### Added
+
+- **SearXNG is now bundled in compose.** `docker compose up -d` now starts a
+  self-hosted SearXNG container alongside the rest of the stack. Configure
+  by setting `SEARXNG_SECRET` (recommended: `openssl rand -hex 32`) and
+  picking `searxng` as the search provider in Settings → Sourcing — no
+  third-party account, no card. Config lives in `searxng/settings.yml`.
+- **Per-source result limit input in the Search tab.** A small numeric
+  control (1–30, default 5) next to the source chips lets you request
+  more results per search.
+- **Paginated SearXNG provider.** The provider now walks `pageno=1..5`
+  until it has `limit` distinct results (URL-deduped). Earlier it asked
+  only for page 1, so `limit_per_source` above ~10 was silently ignored.
+
+### Changed
+
+- **SMTP settings form now pre-fills from saved values.** The non-secret
+  SMTP fields (host, port, user, from, STARTTLS) round-trip through
+  `GET /api/settings`. The password remains write-only; leaving it blank
+  on save now keeps the stored password instead of overwriting it.
+- **"Needs paste" is now explicit.** When a LinkedIn URL can't be
+  auto-extracted (no Apify token, no LinkedIn cookie), the kanban card
+  label, the detail page stage, and an amber banner all say "needs paste"
+  instead of the misleading "extracting".
+- **Gmail channel hidden from the Notify wizard.** The backend route
+  returns 501 for `channel="gmail"`, so the Select option is removed
+  until it's wired up.
+
+### Fixed
+
+- `PATCH /api/candidates/{id}` no longer crashes with `MissingGreenlet`
+  when the candidate row has a non-null `updated_at`. The handler now
+  explicitly refreshes the row after commit before serializing.
+- The e2e candidate-edit spec restores the original email in
+  `test.afterEach` and asserts the restore response, so a mid-test
+  failure no longer leaks dirty state into subsequent runs.
+- `tests/unit/test_webpage_fetcher.py` was asserting on stale error
+  copy from a previous rewrite. Updated to assert on the HTTP status
+  embedded in the message instead.
+
+---
+
 ## v0.1.0-alpha — 2026-05-24
 
 First public preview. Single-tenant, self-hosted recruiter assistant: add a

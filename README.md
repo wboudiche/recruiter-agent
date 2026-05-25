@@ -130,16 +130,28 @@ env wins so dev overrides work.
 | `RECRUITER_DEV_AUTH_BYPASS` | Email that auto-logs-in without password. **Never set in production.** |
 | `RECRUITER_OIDC_*` | Google OIDC sign-in (`ISSUER`, `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`). Empty issuer disables. |
 | `RECRUITER_LOG_LEVEL` | Default `INFO`. |
+| `SEARXNG_SECRET` | Secret key for the bundled SearXNG container. Generate via `openssl rand -hex 32`. Unset falls back to a placeholder — fine locally, do not ship to production. |
 
 ### Settings (UI tabs)
 
 | Tab | What it holds |
 |---|---|
 | **LLM** | Provider (Anthropic / local) · provider key · base URL · model id (e.g. `openai/gpt-oss-120b:free` for LINAGORA, `claude-sonnet-4-6` for Anthropic) · monthly spend cap. |
-| **Sourcing** | Search provider (SerpAPI / Google CSE / Brave / SearXNG) + key · GitHub PAT · Apify token + actor slug · LinkedIn (cookie paste, or email+password with optional "Remember"). |
+| **Sourcing** | Search provider (SerpAPI / Google CSE / Brave / **SearXNG — bundled, no third-party key**) + key/URL · GitHub PAT · Apify token + actor slug · LinkedIn (cookie paste, or email+password with optional "Remember"). |
 | **Enrichment** | Master toggle + per-source toggles (Twitter, YouTube, Stack Exchange) + API keys. |
 | **Notifications** | SMTP host/port/user/password/from (encrypted). Required to send invite emails. Use port `587` with STARTTLS, not 25 (relay-only). |
 | **Profile** | Recruiter name + email (used as the From: on outbound mail). |
+
+### Search providers — quick comparison
+
+| Provider | Cost | Setup | Per-call cap | Notes |
+|---|---|---|---|---|
+| **SearXNG** (bundled) | Free | None — comes up with `docker compose up -d` | ~30+ per call (paginated) | Aggregates Google, Bing, DuckDuckGo, Qwant, Startpage. No third-party account. |
+| SerpAPI | Free tier ~100/mo (card required); paid from ~$50/mo | Sign up + key | ~10 (Google's quirk) | Best LinkedIn coverage; paid pagination for more. |
+| Brave | Free tier 2,000/mo (card required) + paid | Sign up + key | 20 per call | Honors `count` directly. |
+| Google CSE | 100/day free (requires GCP billing setup) | Sign up + key + engine id | 10 per call (hard cap) | OK but billing setup friction. |
+
+Default after `docker compose up -d` is SearXNG. Switch in Settings → Sourcing → Search provider.
 
 ### LinkedIn extraction order
 
@@ -165,8 +177,10 @@ criteria you can edit before creating the job.
 - *URL* — LinkedIn / GitHub / personal site
 - *Upload* — PDF or DOCX
 - *Paste* — copy-paste profile text
-- *Search* — pick LinkedIn / GitHub / Web, optionally use **Suggest from JD**
-  to generate the query from the job description, then click *Add* on a result.
+- *Search* — pick LinkedIn / GitHub / Web, set the **Per source** count
+  (1–30, default 5), optionally click the **Sparkles ✦** button to generate
+  the query from the job description, then *Search* and click *Add* on a
+  result.
 
 **Score → Validate → Invite** — once the candidate is *Scored*, click
 **Validate**. From the validated stage, click **Notify & invite** to open a
