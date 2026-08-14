@@ -14,9 +14,16 @@ from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
 from recruiter.config import get_config
 from recruiter.db import get_engine, get_session_factory
+from recruiter.logging_config import configure_logging
 from recruiter.models import Role, User
 
 _log = logging.getLogger(__name__)
+
+# Applied at import, before any router module logs anything. Without this
+# the root logger stays at WARNING with no handler, and every
+# `logger.info(...)` in the app — including the user-management audit
+# trail — is discarded, while uvicorn's own request lines still appear.
+configure_logging(get_config().log_level)
 
 
 async def _seed_default_user() -> None:
