@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from typing import TypeVar
 
 import httpx
@@ -8,6 +10,34 @@ from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall, ToolDef
 from recruiter.llm.client import LLMMessage
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
+
+# Statuses worth a second look. 429 is the common one on free-tier
+# gateways (the shared upstream pool saturates and answers "temporarily
+# rate-limited"); the 5xx family covers provider blips. Everything else
+# — notably 401/402/404 — is definitive, and retrying only delays the
+# error the user needs to see.
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+_MAX_ATTEMPTS = 4
+_BASE_BACKOFF_S = 2.0
+_MAX_BACKOFF_S = 30.0
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before retry `attempt` (0-based).
+
+    A `Retry-After` header is the provider telling us exactly when it
+    will serve us again — prefer it over our own guess. Otherwise back
+    off exponentially so a saturated pool isn't hammered at a fixed rate.
+    """
+    header = response.headers.get("Retry-After")
+    if header:
+        try:
+            return min(float(header), _MAX_BACKOFF_S)
+        except ValueError:
+            pass  # HTTP-date form; fall through to the exponential guess.
+    return min(_BASE_BACKOFF_S * (2 ** attempt), _MAX_BACKOFF_S)
 
 
 class OpenAICompatLLMClient:
@@ -44,11 +74,7 @@ class OpenAICompatLLMClient:
             "temperature": temperature,
         }
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        response = await self._client.post(
-            f"{self._base_url}/chat/completions",
-            json=body,
-            headers=headers,
-        )
+        response = await self._post(body, headers)
         if response.status_code >= 400:
             _raise_with_body(response)
         data = response.json()
@@ -106,11 +132,7 @@ class OpenAICompatLLMClient:
             ]
             body["tool_choice"] = "auto"
 
-        response = await self._client.post(
-            f"{self._base_url}/chat/completions",
-            json=body,
-            headers={"Authorization": f"Bearer {self._api_key}"},
-        )
+        response = await self._post(body, {"Authorization": f"Bearer {self._api_key}"})
         if response.status_code >= 400:
             _raise_with_body(response)
         msg = response.json()["choices"][0]["message"]
@@ -125,6 +147,27 @@ class OpenAICompatLLMClient:
             for tc in raw_tcs
         ]
         return AssistantTurn(text=msg.get("content"), tool_calls=tool_calls)
+
+    async def _post(self, body: dict, headers: dict) -> httpx.Response:
+        """POST /chat/completions, retrying transient upstream failures.
+
+        Returns the final response — the caller still decides what to do
+        with a >=400 status, so a definitive error surfaces with its body
+        intact rather than being masked by the retry loop.
+        """
+        url = f"{self._base_url}/chat/completions"
+        for attempt in range(_MAX_ATTEMPTS):
+            response = await self._client.post(url, json=body, headers=headers)
+            last = attempt == _MAX_ATTEMPTS - 1
+            if response.status_code not in _RETRY_STATUSES or last:
+                return response
+            delay = _retry_delay(response, attempt)
+            logger.warning(
+                "LLM HTTP %s from %s — retrying in %.1fs (attempt %d/%d)",
+                response.status_code, url, delay, attempt + 1, _MAX_ATTEMPTS,
+            )
+            await asyncio.sleep(delay)
+        return response  # unreachable; the loop always returns.
 
     async def aclose(self) -> None:
         await self._client.aclose()

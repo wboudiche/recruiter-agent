@@ -203,6 +203,44 @@ async def test_apify_reports_in_band_error_for_free_plan(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_budget_stays_under_the_client_timeout(monkeypatch) -> None:
+    """The `timeout` we send Apify is the *actor run* budget — Apify kills
+    the run when it elapses. A hardcoded 60s budget killed real runs that
+    need ~2min, so it must derive from our own client timeout and stay
+    strictly below it (otherwise the socket times out before we ever see
+    the actor's verdict)."""
+    import httpx
+
+    from recruiter.sourcing.apify import fetch_profile_via_apify
+
+    seen: dict = {}
+
+    class MockResp:
+        status_code = 200
+        text = "[]"
+        def json(self):
+            return [{"fullName": "Alice", "headline": "Eng"}]
+
+    class MockClient:
+        def __init__(self, *a, **kw):
+            seen["client_timeout"] = kw.get("timeout")
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return None
+        async def post(self, *a, **kw):
+            seen["run_budget"] = int(kw["params"]["timeout"])
+            return MockResp()
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockClient)
+
+    await fetch_profile_via_apify(
+        "https://www.linkedin.com/in/alice/", api_key="tk", timeout=200.0,
+    )
+    assert seen["run_budget"] < seen["client_timeout"]
+    # Must clear the ~123s a real scrape was measured to need.
+    assert seen["run_budget"] >= 150
+
+
+@pytest.mark.asyncio
 async def test_linkedin_add_prefers_apify_when_key_is_set(
     api_client: AsyncClient, monkeypatch,
 ) -> None:

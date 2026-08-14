@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -11,6 +12,8 @@ from recruiter.pipeline.router import RoutedInput
 from recruiter.pipeline.scorer import score_candidate
 from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.job import CriteriaItem
+
+logger = logging.getLogger(__name__)
 
 
 async def re_enrich_application(
@@ -139,9 +142,18 @@ async def process_application(
         try:
             extracted = await extract_candidate(text=text, llm=llm)
         except Exception as exc:
-            session.add(EventLog(application_id=app.id, event_type="extract.failed", payload={"error": str(exc)}))
+            # `str(exc)` is empty for exceptions raised without a message
+            # (bare TimeoutError, CancelledError, …). Falling back to the
+            # class name keeps the event log diagnosable — an empty string
+            # here reads as "no error" and strands the card on EXTRACTING
+            # with nothing to go on.
+            detail = str(exc) or type(exc).__name__
+            logger.warning(
+                "extraction failed for application %s: %s", app.id, detail, exc_info=True,
+            )
+            session.add(EventLog(application_id=app.id, event_type="extract.failed", payload={"error": detail}))
             await session.commit()
-            await bus.publish({"type": "error", "application_id": app.id, "phase": "extract", "error": str(exc)})
+            await bus.publish({"type": "error", "application_id": app.id, "phase": "extract", "error": detail})
             return
 
         _apply_extracted(candidate, extracted, raw_text=text, source_url=routed.source_url, resume_path=routed.resume_path)
