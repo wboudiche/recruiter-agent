@@ -157,6 +157,16 @@ async def test_login_password_rate_limit_triggers(
     assert r.status_code == 429
 
 
+def test_password_login_request_has_no_next_field() -> None:
+    """M2: `next` was dead — sanitization moved into login.tsx and no
+    handler code ever read `payload.next`. Kept only as a schema field it
+    would be misleading: a future reader could reasonably assume the
+    backend uses it for something."""
+    from recruiter.schemas.auth import PasswordLoginRequest
+
+    assert "next" not in PasswordLoginRequest.model_fields
+
+
 @pytest.mark.asyncio
 async def test_login_password_accepts_but_ignores_a_malicious_next(
     api_client_unauth: AsyncClient, password_env,

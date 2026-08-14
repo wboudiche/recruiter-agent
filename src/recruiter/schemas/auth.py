@@ -29,7 +29,6 @@ class PasswordLoginRequest(BaseModel):
     # other bad credential, rather than a 422 that would carve out a distinct
     # response shape for the "empty password" case.
     password: str = Field(min_length=0, max_length=256)
-    next: str | None = None
 
 
 class AuthMethods(BaseModel):

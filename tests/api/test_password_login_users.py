@@ -8,6 +8,7 @@ timing, the login page becomes an account-enumeration oracle.
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.auth.passwords import hash_password
@@ -170,3 +171,146 @@ async def test_migration_promoted_admin_with_no_hash_still_logs_in_via_break_gla
         assert me["id"] == promoted.id
     finally:
         get_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_methods_reports_password_true_for_hashed_user_without_env_pair(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession, monkeypatch,
+) -> None:
+    """I1: `/api/auth/methods` used to check only the env pair — a leftover
+    from before login moved to the users table. An operator who creates
+    real accounts and then removes the env pair must still see the
+    password form: any active user with a password_hash is enough on its
+    own to make password login possible.
+    """
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "")
+    get_config.cache_clear()
+    await _add_user(db_session_with_schema, "recruiter@acme.com", "s3cret")
+
+    try:
+        r = await api_client_unauth.get("/api/auth/methods")
+        assert r.status_code == 200
+        assert r.json() == {"oidc": False, "password": True}
+    finally:
+        get_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_methods_reports_password_false_when_no_hash_and_no_env_pair(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession, monkeypatch,
+) -> None:
+    """Companion to the above: an OIDC-only user (no password_hash) must
+    NOT make /methods claim password login is possible."""
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "")
+    get_config.cache_clear()
+    await _add_user(db_session_with_schema, "sso@acme.com", password=None)
+
+    try:
+        r = await api_client_unauth.get("/api/auth/methods")
+        assert r.status_code == 200
+        assert r.json() == {"oidc": False, "password": False}
+    finally:
+        get_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_break_glass_resolves_existing_row_by_email_without_inserting_duplicate(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession, monkeypatch,
+) -> None:
+    """I2: the migration promotes a row by lower(email) regardless of
+    issuer/sub. If the break-glass env-pair email belongs to an OIDC (or
+    dev-bypass) row, looking it up only by (issuer='default',
+    sub=f'default:{email}') misses it, and the old code then tried to
+    INSERT a second row with the same email — violating the unique
+    ix_users_email index and 500ing exactly when break-glass is needed.
+    """
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "admin@acme.com")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "s3cret-bootstrap")
+    get_config.cache_clear()
+
+    oidc_row = User(
+        email="admin@acme.com", sub="oidc-sub-123", issuer="https://idp.example.com",
+        name="Admin", role=Role.RECRUITER, is_active=True, password_hash=None,
+    )
+    db_session_with_schema.add(oidc_row)
+    await db_session_with_schema.commit()
+
+    try:
+        r = await api_client_unauth.post(
+            "/api/auth/login/password",
+            json={"email": "admin@acme.com", "password": "s3cret-bootstrap"},
+        )
+        assert r.status_code == 204, r.text
+
+        rows = (await db_session_with_schema.execute(
+            select(User).where(User.email == "admin@acme.com")
+        )).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].id == oidc_row.id
+    finally:
+        get_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_break_glass_reactivates_and_repromotes_the_default_account_row(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession, monkeypatch,
+) -> None:
+    """I3: an admin can deactivate or demote the default-account row (both
+    permitted while another admin remains). Break-glass exists precisely
+    to restore admin access afterwards, so it must force is_active=True
+    and role=admin on the row it resolves rather than silently returning
+    a session that then 401s (inactive) or lacks admin rights (demoted)
+    on every subsequent request.
+    """
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "admin@acme.com")
+    monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "s3cret-bootstrap")
+    get_config.cache_clear()
+
+    demoted = User(
+        email="admin@acme.com", sub="default:admin@acme.com", issuer="default",
+        name="Default Admin", role=Role.VIEWER, is_active=False, password_hash=None,
+    )
+    db_session_with_schema.add(demoted)
+    await db_session_with_schema.commit()
+
+    try:
+        r = await api_client_unauth.post(
+            "/api/auth/login/password",
+            json={"email": "admin@acme.com", "password": "s3cret-bootstrap"},
+        )
+        assert r.status_code == 204, r.text
+        cookie_value = r.cookies.get("recruiter_session")
+
+        me = await api_client_unauth.get(
+            "/api/auth/me", cookies={"recruiter_session": cookie_value},
+        )
+        assert me.status_code == 200
+        assert me.json()["role"] == "admin"
+    finally:
+        get_config.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_empty_string_password_hash_cannot_authenticate(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """M1: `password_hash=""` is falsy but not None. The old
+    `stored is not None` check let it slip through to verify against
+    DUMMY_HASH, so the published dummy password ("not-a-real-password",
+    see auth/passwords.py) would authenticate against ANY row with an
+    empty-string hash. No code path writes "" today, but a hand-edited or
+    imported row could.
+    """
+    user = User(
+        email="blank@acme.com", role=Role.RECRUITER, is_active=True, password_hash="",
+    )
+    db_session_with_schema.add(user)
+    await db_session_with_schema.commit()
+
+    r = await api_client_unauth.post(
+        "/api/auth/login/password",
+        json={"email": "blank@acme.com", "password": "not-a-real-password"},
+    )
+    assert r.status_code == 401

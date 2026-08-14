@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
@@ -216,17 +216,32 @@ async def me(user: User = Depends(require_user)) -> UserRead:
 
 
 @router.get("/methods", response_model=AuthMethods)
-async def methods() -> AuthMethods:
+async def methods(session: AsyncSession = Depends(get_session)) -> AuthMethods:
     """Report which login methods this deployment exposes.
 
     The frontend's /login page uses this to decide whether to render the
     password form, the SSO button, or both. Public endpoint (no auth) —
-    it leaks only the set of configured methods, which is non-sensitive.
+    it leaks only the set of configured methods (booleans only, no counts
+    or emails), which is non-sensitive.
+
+    Password login is possible when EITHER the break-glass env pair is
+    set OR at least one active user has a password_hash — checking only
+    the env pair (as this used to) means an operator who creates real
+    accounts and then removes the env pair sees the password form vanish
+    even though the API still accepts those users' credentials.
     """
     cfg = get_config()
+    env_pair_configured = bool(cfg.default_account_email and cfg.default_account_password)
+    has_password_user = env_pair_configured or (await session.execute(
+        select(User.id)
+        .where(User.is_active.is_(True))
+        .where(User.password_hash.is_not(None))
+        .where(User.password_hash != "")
+        .limit(1)
+    )).first() is not None
     return AuthMethods(
         oidc=bool(cfg.oidc_issuer),
-        password=bool(cfg.default_account_email and cfg.default_account_password),
+        password=has_password_user,
     )
 
 
@@ -259,17 +274,34 @@ async def _issue_session(session: AsyncSession, request: Request, user: User) ->
 async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User:
     """Find-or-create the break-glass admin row for the configured env pair.
 
-    Uses the same (issuer="default", sub=f"default:{email}") identity as
-    the startup seeder in main.py, so an operator who already has a seeded
-    — or migration-promoted — admin resolves to that same row instead of
-    creating a duplicate.
+    Resolves by email FIRST: the users_roles migration promotes a
+    pre-existing row by `lower(email)` regardless of issuer/sub, so an
+    email that belongs to an OIDC or dev-bypass row must be found here
+    too. Looking up only by (issuer="default", sub=f"default:{email}")
+    would miss it and then try to INSERT a second row with the same
+    email — violating the unique `ix_users_email` index and 500ing
+    exactly when break-glass is needed. The (issuer, sub) lookup is kept
+    as a fallback for the seeded-admin identity used by main.py's startup
+    seeder, in case a row was ever created without matching the email.
+
+    Break-glass exists to restore admin access, so whatever row is
+    resolved (existing or newly created) is force-reactivated and
+    re-promoted to admin before being returned — an operator who lost
+    every admin password may be recovering a row that was since
+    deactivated or demoted, and a "successful" break-glass login that
+    still 401s or lacks admin rights on the next request would be worse
+    than an outright failure.
     """
     canonical_email = cfg.default_account_email.strip().lower()
     user = (await session.execute(
-        select(User)
-        .where(User.issuer == "default")
-        .where(User.sub == f"default:{canonical_email}")
+        select(User).where(func.lower(User.email) == canonical_email)
     )).scalar_one_or_none()
+    if user is None:
+        user = (await session.execute(
+            select(User)
+            .where(User.issuer == "default")
+            .where(User.sub == f"default:{canonical_email}")
+        )).scalar_one_or_none()
     if user is None:
         user = User(
             email=canonical_email,
@@ -279,7 +311,9 @@ async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User
             role=Role.ADMIN,
         )
         session.add(user)
-        await session.commit()
+    user.is_active = True
+    user.role = Role.ADMIN
+    await session.commit()
     return user
 
 
@@ -308,7 +342,12 @@ async def login_password(
     # otherwise timing re-opens the enumeration hole that the identical 401
     # bodies below exist to close.
     stored = user.password_hash if user and user.is_active else None
-    password_ok = verify_password(payload.password, stored or DUMMY_HASH) and stored is not None
+    # `bool(stored)`, not `stored is not None`: an empty-string hash is
+    # falsy but not None, and a `stored is not None` check would let it
+    # slip through to verify against DUMMY_HASH — making the published
+    # dummy password ("not-a-real-password") authenticate against any row
+    # with an empty-string password_hash.
+    password_ok = verify_password(payload.password, stored or DUMMY_HASH) and bool(stored)
 
     # `user is not None` is implied by password_ok: `stored` (and hence
     # password_ok) can only be truthy when `user` was truthy above.
