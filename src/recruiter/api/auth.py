@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime, timezone
 
@@ -25,6 +26,8 @@ from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
 from recruiter.schemas.user import PasswordChange
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 def _safe_next(value: str | None) -> str:
     """Restrict post-login redirect targets to same-origin paths.
@@ -311,6 +314,27 @@ async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User
             role=Role.ADMIN,
         )
         session.add(user)
+    # Log ONLY when something was actually restored. A warning on every
+    # ordinary break-glass login would train the operator to ignore it,
+    # and this line needs to be believed: it is the sole record that a
+    # deliberate demotion or deactivation was reversed by whoever holds
+    # the env pair. The change is persistent, not session-scoped.
+    restored = []
+    if not user.is_active:
+        restored.append("reactivated")
+    if user.role != Role.ADMIN:
+        # `Role(...)`, not `.value`: a row loaded from the DB carries a
+        # plain `str` here — the column is a String, despite the
+        # `Mapped[Role]` annotation.
+        restored.append(f"re-promoted from {Role(user.role).value}")
+    if restored:
+        logger.warning(
+            "break-glass login %s user id=%s (%s) — env-pair credentials "
+            "override the stored role; clear RECRUITER_DEFAULT_ACCOUNT_* "
+            "if this account is meant to stay restricted",
+            " and ".join(restored), user.id, user.email,
+        )
+
     user.is_active = True
     user.role = Role.ADMIN
     await session.commit()
@@ -379,6 +403,11 @@ async def login_password(
 
 
 @router.post("/password", status_code=204)
+# Same budget as /login/password, and for the same reason: this endpoint
+# verifies `current_password`, so without a cap someone holding a stolen
+# session cookie can brute-force it at full speed — and knowing it lets
+# them change the password and lock the real owner out.
+@limiter.limit("5/minute")
 async def change_own_password(
     request: Request,
     payload: PasswordChange,

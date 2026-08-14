@@ -5,6 +5,8 @@ hard deletion either cascades away audit history or fails on a foreign
 key. Deactivation is the supported removal.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,15 @@ from recruiter.models import AuthSession, Role, User
 from recruiter.schemas.user import PasswordSet, UserAdminRead, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+# Privilege changes are logged here because `event_logs` cannot hold them:
+# its FK is `application_id`, so it models application events only. Role is
+# what gates access to the stored API keys, LinkedIn cookie and SMTP
+# credentials, so "who promoted whom, and when" needs to survive somewhere
+# an operator can read it. Until a user-scoped audit table exists, the
+# application log is that somewhere — every line names the acting admin and
+# the target so the two can be told apart after the fact.
+logger = logging.getLogger(__name__)
 
 
 async def _lock_active_admin_ids(session: AsyncSession) -> set[int]:
@@ -59,7 +70,7 @@ async def list_users(
 async def create_user(
     payload: UserCreate,
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(require_role(Role.ADMIN)),
+    actor: User = Depends(require_role(Role.ADMIN)),
 ) -> UserAdminRead:
     email = payload.email.strip().lower()
     if (await session.execute(select(User).where(User.email == email))).scalar_one_or_none():
@@ -70,6 +81,10 @@ async def create_user(
     )
     session.add(user)
     await session.commit()
+    logger.info(
+        "user created: %s (id=%s) with role %s by admin id=%s",
+        user.email, user.id, user.role.value, actor.id,
+    )
     return UserAdminRead.model_validate(user)
 
 
@@ -100,6 +115,11 @@ async def update_user(
                 detail="this is the last active admin — promote another admin first",
             )
 
+    # `Role(...)` normalisation, not `.value`: the column is a plain
+    # String, so a row loaded from the DB carries a `str` here even though
+    # the attribute is typed `Mapped[Role]`. Comparisons still work (Role
+    # subclasses str) but `.value` would raise AttributeError.
+    previous_role = Role(user.role).value
     if payload.role is not None:
         user.role = payload.role
     if payload.is_active is not None:
@@ -108,6 +128,19 @@ async def update_user(
             # Deactivation must bite now, not at cookie expiry.
             await session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
     await session.commit()
+
+    if payload.role is not None and payload.role.value != previous_role:
+        logger.info(
+            "role changed: user id=%s (%s) %s -> %s by admin id=%s",
+            user.id, user.email, previous_role, payload.role.value, actor.id,
+        )
+    if payload.is_active is not None:
+        logger.info(
+            "user id=%s (%s) %s by admin id=%s",
+            user.id, user.email,
+            "reactivated" if payload.is_active else "deactivated, sessions revoked",
+            actor.id,
+        )
     return UserAdminRead.model_validate(user)
 
 
@@ -116,7 +149,7 @@ async def reset_password(
     user_id: int,
     payload: PasswordSet,
     session: AsyncSession = Depends(get_session),
-    _: User = Depends(require_role(Role.ADMIN)),
+    actor: User = Depends(require_role(Role.ADMIN)),
 ) -> None:
     user = await session.get(User, user_id)
     if user is None:
@@ -125,3 +158,7 @@ async def reset_password(
     # A reset exists to cut off access; old cookies must not survive it.
     await session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
     await session.commit()
+    logger.info(
+        "password reset for user id=%s (%s) by admin id=%s, sessions revoked",
+        user.id, user.email, actor.id,
+    )
