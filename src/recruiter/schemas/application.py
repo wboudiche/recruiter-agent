@@ -30,6 +30,9 @@ class ApplicationRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     awaiting_paste: bool = False
+    # Why the pipeline stopped, when it did. Derived from the newest
+    # event_logs row rather than stored — see `_latest_errors`.
+    last_error: str | None = None
     enrichment: dict | None = None
 
 

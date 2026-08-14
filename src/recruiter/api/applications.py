@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -9,7 +9,7 @@ from recruiter.api.candidates import ApplicationCreated, get_engine_dep, get_eve
 from recruiter.api.deps import get_session, require_user
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, Stage
+from recruiter.models import Application, Candidate, EventLog, Stage
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -43,7 +43,8 @@ async def get_application(application_id: int, session: AsyncSession = Depends(g
     app_row = await _load_application(session, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    return _to_read(app_row)
+    errors = await _latest_errors(session, [app_row.id])
+    return _to_read(app_row, errors.get(app_row.id))
 
 
 @router.get("/candidates/{candidate_id}", response_model=CandidateRead)
@@ -103,10 +104,47 @@ async def list_applications_for_job(
             .options(selectinload(Application.candidate))
         )
     ).scalars().all()
-    return [_to_read(r) for r in rows]
+    errors = await _latest_errors(session, [r.id for r in rows])
+    return [_to_read(r, errors.get(r.id)) for r in rows]
 
 
-def _to_read(app_row: Application) -> ApplicationRead:
+async def _latest_errors(
+    session: AsyncSession, application_ids: list[int]
+) -> dict[int, str]:
+    """Map application id → error message, for those whose most recent
+    event is a failure.
+
+    Ordered by `id` rather than `created_at`: two events written in the
+    same second tie on the timestamp, and a tie here would flip a card
+    between "failed" and "fine" at random.
+
+    One query for the whole batch — `_to_read` runs per row, so a
+    per-row lookup would be N+1 across a full board.
+    """
+    if not application_ids:
+        return {}
+    newest = (
+        select(EventLog.application_id, func.max(EventLog.id).label("max_id"))
+        .where(EventLog.application_id.in_(application_ids))
+        .group_by(EventLog.application_id)
+        .subquery()
+    )
+    rows = (
+        await session.execute(
+            select(EventLog).join(newest, EventLog.id == newest.c.max_id)
+        )
+    ).scalars().all()
+    out: dict[int, str] = {}
+    for row in rows:
+        if not row.event_type.endswith(".failed") or row.application_id is None:
+            continue
+        error = (row.payload or {}).get("error")
+        if error:
+            out[row.application_id] = str(error)
+    return out
+
+
+def _to_read(app_row: Application, last_error: str | None = None) -> ApplicationRead:
     breakdown = (
         [ScoreBreakdownItem.model_validate(c) for c in app_row.score_breakdown]
         if app_row.score_breakdown
@@ -148,6 +186,7 @@ def _to_read(app_row: Application) -> ApplicationRead:
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
+        last_error=last_error,
         enrichment=app_row.enrichment,
     )
 
