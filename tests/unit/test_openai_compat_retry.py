@@ -99,6 +99,16 @@ async def test_auth_errors_are_not_retried(_no_real_sleeping) -> None:
     assert _no_real_sleeping == []
 
 
+def test_default_timeout_fits_a_slow_free_tier_model() -> None:
+    """Free-tier models are slow: a 6.6k-char profile measured 80s on
+    `gpt-oss-20b:free`, and exceeded the old 120s budget under load —
+    surfacing as a bare ReadTimeout with the card stuck on EXTRACTING.
+    The default must leave room for that, not just for a fast paid API."""
+    client = OpenAICompatLLMClient(base_url="https://x/v1", model="m", api_key="k")
+
+    assert client._client.timeout.read >= 300.0
+
+
 @pytest.mark.asyncio
 async def test_chat_with_tools_retries_too(_no_real_sleeping) -> None:
     """The agent loop hits the same throttle as extraction."""

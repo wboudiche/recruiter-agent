@@ -48,7 +48,11 @@ class OpenAICompatLLMClient:
         model: str,
         api_key: str,
         transport: httpx.AsyncBaseTransport | httpx.MockTransport | None = None,
-        timeout: float = 120.0,
+        # Sized for the slowest realistic backend, not the fastest: free
+        # gateways serve big prompts an order of magnitude slower than a
+        # paid API, and a premature ReadTimeout costs the whole extraction
+        # (there is no resume — the pipeline restarts from the scrape).
+        timeout: float = 300.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
