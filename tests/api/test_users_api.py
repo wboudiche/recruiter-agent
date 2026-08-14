@@ -3,10 +3,12 @@ locking everyone out of the install."""
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.auth.passwords import hash_password, verify_password
-from recruiter.models import Role, User
+from recruiter.auth.sessions import create_session, hash_token
+from recruiter.models import AuthSession, Role, User
 
 
 @pytest.fixture(autouse=True)
@@ -128,6 +130,60 @@ async def test_admin_cannot_deactivate_themselves(
     )
 
     assert r.status_code == 409
+    # Pin the SELF-deactivation message specifically — there are two active
+    # admins here, so the last-admin rule would also produce a 409, and a
+    # bare status-code check can't tell which guard actually fired.
+    assert r.json()["detail"] == "you cannot deactivate yourself"
+
+
+@pytest.mark.asyncio
+async def test_demoting_one_of_two_active_admins_succeeds(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """The last-admin guard must not be so trigger-happy that it blocks a
+    perfectly safe demotion — one admin remains active either way."""
+    await _add(db_session_with_schema, "boss3@acme.com", Role.ADMIN, "s3cret")
+    other = await _add(db_session_with_schema, "other-admin@acme.com", Role.ADMIN)
+    await _login(api_client_unauth, "boss3@acme.com", "s3cret")
+
+    r = await api_client_unauth.patch(
+        f"/api/users/{other.id}", json={"role": "viewer"},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["role"] == "viewer"
+    # Read back from a fresh session to prove the change was committed,
+    # not just reflected in the in-memory response object.
+    await db_session_with_schema.refresh(other)
+    assert other.role == Role.VIEWER
+
+
+@pytest.mark.asyncio
+async def test_deactivating_a_non_last_admin_revokes_their_sessions(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """If `_lock_active_admin_ids` ever spuriously saw zero admins left
+    (e.g. an enum/column-type mismatch on `User.role == Role.ADMIN`), every
+    admin deactivation would 409 and user management would be silently
+    dead — with all the OTHER tests in this module still green. This test
+    exists to catch exactly that: the allowed path must actually work."""
+    await _add(db_session_with_schema, "boss4@acme.com", Role.ADMIN, "s3cret")
+    other = await _add(db_session_with_schema, "other-admin2@acme.com", Role.ADMIN)
+    await create_session(db_session_with_schema, user_id=other.id, ttl_days=7)
+    await _login(api_client_unauth, "boss4@acme.com", "s3cret")
+
+    r = await api_client_unauth.patch(
+        f"/api/users/{other.id}", json={"is_active": False},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["is_active"] is False
+    # Read from a fresh session (not the in-memory ORM object) to prove the
+    # sessions were actually deleted and committed, not just queued.
+    remaining = (await db_session_with_schema.execute(
+        select(AuthSession).where(AuthSession.user_id == other.id)
+    )).scalars().all()
+    assert remaining == []
 
 
 @pytest.mark.asyncio
@@ -141,7 +197,6 @@ async def test_password_reset_revokes_that_users_sessions(
     assert (await api_client_unauth.get("/api/auth/me")).status_code == 200
     victim_cookie = api_client_unauth.cookies.get("recruiter_session")
 
-    admin_client_cookies = dict(api_client_unauth.cookies)
     api_client_unauth.cookies.clear()
     await _add(db_session_with_schema, "boss2@acme.com", Role.ADMIN, "s3cret")
     await _login(api_client_unauth, "boss2@acme.com", "s3cret")
@@ -153,7 +208,6 @@ async def test_password_reset_revokes_that_users_sessions(
     api_client_unauth.cookies.clear()
     api_client_unauth.cookies.set("recruiter_session", victim_cookie)
     assert (await api_client_unauth.get("/api/auth/me")).status_code == 401
-    assert admin_client_cookies is not None
 
 
 @pytest.mark.asyncio
@@ -176,3 +230,32 @@ async def test_users_change_their_own_password(
     assert ok.status_code == 204
     await db_session_with_schema.refresh(user)
     assert verify_password("brand-new", user.password_hash) is True
+
+
+@pytest.mark.asyncio
+async def test_self_service_password_change_revokes_other_sessions_but_keeps_current(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """A self-service change made because you suspect compromise must kill
+    the attacker's cookie — but must NOT log you out of the browser you
+    just used to make the change, or people will avoid changing it at all."""
+    user = await _add(db_session_with_schema, "multi@acme.com", Role.RECRUITER, "old-pw")
+    other_token = await create_session(db_session_with_schema, user_id=user.id, ttl_days=7)
+    await _login(api_client_unauth, "multi@acme.com", "old-pw")
+
+    ok = await api_client_unauth.post("/api/auth/password", json={
+        "current_password": "old-pw", "new_password": "brand-new",
+    })
+    assert ok.status_code == 204
+
+    # The caller's own (just-used) session must still work.
+    assert (await api_client_unauth.get("/api/auth/me")).status_code == 200
+    # A second, pre-existing session for the same user must be dead. Uses a
+    # SELECT (not Session.get()) so it actually round-trips to the DB rather
+    # than answering from this session's identity-map cache of the row it
+    # inserted above — `.get()` would return that stale, unexpired object
+    # without ever checking whether the API's own session deleted it.
+    other_row = (await db_session_with_schema.execute(
+        select(AuthSession).where(AuthSession.id == hash_token(other_token))
+    )).scalar_one_or_none()
+    assert other_row is None

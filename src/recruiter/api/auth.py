@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
@@ -18,9 +18,9 @@ from recruiter.auth.oidc import (
     validate_id_token_claims,
 )
 from recruiter.auth.passwords import DUMMY_HASH, hash_password, needs_rehash, verify_password
-from recruiter.auth.sessions import create_session, revoke_session
+from recruiter.auth.sessions import create_session, hash_token, revoke_session
 from recruiter.config import Config, get_config
-from recruiter.models import OAuthState, Role, User
+from recruiter.models import AuthSession, OAuthState, Role, User
 from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
 from recruiter.schemas.user import PasswordChange
 
@@ -341,13 +341,28 @@ async def login_password(
 
 @router.post("/password", status_code=204)
 async def change_own_password(
+    request: Request,
     payload: PasswordChange,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
 ) -> None:
     """Any role may change their OWN password. Without this the admin who
-    created the account knows its password forever."""
+    created the account knows its password forever.
+
+    Also revokes every OTHER session for this user — someone who changes
+    their password because they suspect compromise needs the attacker's
+    cookie killed, same as an admin-driven reset. The caller's own current
+    session is deliberately spared: logging someone out of the browser
+    they just used to change their password is bad UX and would push
+    people to skip changing it at all.
+    """
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=403, detail="current password is incorrect")
     user.password_hash = hash_password(payload.new_password)
+
+    stmt = delete(AuthSession).where(AuthSession.user_id == user.id)
+    current_cookie = request.cookies.get("recruiter_session")
+    if current_cookie:
+        stmt = stmt.where(AuthSession.id != hash_token(current_cookie))
+    await session.execute(stmt)
     await session.commit()

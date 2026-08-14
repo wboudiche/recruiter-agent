@@ -6,7 +6,7 @@ key. Deactivation is the supported removal.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_role
@@ -17,12 +17,33 @@ from recruiter.schemas.user import PasswordSet, UserAdminRead, UserCreate, UserU
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-async def _active_admin_count(session: AsyncSession, *, excluding: int) -> int:
-    return (await session.execute(
-        select(func.count())
-        .select_from(User)
-        .where(User.role == Role.ADMIN, User.is_active.is_(True), User.id != excluding)
-    )).scalar_one()
+async def _lock_active_admin_ids(session: AsyncSession) -> set[int]:
+    """Lock every currently-active-admin row FOR UPDATE and return their ids.
+
+    A plain COUNT here is a TOCTOU race: two concurrent requests demoting
+    two DIFFERENT admins would each read a snapshot count over the OTHER
+    (disjoint) admin row and both see "still >= 1 left", so both pass and
+    commit — zero active admins. Locking the id (excluding neither) means
+    both requests contend for the SAME row set: the second blocks until
+    the first commits, and PostgreSQL's post-unblock re-check (EvalPlanQual)
+    drops any row that no longer matches the WHERE clause once it sees the
+    first request's write — so the second request's `locked_ids` reflects
+    the first request's committed change, not a stale pre-transaction read.
+    This only narrows (rather than closes) the window if the lock is taken
+    on a subset of the rows a concurrent request could also change; taking
+    it on the *full* active-admin set — not "excluding this one target" —
+    is what makes the two requests actually contend with each other.
+
+    Returns ids rather than a count because PostgreSQL rejects
+    `SELECT count(*) ... FOR UPDATE` ("FOR UPDATE is not allowed with
+    aggregate functions"), so the count has to happen in Python.
+    """
+    rows = (await session.execute(
+        select(User.id)
+        .where(User.role == Role.ADMIN, User.is_active.is_(True))
+        .with_for_update()
+    )).scalars().all()
+    return set(rows)
 
 
 @router.get("", response_model=list[UserAdminRead])
@@ -66,16 +87,18 @@ async def update_user(
     if payload.is_active is False and user.id == actor.id:
         raise HTTPException(status_code=409, detail="you cannot deactivate yourself")
 
-    loses_admin = (
-        user.role == Role.ADMIN
-        and user.is_active
-        and (payload.role not in (None, Role.ADMIN) or payload.is_active is False)
-    )
-    if loses_admin and await _active_admin_count(session, excluding=user.id) == 0:
-        raise HTTPException(
-            status_code=409,
-            detail="this is the last active admin — promote another admin first",
-        )
+    wants_to_leave_admin = payload.role not in (None, Role.ADMIN) or payload.is_active is False
+    if wants_to_leave_admin:
+        # Lock (and re-read) the active-admin set now, rather than trusting
+        # `user.role`/`user.is_active` fetched above — those could already
+        # be stale if another request changed this same row in between.
+        locked_admin_ids = await _lock_active_admin_ids(session)
+        loses_admin = user.id in locked_admin_ids
+        if loses_admin and len(locked_admin_ids - {user.id}) == 0:
+            raise HTTPException(
+                status_code=409,
+                detail="this is the last active admin — promote another admin first",
+            )
 
     if payload.role is not None:
         user.role = payload.role
