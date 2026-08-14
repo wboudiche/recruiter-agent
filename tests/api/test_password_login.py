@@ -67,9 +67,9 @@ async def test_login_password_success_sets_cookie_and_upserts_user(
         "/api/auth/login/password",
         json={"email": "admin@acme.com", "password": "s3cret-bootstrap", "next": "/jobs"},
     )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["redirect"] == "/jobs"
+    # Login now returns a bare 204 (cookie-only); the client already has
+    # `next` from the URL it originated, so the body no longer echoes it.
+    assert r.status_code == 204, r.text
     cookie = r.headers.get("set-cookie", "")
     assert "recruiter_session=" in cookie
     assert "HttpOnly" in cookie
@@ -92,7 +92,7 @@ async def test_login_password_email_is_normalized(
         "/api/auth/login/password",
         json={"email": "  Admin@ACME.com  ", "password": "s3cret-bootstrap"},
     )
-    assert r.status_code == 200
+    assert r.status_code == 204
 
 
 @pytest.mark.asyncio
@@ -118,12 +118,13 @@ async def test_login_password_wrong_email_401(
 
 
 @pytest.mark.asyncio
-async def test_login_password_not_configured_returns_404(
+async def test_login_password_unconfigured_break_glass_falls_through_to_401(
     api_client_unauth: AsyncClient, monkeypatch,
 ) -> None:
-    # pydantic-settings reads from .env on instantiation, so deleting
-    # the OS env var isn't enough — set explicitly to empty to override
-    # whatever the developer's local .env declares.
+    # Password login is no longer gated on the env pair being set — a users
+    # table can grant password logins on its own. With no break-glass pair
+    # AND no matching table user, the only outcome left is the generic
+    # invalid-credentials 401 (there's no "login disabled" 404 anymore).
     monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_EMAIL", "")
     monkeypatch.setenv("RECRUITER_DEFAULT_ACCOUNT_PASSWORD", "")
     from recruiter.config import get_config
@@ -133,7 +134,7 @@ async def test_login_password_not_configured_returns_404(
             "/api/auth/login/password",
             json={"email": "admin@acme.com", "password": "anything"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 401
     finally:
         get_config.cache_clear()
 
@@ -156,10 +157,25 @@ async def test_login_password_rate_limit_triggers(
     assert r.status_code == 429
 
 
+def test_password_login_request_has_no_next_field() -> None:
+    """M2: `next` was dead — sanitization moved into login.tsx and no
+    handler code ever read `payload.next`. Kept only as a schema field it
+    would be misleading: a future reader could reasonably assume the
+    backend uses it for something."""
+    from recruiter.schemas.auth import PasswordLoginRequest
+
+    assert "next" not in PasswordLoginRequest.model_fields
+
+
 @pytest.mark.asyncio
-async def test_login_password_rejects_open_redirect(
+async def test_login_password_accepts_but_ignores_a_malicious_next(
     api_client_unauth: AsyncClient, password_env,
 ) -> None:
+    # The response no longer echoes `next` (no body at all on 204), so the
+    # backend has nothing left to sanitize on this endpoint — a malicious
+    # value must simply not break the login itself. Client-side redirect
+    # safety is now entirely the frontend's responsibility, same as it
+    # already is for the value it read out of its own URL bar.
     r = await api_client_unauth.post(
         "/api/auth/login/password",
         json={
@@ -168,5 +184,4 @@ async def test_login_password_rejects_open_redirect(
             "next": "https://evil.tld/phish",
         },
     )
-    assert r.status_code == 200
-    assert r.json()["redirect"] == "/"
+    assert r.status_code == 204

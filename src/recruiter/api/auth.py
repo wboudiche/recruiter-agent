@@ -1,9 +1,10 @@
+import logging
 import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import select
+from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
@@ -17,12 +18,16 @@ from recruiter.auth.oidc import (
     generate_pkce,
     validate_id_token_claims,
 )
-from recruiter.auth.sessions import create_session, revoke_session
-from recruiter.config import get_config
-from recruiter.models import OAuthState, User
+from recruiter.auth.passwords import DUMMY_HASH, hash_password, needs_rehash, verify_password
+from recruiter.auth.sessions import create_session, hash_token, revoke_session
+from recruiter.config import Config, get_config
+from recruiter.models import AuthSession, OAuthState, Role, User
 from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
+from recruiter.schemas.user import PasswordChange
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+logger = logging.getLogger(__name__)
 
 def _safe_next(value: str | None) -> str:
     """Restrict post-login redirect targets to same-origin paths.
@@ -153,9 +158,20 @@ async def callback(
     )).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if user is None:
+        # RECRUITER, not ADMIN: the gate here is RECRUITER_OIDC_ALLOWED_DOMAINS,
+        # a whole-domain allowlist (config.py), so every first-time SSO login
+        # from an allowed domain would otherwise become an unrestricted admin.
+        # An admin always exists regardless — the migration seeds one from
+        # RECRUITER_DEFAULT_ACCOUNT_EMAIL/PASSWORD and fails loudly if it
+        # can't — so nothing needs OIDC provisioning to mint admins. Admin is
+        # granted deliberately by an existing admin (Task 3), never by merely
+        # being able to log in. RECRUITER because these are staff from an
+        # allow-listed domain arriving to do recruiting work; Slice 2 is what
+        # makes the recruiter/viewer distinction bite.
         user = User(
             email=info["email"], sub=info["sub"], issuer=cfg.oidc_issuer,
             name=info.get("name"), picture=info.get("picture"), last_login_at=now,
+            role=Role.RECRUITER,
         )
         session.add(user)
     else:
@@ -203,18 +219,126 @@ async def me(user: User = Depends(require_user)) -> UserRead:
 
 
 @router.get("/methods", response_model=AuthMethods)
-async def methods() -> AuthMethods:
+async def methods(session: AsyncSession = Depends(get_session)) -> AuthMethods:
     """Report which login methods this deployment exposes.
 
     The frontend's /login page uses this to decide whether to render the
     password form, the SSO button, or both. Public endpoint (no auth) —
-    it leaks only the set of configured methods, which is non-sensitive.
+    it leaks only the set of configured methods (booleans only, no counts
+    or emails), which is non-sensitive.
+
+    Password login is possible when EITHER the break-glass env pair is
+    set OR at least one active user has a password_hash — checking only
+    the env pair (as this used to) means an operator who creates real
+    accounts and then removes the env pair sees the password form vanish
+    even though the API still accepts those users' credentials.
     """
     cfg = get_config()
+    env_pair_configured = bool(cfg.default_account_email and cfg.default_account_password)
+    has_password_user = env_pair_configured or (await session.execute(
+        select(User.id)
+        .where(User.is_active.is_(True))
+        .where(User.password_hash.is_not(None))
+        .where(User.password_hash != "")
+        .limit(1)
+    )).first() is not None
     return AuthMethods(
         oidc=bool(cfg.oidc_issuer),
-        password=bool(cfg.default_account_email and cfg.default_account_password),
+        password=has_password_user,
     )
+
+
+async def _issue_session(session: AsyncSession, request: Request, user: User) -> Response:
+    """Stamp last_login_at, create the session row, and return the 204
+    response with the session cookie set.
+
+    The cookie MUST be set on the same Response instance that gets
+    returned — building a fresh `Response(status_code=204)` in the caller
+    after this returns would silently drop the Set-Cookie header.
+    """
+    cfg = get_config()
+    user.last_login_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    token = await create_session(
+        session, user_id=user.id, ttl_days=cfg.session_ttl_days,
+        user_agent=request.headers.get("user-agent"),
+        ip=request.client.host if request.client else None,
+    )
+
+    response = Response(status_code=204)
+    response.set_cookie(
+        key="recruiter_session", value=token, httponly=True, samesite="strict",
+        secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",
+    )
+    return response
+
+
+async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User:
+    """Find-or-create the break-glass admin row for the configured env pair.
+
+    Resolves by email FIRST: the users_roles migration promotes a
+    pre-existing row by `lower(email)` regardless of issuer/sub, so an
+    email that belongs to an OIDC or dev-bypass row must be found here
+    too. Looking up only by (issuer="default", sub=f"default:{email}")
+    would miss it and then try to INSERT a second row with the same
+    email — violating the unique `ix_users_email` index and 500ing
+    exactly when break-glass is needed. The (issuer, sub) lookup is kept
+    as a fallback for the seeded-admin identity used by main.py's startup
+    seeder, in case a row was ever created without matching the email.
+
+    Break-glass exists to restore admin access, so whatever row is
+    resolved (existing or newly created) is force-reactivated and
+    re-promoted to admin before being returned — an operator who lost
+    every admin password may be recovering a row that was since
+    deactivated or demoted, and a "successful" break-glass login that
+    still 401s or lacks admin rights on the next request would be worse
+    than an outright failure.
+    """
+    canonical_email = cfg.default_account_email.strip().lower()
+    user = (await session.execute(
+        select(User).where(func.lower(User.email) == canonical_email)
+    )).scalar_one_or_none()
+    if user is None:
+        user = (await session.execute(
+            select(User)
+            .where(User.issuer == "default")
+            .where(User.sub == f"default:{canonical_email}")
+        )).scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=canonical_email,
+            sub=f"default:{canonical_email}",
+            issuer="default",
+            name="Default Admin",
+            role=Role.ADMIN,
+        )
+        session.add(user)
+    # Log ONLY when something was actually restored. A warning on every
+    # ordinary break-glass login would train the operator to ignore it,
+    # and this line needs to be believed: it is the sole record that a
+    # deliberate demotion or deactivation was reversed by whoever holds
+    # the env pair. The change is persistent, not session-scoped.
+    restored = []
+    if not user.is_active:
+        restored.append("reactivated")
+    if user.role != Role.ADMIN:
+        # `Role(...)`, not `.value`: a row loaded from the DB carries a
+        # plain `str` here — the column is a String, despite the
+        # `Mapped[Role]` annotation.
+        restored.append(f"re-promoted from {Role(user.role).value}")
+    if restored:
+        logger.warning(
+            "break-glass login %s user id=%s (%s) — env-pair credentials "
+            "override the stored role; clear RECRUITER_DEFAULT_ACCOUNT_* "
+            "if this account is meant to stay restricted",
+            " and ".join(restored), user.id, user.email,
+        )
+
+    user.is_active = True
+    user.role = Role.ADMIN
+    await session.commit()
+    return user
 
 
 @router.post("/login/password")
@@ -224,58 +348,89 @@ async def login_password(
     payload: PasswordLoginRequest,
     session: AsyncSession = Depends(get_session),
 ) -> Response:
-    """Sign in via the seed "default account" credentials.
+    """Sign in against the users table, with the env pair as break-glass.
 
-    Both email and password are compared constant-time against the values
-    in `RECRUITER_DEFAULT_ACCOUNT_EMAIL` / `_PASSWORD`. Both comparisons
-    always run (no short-circuit on email mismatch) so timing cannot be
-    used to enumerate the configured email.
+    Password login is no longer gated on the env pair being configured —
+    any active user with a password_hash can sign in. The env pair
+    (`RECRUITER_DEFAULT_ACCOUNT_EMAIL` / `_PASSWORD`), when set, still
+    authenticates as a break-glass path resolving to an admin row, for an
+    operator who has lost every admin password.
     """
     cfg = get_config()
-    if not cfg.default_account_email or not cfg.default_account_password:
-        # Don't reveal whether OIDC is the only option — generic 404.
-        raise HTTPException(status_code=404, detail="password login not configured")
 
-    email_ok = secrets.compare_digest(
-        payload.email.strip().lower().encode("utf-8"),
-        cfg.default_account_email.strip().lower().encode("utf-8"),
-    )
-    pw_ok = secrets.compare_digest(
-        payload.password.encode("utf-8"),
-        cfg.default_account_password.encode("utf-8"),
-    )
-    if not (email_ok and pw_ok):
-        raise HTTPException(status_code=401, detail="invalid credentials")
+    email = payload.email.strip().lower()
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
-    canonical_email = cfg.default_account_email.strip().lower()
-    user = (await session.execute(
-        select(User)
-        .where(User.issuer == "default")
-        .where(User.sub == f"default:{canonical_email}")
-    )).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if user is None:
-        user = User(
-            email=canonical_email,
-            sub=f"default:{canonical_email}",
-            issuer="default",
-            name="Default Admin",
-            last_login_at=now,
+    # Always verify SOMETHING. On unknown email we burn the same CPU against
+    # a dummy hash so "no such account" and "wrong password" cost the same —
+    # otherwise timing re-opens the enumeration hole that the identical 401
+    # bodies below exist to close.
+    stored = user.password_hash if user and user.is_active else None
+    # `bool(stored)`, not `stored is not None`: an empty-string hash is
+    # falsy but not None, and a `stored is not None` check would let it
+    # slip through to verify against DUMMY_HASH — making the published
+    # dummy password ("not-a-real-password") authenticate against any row
+    # with an empty-string password_hash.
+    password_ok = verify_password(payload.password, stored or DUMMY_HASH) and bool(stored)
+
+    # `user is not None` is implied by password_ok: `stored` (and hence
+    # password_ok) can only be truthy when `user` was truthy above.
+    if password_ok:
+        assert user is not None
+        if needs_rehash(user.password_hash or ""):
+            user.password_hash = hash_password(payload.password)
+        return await _issue_session(session, request, user)
+
+    # Break-glass: the env pair still authenticates, resolving to the seeded
+    # admin row. Kept so an operator who loses every admin password can
+    # recover without hand-editing the database.
+    if cfg.default_account_email and cfg.default_account_password:
+        email_ok = secrets.compare_digest(
+            email.encode("utf-8"),
+            cfg.default_account_email.strip().lower().encode("utf-8"),
         )
-        session.add(user)
-    else:
-        user.last_login_at = now
+        pw_ok = secrets.compare_digest(
+            payload.password.encode("utf-8"),
+            cfg.default_account_password.encode("utf-8"),
+        )
+        if email_ok and pw_ok:
+            fallback = await _resolve_break_glass_admin(session, cfg)
+            return await _issue_session(session, request, fallback)
+
+    # One message for every failure: wrong password, unknown email, and
+    # deactivated account are indistinguishable to the caller.
+    raise HTTPException(status_code=401, detail="invalid credentials")
+
+
+@router.post("/password", status_code=204)
+# Same budget as /login/password, and for the same reason: this endpoint
+# verifies `current_password`, so without a cap someone holding a stolen
+# session cookie can brute-force it at full speed — and knowing it lets
+# them change the password and lock the real owner out.
+@limiter.limit("5/minute")
+async def change_own_password(
+    request: Request,
+    payload: PasswordChange,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
+) -> None:
+    """Any role may change their OWN password. Without this the admin who
+    created the account knows its password forever.
+
+    Also revokes every OTHER session for this user — someone who changes
+    their password because they suspect compromise needs the attacker's
+    cookie killed, same as an admin-driven reset. The caller's own current
+    session is deliberately spared: logging someone out of the browser
+    they just used to change their password is bad UX and would push
+    people to skip changing it at all.
+    """
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=403, detail="current password is incorrect")
+    user.password_hash = hash_password(payload.new_password)
+
+    stmt = delete(AuthSession).where(AuthSession.user_id == user.id)
+    current_cookie = request.cookies.get("recruiter_session")
+    if current_cookie:
+        stmt = stmt.where(AuthSession.id != hash_token(current_cookie))
+    await session.execute(stmt)
     await session.commit()
-
-    token = await create_session(
-        session, user_id=user.id, ttl_days=cfg.session_ttl_days,
-        user_agent=request.headers.get("user-agent"),
-        ip=request.client.host if request.client else None,
-    )
-
-    response = JSONResponse({"redirect": _safe_next(payload.next)})
-    response.set_cookie(
-        key="recruiter_session", value=token, httponly=True, samesite="strict",
-        secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",
-    )
-    return response

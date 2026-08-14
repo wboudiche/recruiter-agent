@@ -7,4 +7,5 @@ export const queryKeys = {
   chat: (applicationId: number) => ["applications", applicationId, "chat"] as const,
   settings: () => ["settings"] as const,
   currentUser: () => ["auth", "me"] as const,
+  users: () => ["users"] as const,
 };

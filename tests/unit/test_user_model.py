@@ -4,13 +4,14 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.models import AuthSession, OAuthState, User
+from recruiter.models import AuthSession, OAuthState, Role, User
 
 
 @pytest.mark.asyncio
 async def test_user_roundtrip(db_session_with_schema: AsyncSession) -> None:
     user = User(email="alice@acme.com", sub="g-12345",
-                issuer="https://accounts.google.com", name="Alice", picture=None)
+                issuer="https://accounts.google.com", name="Alice", picture=None,
+                role=Role.ADMIN)
     db_session_with_schema.add(user)
     await db_session_with_schema.commit()
     fetched = (await db_session_with_schema.execute(select(User))).scalar_one()
@@ -20,7 +21,7 @@ async def test_user_roundtrip(db_session_with_schema: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_auth_session_roundtrip(db_session_with_schema: AsyncSession) -> None:
-    user = User(email="alice@acme.com", sub="g-1", issuer="x")
+    user = User(email="alice@acme.com", sub="g-1", issuer="x", role=Role.ADMIN)
     db_session_with_schema.add(user); await db_session_with_schema.flush()
     now = datetime.now(timezone.utc)
     sess = AuthSession(
@@ -44,7 +45,7 @@ async def test_oauth_state_roundtrip(db_session_with_schema: AsyncSession) -> No
 
 @pytest.mark.asyncio
 async def test_session_cascade_on_user_delete(db_session_with_schema: AsyncSession) -> None:
-    user = User(email="bob@acme.com", sub="g-2", issuer="x")
+    user = User(email="bob@acme.com", sub="g-2", issuer="x", role=Role.ADMIN)
     db_session_with_schema.add(user); await db_session_with_schema.flush()
     now = datetime.now(timezone.utc)
     sess = AuthSession(id="t1", user_id=user.id, expires_at=now + timedelta(days=7),

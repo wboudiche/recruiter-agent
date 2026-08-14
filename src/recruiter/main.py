@@ -8,13 +8,13 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
 from recruiter.api import (
-    applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing,
+    applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing, users,
 )
 from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
 from recruiter.config import get_config
 from recruiter.db import get_engine, get_session_factory
-from recruiter.models import User
+from recruiter.models import Role, User
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ async def _seed_default_user() -> None:
                 return
             session.add(User(
                 email=canonical_email, sub=sub, issuer="default", name="Default Admin",
+                role=Role.ADMIN,
             ))
             await session.commit()
             _log.info("seeded default user %s", canonical_email)
@@ -76,6 +77,7 @@ app.include_router(notifications.router)
 app.include_router(settings.router)
 app.include_router(events.router)
 app.include_router(sourcing.router)
+app.include_router(users.router)
 
 
 @app.get("/health")
