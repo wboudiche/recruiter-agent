@@ -27,13 +27,29 @@ function renderCard(application: ApplicationRead) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const utils = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <CandidateCard application={application} jobId={8} draggable={false} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  // Mirrors production: `CandidateCard` is keyed by application id in
+  // kanban-column.tsx, so an SSE-triggered refetch re-renders the SAME
+  // instance with new `application` props rather than remounting it.
+  // Reusing the same QueryClientProvider/MemoryRouter tree (not a fresh
+  // render) is what lets useMutation state survive across the rerender,
+  // just like it does in the real card.
+  function rerenderCard(nextApplication: ApplicationRead) {
+    utils.rerender(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <CandidateCard application={nextApplication} jobId={8} draggable={false} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+  return { ...utils, rerenderCard };
 }
 
 beforeEach(() => {
@@ -90,6 +106,47 @@ describe("CandidateCard retry", () => {
     // application prop is still the stale value — nothing has re-fetched
     // a cleared error yet. The button must remain disabled regardless.
     await waitFor(() => expect(button).toBeDisabled());
+    await userEvent.click(button, { pointerEventsCheck: 0 });
+
+    expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables Retry with the normal label once a genuinely new last_error arrives", async () => {
+    // The retried run also failed: SSE invalidation lands a fresh
+    // `last_error` (different from the one showing when the user clicked).
+    // That's exactly the case Retry exists for, so the button must come
+    // back to life instead of staying stuck on "Retrying…" forever.
+    const { rerenderCard } = renderCard(baseApp({ last_error: "boom" }));
+    const button = screen.getByRole("button", { name: /retry/i });
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button).toBeDisabled());
+    expect(button).toHaveTextContent("Retrying…");
+
+    rerenderCard(baseApp({ last_error: "different failure this time" }));
+
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(button).toHaveTextContent("Retry");
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("stays disabled when last_error is unchanged after a successful retry (still the stale window)", async () => {
+    // Nothing proves the new run has actually reported anything yet --
+    // the error text is identical to what was showing before the click --
+    // so this must NOT be treated as a new failure.
+    const { rerenderCard } = renderCard(baseApp({ last_error: "boom" }));
+    const button = screen.getByRole("button", { name: /retry/i });
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button).toBeDisabled());
+
+    rerenderCard(baseApp({ last_error: "boom" }));
+
+    expect(button).toBeDisabled();
     await userEvent.click(button, { pointerEventsCheck: 0 });
 
     expect(apiMock).toHaveBeenCalledTimes(1);

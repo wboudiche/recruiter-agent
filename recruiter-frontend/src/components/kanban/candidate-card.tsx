@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useDraggable } from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -67,6 +68,22 @@ export function CandidateCard({
       }
     },
   });
+
+  // `CandidateCard` is keyed by application id, so it does not remount
+  // between pipeline runs, and `retryMut.isSuccess` never resets on its
+  // own. Capture the error that was showing when the user clicked Retry;
+  // once `last_error` moves away from that captured value we know a NEW
+  // event landed (the retried run reported its own outcome), so it's safe
+  // to reset the mutation and let the button be clicked again. Comparing
+  // against the captured value (not just "isSuccess and there's an error")
+  // is what keeps this from re-arming during the stale window, where
+  // `last_error` is unchanged but SSE may still trigger re-renders.
+  const clickedErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (retryMut.isSuccess && lastError !== clickedErrorRef.current) {
+      retryMut.reset();
+    }
+  }, [lastError, retryMut]);
 
   function handleClick(e: React.MouseEvent) {
     if (e.shiftKey && onShiftClick) {
@@ -150,6 +167,7 @@ export function CandidateCard({
                   // navigates to the detail page instead of retrying.
                   e.preventDefault();
                   e.stopPropagation();
+                  clickedErrorRef.current = lastError;
                   retryMut.mutate();
                 }}
               >
