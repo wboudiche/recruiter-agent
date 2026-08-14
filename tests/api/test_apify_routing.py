@@ -240,6 +240,22 @@ async def test_run_budget_stays_under_the_client_timeout(monkeypatch) -> None:
     assert seen["run_budget"] >= 150
 
 
+@pytest.mark.parametrize("timeout", [5.0, 30.0, 60.0, 80.0, 90.0, 120.0, 200.0, 300.0])
+def test_run_budget_is_always_under_the_timeout(timeout: float) -> None:
+    """The invariant has to hold for *every* timeout, not just the default.
+
+    A floor that outgrows a short timeout puts the run budget at or above
+    our own HTTP wait, so both expire together and Apify's verdict is lost
+    to a socket timeout — reintroducing the bug this helper exists to fix.
+    """
+    from recruiter.sourcing.apify import _run_budget
+
+    budget = _run_budget(timeout)
+
+    assert budget >= 1
+    assert budget < timeout, f"budget {budget}s must stay under the {timeout}s client timeout"
+
+
 @pytest.mark.asyncio
 async def test_linkedin_add_prefers_apify_when_key_is_set(
     api_client: AsyncClient, monkeypatch,

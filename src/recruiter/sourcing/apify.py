@@ -38,8 +38,18 @@ _MIN_RUN_BUDGET_S = 60
 
 
 def _run_budget(timeout: float) -> int:
-    """Actor-run budget, in whole seconds, kept under `timeout`."""
-    return max(_MIN_RUN_BUDGET_S, int(timeout) - _RUN_BUDGET_SLACK_S)
+    """Actor-run budget, in whole seconds, always strictly under `timeout`.
+
+    The fixed slack is the normal case. For timeouts too short to absorb
+    it, a proportional gap takes over — a floor that outgrew the timeout
+    would put the budget at or above our own HTTP wait, so both would
+    expire together and Apify's verdict would be lost to a socket
+    timeout, which is the failure this helper exists to prevent.
+    """
+    with_slack = int(timeout) - _RUN_BUDGET_SLACK_S
+    if with_slack >= _MIN_RUN_BUDGET_S:
+        return with_slack
+    return max(1, int(timeout * 0.75))
 
 
 def _build_api_url(actor_id: str) -> str:
