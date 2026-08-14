@@ -119,9 +119,16 @@ _HALTING_FAILURE_EVENT_TYPES = {"extract.failed", "score.failed"}
 
 async def _latest_errors(
     session: AsyncSession, application_ids: list[int]
-) -> dict[int, str]:
-    """Map application id → error message, for those whose most recent
-    event is a halting failure (see `_HALTING_FAILURE_EVENT_TYPES`).
+) -> dict[int, tuple[str, int]]:
+    """Map application id → (error message, event id), for those whose
+    most recent event is a halting failure (see
+    `_HALTING_FAILURE_EVENT_TYPES`).
+
+    The event id travels with the message because consecutive failures
+    frequently carry identical text — a recurring rate limit, an expired
+    token, a missing model all stringify the same way. A consumer
+    watching only the message cannot tell "no new event yet" from "it
+    failed again, identically"; the id makes that unambiguous.
 
     Ordered by `id` rather than `created_at`: two events written in the
     same second tie on the timestamp, and a tie here would flip a card
@@ -138,22 +145,27 @@ async def _latest_errors(
         .group_by(EventLog.application_id)
         .subquery()
     )
+    # Only the columns the caller needs — the newest event of every card
+    # on the board would otherwise drag its whole payload across the wire.
     rows = (
         await session.execute(
-            select(EventLog).join(newest, EventLog.id == newest.c.max_id)
+            select(EventLog.id, EventLog.application_id, EventLog.event_type, EventLog.payload)
+            .join(newest, EventLog.id == newest.c.max_id)
         )
-    ).scalars().all()
-    out: dict[int, str] = {}
-    for row in rows:
-        if row.event_type not in _HALTING_FAILURE_EVENT_TYPES:
+    ).all()
+    out: dict[int, tuple[str, int]] = {}
+    for event_id, application_id, event_type, payload in rows:
+        if event_type not in _HALTING_FAILURE_EVENT_TYPES:
             continue
-        error = (row.payload or {}).get("error")
+        error = (payload or {}).get("error")
         if error:
-            out[row.application_id] = str(error)
+            out[application_id] = (str(error), event_id)
     return out
 
 
-def _to_read(app_row: Application, last_error: str | None = None) -> ApplicationRead:
+def _to_read(
+    app_row: Application, last_error: tuple[str, int] | None = None
+) -> ApplicationRead:
     breakdown = (
         [ScoreBreakdownItem.model_validate(c) for c in app_row.score_breakdown]
         if app_row.score_breakdown
@@ -195,7 +207,8 @@ def _to_read(app_row: Application, last_error: str | None = None) -> Application
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
-        last_error=last_error,
+        last_error=last_error[0] if last_error else None,
+        last_error_event_id=last_error[1] if last_error else None,
         enrichment=app_row.enrichment,
     )
 

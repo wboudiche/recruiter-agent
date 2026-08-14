@@ -18,7 +18,7 @@ function baseApp(overrides: Partial<ApplicationRead> = {}): ApplicationRead {
     score: null, score_breakdown: null, score_rationale: null, notes: null,
     validated_at: null, invited_at: null, scheduled_at: null, rejected_at: null,
     created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    awaiting_paste: false, last_error: null,
+    awaiting_paste: false, last_error: null, last_error_event_id: null,
     ...overrides,
   };
 }
@@ -116,7 +116,9 @@ describe("CandidateCard retry", () => {
     // `last_error` (different from the one showing when the user clicked).
     // That's exactly the case Retry exists for, so the button must come
     // back to life instead of staying stuck on "Retrying…" forever.
-    const { rerenderCard } = renderCard(baseApp({ last_error: "boom" }));
+    const { rerenderCard } = renderCard(
+      baseApp({ last_error: "boom", last_error_event_id: 11 }),
+    );
     const button = screen.getByRole("button", { name: /retry/i });
 
     await userEvent.click(button);
@@ -124,7 +126,9 @@ describe("CandidateCard retry", () => {
     await waitFor(() => expect(button).toBeDisabled());
     expect(button).toHaveTextContent("Retrying…");
 
-    rerenderCard(baseApp({ last_error: "different failure this time" }));
+    rerenderCard(
+      baseApp({ last_error: "different failure this time", last_error_event_id: 12 }),
+    );
 
     await waitFor(() => expect(button).not.toBeDisabled());
     expect(button).toHaveTextContent("Retry");
@@ -133,22 +137,50 @@ describe("CandidateCard retry", () => {
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
   });
 
-  it("stays disabled when last_error is unchanged after a successful retry (still the stale window)", async () => {
-    // Nothing proves the new run has actually reported anything yet --
-    // the error text is identical to what was showing before the click --
-    // so this must NOT be treated as a new failure.
-    const { rerenderCard } = renderCard(baseApp({ last_error: "boom" }));
+  it("stays disabled while no new event has landed (the stale window)", async () => {
+    // Same message AND same event id: nothing has happened since the
+    // click, so this must NOT be treated as a new failure.
+    const { rerenderCard } = renderCard(
+      baseApp({ last_error: "boom", last_error_event_id: 11 }),
+    );
     const button = screen.getByRole("button", { name: /retry/i });
 
     await userEvent.click(button);
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(button).toBeDisabled());
 
-    rerenderCard(baseApp({ last_error: "boom" }));
+    rerenderCard(baseApp({ last_error: "boom", last_error_event_id: 11 }));
 
     expect(button).toBeDisabled();
     await userEvent.click(button, { pointerEventsCheck: 0 });
 
     expect(apiMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-enables Retry when the retried run fails with an IDENTICAL message", async () => {
+    // The most likely retry outcome: it fails the same way. A recurring
+    // rate limit, an expired token or a missing model stringify
+    // identically every time, so message-only comparison would leave the
+    // button dead exactly when the user needs it a second time. The event
+    // id is what distinguishes a fresh failure from the stale window.
+    const { rerenderCard } = renderCard(
+      baseApp({ last_error: "HTTP 400 Model not found", last_error_event_id: 11 }),
+    );
+    const button = screen.getByRole("button", { name: /retry/i });
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(button).toBeDisabled());
+
+    // Same text, new event — the retried run reported its own failure.
+    rerenderCard(
+      baseApp({ last_error: "HTTP 400 Model not found", last_error_event_id: 12 }),
+    );
+
+    await waitFor(() => expect(button).not.toBeDisabled());
+    expect(button).toHaveTextContent("Retry");
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
   });
 });

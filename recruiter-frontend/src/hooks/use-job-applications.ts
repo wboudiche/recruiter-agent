@@ -31,6 +31,10 @@ export interface ApplicationRead {
   awaiting_paste: boolean;
   /** Why the pipeline stopped, when it did. Null when healthy. */
   last_error?: string | null;
+  /** id of the event `last_error` came from. Two consecutive failures often
+   * carry identical text, so the message alone cannot tell "nothing new" from
+   * "it failed again the same way". */
+  last_error_event_id?: number | null;
   enrichment?: unknown | null;
 }
 

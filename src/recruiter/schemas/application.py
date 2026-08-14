@@ -33,6 +33,11 @@ class ApplicationRead(BaseModel):
     # Why the pipeline stopped, when it did. Derived from the newest
     # event_logs row rather than stored — see `_latest_errors`.
     last_error: str | None = None
+    # id of the event `last_error` came from. Two consecutive failures
+    # often carry identical text (a recurring rate limit, an expired
+    # token), so the message alone cannot tell "nothing new has happened"
+    # apart from "it failed again the same way". The id can.
+    last_error_event_id: int | None = None
     enrichment: dict | None = None
 
 

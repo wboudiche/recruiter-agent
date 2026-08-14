@@ -48,6 +48,7 @@ export function CandidateCard({
 
   const qc = useQueryClient();
   const lastError = application.last_error ?? null;
+  const lastErrorEventId = application.last_error_event_id ?? null;
   // Retry needs BOTH conditions. The re-enrich endpoint can leave a
   // failure event on an application that has already scored; the retry
   // endpoint rejects anything that is not EXTRACTING, so offering the
@@ -70,20 +71,22 @@ export function CandidateCard({
   });
 
   // `CandidateCard` is keyed by application id, so it does not remount
-  // between pipeline runs, and `retryMut.isSuccess` never resets on its
-  // own. Capture the error that was showing when the user clicked Retry;
-  // once `last_error` moves away from that captured value we know a NEW
-  // event landed (the retried run reported its own outcome), so it's safe
-  // to reset the mutation and let the button be clicked again. Comparing
-  // against the captured value (not just "isSuccess and there's an error")
-  // is what keeps this from re-arming during the stale window, where
-  // `last_error` is unchanged but SSE may still trigger re-renders.
-  const clickedErrorRef = useRef<string | null>(null);
+  // between pipeline runs and `retryMut.isSuccess` never resets on its
+  // own. Capture which failure EVENT was showing when the user clicked;
+  // once a different event id arrives we know the retried run reported
+  // its own outcome, so it is safe to re-arm the button.
+  //
+  // Keyed on the event id, not the message: the likeliest retry outcome
+  // is failing the same way, and a recurring rate limit / expired token /
+  // missing model stringifies identically every time. Comparing text
+  // would leave the button dead exactly when a second retry is needed.
+  const clickedErrorEventRef = useRef<number | null>(null);
+  const { isSuccess: retrySucceeded, reset: resetRetry } = retryMut;
   useEffect(() => {
-    if (retryMut.isSuccess && lastError !== clickedErrorRef.current) {
-      retryMut.reset();
+    if (retrySucceeded && lastErrorEventId !== clickedErrorEventRef.current) {
+      resetRetry();
     }
-  }, [lastError, retryMut]);
+  }, [lastErrorEventId, retrySucceeded, resetRetry]);
 
   function handleClick(e: React.MouseEvent) {
     if (e.shiftKey && onShiftClick) {
@@ -167,7 +170,7 @@ export function CandidateCard({
                   // navigates to the detail page instead of retrying.
                   e.preventDefault();
                   e.stopPropagation();
-                  clickedErrorRef.current = lastError;
+                  clickedErrorEventRef.current = lastErrorEventId;
                   retryMut.mutate();
                 }}
               >

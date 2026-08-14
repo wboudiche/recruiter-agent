@@ -175,3 +175,53 @@ async def test_list_endpoint_does_not_query_per_application(
     assert errors_by_id[extras[1].id] == "boom 3"
     assert errors_by_id[extras[2].id] is None
     assert errors_by_id[extras[3].id] is None
+
+
+@pytest.mark.asyncio
+async def test_last_error_event_id_identifies_the_failure_event(
+    api_client: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """The UI needs to tell "no new event yet" apart from "a new event
+    arrived carrying the same message".
+
+    A retry that fails the same way — a recurring rate limit, an expired
+    token, a missing model — produces a byte-identical `last_error`. Text
+    alone cannot distinguish those, so the event id travels with it.
+    """
+    app_row = await _seed(db_session_with_schema)
+    first = EventLog(
+        application_id=app_row.id,
+        event_type="extract.failed",
+        payload={"error": "HTTP 400 Model not found"},
+    )
+    db_session_with_schema.add(first)
+    await db_session_with_schema.commit()
+
+    body = (await api_client.get(f"/api/applications/{app_row.id}")).json()
+    assert body["last_error_event_id"] == first.id
+
+    # The retried run fails identically — same text, new event.
+    second = EventLog(
+        application_id=app_row.id,
+        event_type="extract.failed",
+        payload={"error": "HTTP 400 Model not found"},
+    )
+    db_session_with_schema.add(second)
+    await db_session_with_schema.commit()
+
+    body = (await api_client.get(f"/api/applications/{app_row.id}")).json()
+    assert body["last_error"] == "HTTP 400 Model not found"
+    assert body["last_error_event_id"] == second.id
+    assert second.id != first.id
+
+
+@pytest.mark.asyncio
+async def test_last_error_event_id_is_none_without_a_failure(
+    api_client: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    app_row = await _seed(db_session_with_schema)
+
+    body = (await api_client.get(f"/api/applications/{app_row.id}")).json()
+
+    assert body["last_error"] is None
+    assert body["last_error_event_id"] is None
