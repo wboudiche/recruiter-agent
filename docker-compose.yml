@@ -8,7 +8,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — see .env.example}
       POSTGRES_DB: recruiter
     ports:
-      - "5432:5432"
+      # Host-side publish only — the backend reaches Postgres over the
+      # compose network at postgres:5432 regardless. Override when 5432
+      # is already taken on the host by another stack.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
@@ -11,6 +12,23 @@ from recruiter.pipeline.router import RoutedInput
 from recruiter.pipeline.scorer import score_candidate
 from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.job import CriteriaItem
+
+logger = logging.getLogger(__name__)
+
+
+def _failure_detail(exc: Exception, *, phase: str, application_id: int) -> str:
+    """Describe `exc` for the event log, and log it with a traceback.
+
+    `str(exc)` is empty for exceptions raised without a message (bare
+    `TimeoutError`, `CancelledError`, …). Recording that verbatim yields
+    `{"error": ""}`, which reads as "no error" and leaves the card parked
+    on its stage with nothing to debug — so fall back to the class name.
+    """
+    detail = str(exc) or type(exc).__name__
+    logger.warning(
+        "%s failed for application %s: %s", phase, application_id, detail, exc_info=True,
+    )
+    return detail
 
 
 async def re_enrich_application(
@@ -72,7 +90,9 @@ async def re_enrich_application(
             session.add(EventLog(
                 application_id=app.id,
                 event_type="enrichment.failed",
-                payload={"error": str(exc) or type(exc).__name__},
+                payload={"error": _failure_detail(
+                    exc, phase="re-enrichment", application_id=app.id,
+                )},
             ))
 
         # Restore: scored candidates go back to scored regardless of
@@ -139,9 +159,10 @@ async def process_application(
         try:
             extracted = await extract_candidate(text=text, llm=llm)
         except Exception as exc:
-            session.add(EventLog(application_id=app.id, event_type="extract.failed", payload={"error": str(exc)}))
+            detail = _failure_detail(exc, phase="extraction", application_id=app.id)
+            session.add(EventLog(application_id=app.id, event_type="extract.failed", payload={"error": detail}))
             await session.commit()
-            await bus.publish({"type": "error", "application_id": app.id, "phase": "extract", "error": str(exc)})
+            await bus.publish({"type": "error", "application_id": app.id, "phase": "extract", "error": detail})
             return
 
         _apply_extracted(candidate, extracted, raw_text=text, source_url=routed.source_url, resume_path=routed.resume_path)
@@ -176,7 +197,9 @@ async def process_application(
                 session.add(EventLog(
                     application_id=app.id,
                     event_type="enrichment.failed",
-                    payload={"error": str(exc)},
+                    payload={"error": _failure_detail(
+                        exc, phase="enrichment", application_id=app.id,
+                    )},
                 ))
                 await session.commit()
                 # Non-fatal: scoring proceeds.
@@ -192,9 +215,10 @@ async def process_application(
                 llm=llm,
             )
         except Exception as exc:
-            session.add(EventLog(application_id=app.id, event_type="score.failed", payload={"error": str(exc)}))
+            detail = _failure_detail(exc, phase="scoring", application_id=app.id)
+            session.add(EventLog(application_id=app.id, event_type="score.failed", payload={"error": detail}))
             await session.commit()
-            await bus.publish({"type": "error", "application_id": app.id, "phase": "score", "error": str(exc)})
+            await bus.publish({"type": "error", "application_id": app.id, "phase": "score", "error": detail})
             return
 
         app.score = score.score

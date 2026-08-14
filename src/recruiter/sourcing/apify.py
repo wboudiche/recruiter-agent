@@ -29,6 +29,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_ACTOR_ID = "dev_fusion/linkedin-profile-scraper"
 
 
+# Slack between the actor's run budget and our HTTP wait. Apify aborts
+# the run at the budget and answers with a `run-failed` body; we need to
+# still be listening when it does, otherwise the socket times out first
+# and we lose the reason (and the credit is spent regardless).
+_RUN_BUDGET_SLACK_S = 20
+_MIN_RUN_BUDGET_S = 60
+
+
+def _run_budget(timeout: float) -> int:
+    """Actor-run budget, in whole seconds, always strictly under `timeout`.
+
+    The fixed slack is the normal case. For timeouts too short to absorb
+    it, a proportional gap takes over — a floor that outgrew the timeout
+    would put the budget at or above our own HTTP wait, so both would
+    expire together and Apify's verdict would be lost to a socket
+    timeout, which is the failure this helper exists to prevent.
+    """
+    with_slack = int(timeout) - _RUN_BUDGET_SLACK_S
+    if with_slack >= _MIN_RUN_BUDGET_S:
+        return with_slack
+    return max(1, int(timeout * 0.75))
+
+
 def _build_api_url(actor_id: str) -> str:
     slug = actor_id.strip().replace("/", "~")
     return f"https://api.apify.com/v2/acts/{slug}/run-sync-get-dataset-items"
@@ -207,7 +230,7 @@ async def fetch_profile_via_apify(
     *,
     api_key: str,
     actor_id: str = DEFAULT_ACTOR_ID,
-    timeout: float = 90.0,
+    timeout: float = 200.0,
 ) -> ParsedContent:
     """Run Apify's profile-scraper actor on a single LinkedIn URL and
     return the rendered text. Raises ApifyError on auth/billing/not-
@@ -219,9 +242,12 @@ async def fetch_profile_via_apify(
     because some actors (including the default) restrict API access
     by plan tier and free-plan users need to point at a different one.
 
-    The default 90s timeout covers Apify's typical 5-20s actor startup
-    + 5-10s scrape window. They sometimes spike on cold start; we'd
-    rather wait than give up and burn the credit for nothing.
+    `timeout` bounds our own HTTP wait; the actor run gets a slightly
+    smaller budget (see `_run_budget`) so Apify's own verdict reaches us
+    before the socket gives up. The default is generous because real
+    free-plan runs of the tested actors were measured at ~2min end to
+    end — the previous 60s run budget killed them mid-scrape, and Apify
+    charges for the burnt run either way.
     """
     if not api_key:
         raise ApifyError("no apify api key configured")
@@ -244,7 +270,7 @@ async def fetch_profile_via_apify(
         "urls": [{"url": url}],
         "startUrls": [{"url": url}],
     }
-    params = {"token": api_key, "timeout": "60"}
+    params = {"token": api_key, "timeout": str(_run_budget(timeout))}
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         try:
