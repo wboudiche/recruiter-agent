@@ -153,14 +153,20 @@ async def callback(
     )).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if user is None:
-        # This deployment supports exactly one human today, so a freshly
-        # provisioned OIDC user gets the same unrestricted access the
-        # migration backfilled onto existing rows. Slice 2 gives admins a
-        # real way to invite recruiter/viewer accounts.
+        # RECRUITER, not ADMIN: the gate here is RECRUITER_OIDC_ALLOWED_DOMAINS,
+        # a whole-domain allowlist (config.py), so every first-time SSO login
+        # from an allowed domain would otherwise become an unrestricted admin.
+        # An admin always exists regardless — the migration seeds one from
+        # RECRUITER_DEFAULT_ACCOUNT_EMAIL/PASSWORD and fails loudly if it
+        # can't — so nothing needs OIDC provisioning to mint admins. Admin is
+        # granted deliberately by an existing admin (Task 3), never by merely
+        # being able to log in. RECRUITER because these are staff from an
+        # allow-listed domain arriving to do recruiting work; Slice 2 is what
+        # makes the recruiter/viewer distinction bite.
         user = User(
             email=info["email"], sub=info["sub"], issuer=cfg.oidc_issuer,
             name=info.get("name"), picture=info.get("picture"), last_login_at=now,
-            role=Role.ADMIN,
+            role=Role.RECRUITER,
         )
         session.add(user)
     else:

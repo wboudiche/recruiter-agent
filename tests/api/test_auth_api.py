@@ -4,8 +4,11 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from authlib.jose import JsonWebKey, jwt
 from httpx import AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from recruiter.config import get_config
+from recruiter.models import Role, User
 
 
 @pytest.fixture(autouse=True)
@@ -113,6 +116,43 @@ async def test_callback_full_happy_path(
     cookie = r.headers["set-cookie"]
     assert "HttpOnly" in cookie
     assert "samesite=strict" in cookie.lower()
+
+
+@pytest.mark.asyncio
+async def test_callback_provisions_new_user_as_recruiter_not_admin(
+    api_client_unauth: AsyncClient, pg_dsn: str, oidc_env, fake_idp,
+) -> None:
+    """RECRUITER_OIDC_ALLOWED_DOMAINS is a whole-domain allowlist (see
+    config.py), so auto-provisioning must never hand out admin — that would
+    make every first-time SSO login from an allowed domain an unrestricted
+    admin. An admin always exists via the migration seed, so nothing needs
+    OIDC provisioning to mint one; admin is granted deliberately by an
+    existing admin (Task 3), never by merely being able to log in."""
+    redirect = await api_client_unauth.get("/api/auth/login?next=/jobs", follow_redirects=False)
+    state = parse_qs(urlparse(redirect.headers["location"]).query)["state"][0]
+    nonce = parse_qs(urlparse(redirect.headers["location"]).query)["nonce"][0]
+
+    fake_idp["next_id_token"] = fake_idp["make_id_token"]({
+        "iss": "https://idp.example.com", "aud": "cid", "exp": int(time.time()) + 600,
+        "iat": int(time.time()), "nonce": nonce,
+        "email": "newhire@acme.com", "email_verified": True,
+        "sub": "g-new-1", "name": "New Hire",
+    })
+
+    r = await api_client_unauth.get(
+        f"/api/auth/callback?code=auth-code&state={state}",
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+
+    engine = create_async_engine(pg_dsn)
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        user = (await session.execute(
+            select(User).where(User.email == "newhire@acme.com")
+        )).scalar_one()
+    await engine.dispose()
+
+    assert user.role == Role.RECRUITER
 
 
 @pytest.mark.asyncio
