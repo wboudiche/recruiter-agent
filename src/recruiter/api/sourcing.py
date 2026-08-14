@@ -9,10 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.candidates import get_llm
-from recruiter.api.deps import get_session, require_user
+from recruiter.api.deps import get_session, require_role, require_user
 from recruiter.crypto import settings_cipher
 from recruiter.llm.client import LLMClient
-from recruiter.models import Job, SettingsRow
+from recruiter.models import Job, Role, SettingsRow, User
 from recruiter.pipeline.query_suggester import suggest_search_query
 from recruiter.schemas.job import CriteriaItem
 from recruiter.schemas.job_suggest import (
@@ -184,6 +184,7 @@ async def linkedin_status(
 async def linkedin_connect(
     payload: LinkedInConnectRequest,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(require_role(Role.ADMIN)),
 ) -> LinkedInConnectResponse:
     """Drive Playwright through linkedin.com/login, capture `li_at`,
     persist it encrypted. Password is consumed and dropped — unless
@@ -223,6 +224,7 @@ class LinkedInConnectCookieRequest(BaseModel):
 async def linkedin_connect_cookie(
     payload: LinkedInConnectCookieRequest,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(require_role(Role.ADMIN)),
 ) -> LinkedInConnectResponse:
     """Persist a `li_at` cookie the user pasted directly.
 
@@ -257,7 +259,10 @@ async def linkedin_connect_cookie(
 
 
 @router.post("/linkedin/disconnect", status_code=204)
-async def linkedin_disconnect(session: AsyncSession = Depends(get_session)) -> None:
+async def linkedin_disconnect(
+    session: AsyncSession = Depends(get_session),
+    _: User = Depends(require_role(Role.ADMIN)),
+) -> None:
     row = (await session.execute(select(SettingsRow).limit(1))).scalar_one_or_none()
     if row is not None:
         row.linkedin_li_at_enc = None

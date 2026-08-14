@@ -4,9 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recruiter.api.deps import get_session, require_user
+from recruiter.api.deps import get_session, require_role, require_user
 from recruiter.crypto import settings_cipher
-from recruiter.models import SettingsRow
+from recruiter.models import Role, SettingsRow, User
 from recruiter.schemas.settings import SettingsRead, SettingsUpdate, SmtpConfigInput
 
 router = APIRouter(prefix="/api/settings", tags=["settings"], dependencies=[Depends(require_user)])
@@ -71,6 +71,7 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
 async def update_settings(
     payload: SettingsUpdate,
     session: AsyncSession = Depends(get_session),
+    _: User = Depends(require_role(Role.ADMIN)),
 ) -> SettingsRead:
     row = await _load_or_create(session)
     cipher = _cipher()

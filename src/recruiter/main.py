@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
 from recruiter.api import (
-    applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing,
+    applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing, users,
 )
 from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
@@ -77,6 +77,7 @@ app.include_router(notifications.router)
 app.include_router(settings.router)
 app.include_router(events.router)
 app.include_router(sourcing.router)
+app.include_router(users.router)
 
 
 @app.get("/health")

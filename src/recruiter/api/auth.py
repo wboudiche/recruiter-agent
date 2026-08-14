@@ -22,6 +22,7 @@ from recruiter.auth.sessions import create_session, revoke_session
 from recruiter.config import Config, get_config
 from recruiter.models import OAuthState, Role, User
 from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
+from recruiter.schemas.user import PasswordChange
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -336,3 +337,17 @@ async def login_password(
     # One message for every failure: wrong password, unknown email, and
     # deactivated account are indistinguishable to the caller.
     raise HTTPException(status_code=401, detail="invalid credentials")
+
+
+@router.post("/password", status_code=204)
+async def change_own_password(
+    payload: PasswordChange,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
+) -> None:
+    """Any role may change their OWN password. Without this the admin who
+    created the account knows its password forever."""
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=403, detail="current password is incorrect")
+    user.password_hash = hash_password(payload.new_password)
+    await session.commit()
