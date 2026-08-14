@@ -29,6 +29,8 @@ export interface ApplicationRead {
   created_at: string;
   updated_at: string;
   awaiting_paste: boolean;
+  /** Why the pipeline stopped, when it did. Null when healthy. */
+  last_error?: string | null;
   enrichment?: unknown | null;
 }
 

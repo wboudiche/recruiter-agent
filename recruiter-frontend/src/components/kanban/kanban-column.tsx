@@ -19,6 +19,7 @@ interface Props {
   title: string;
   stage: ApplicationRead["stage"];
   applications: ApplicationRead[];
+  jobId?: number;
   candidates?: Map<number, CandidateRead>;
   density?: Density;
   selected?: Set<number>;
@@ -44,6 +45,7 @@ export function KanbanColumn({
   title,
   stage,
   applications,
+  jobId,
   candidates,
   density = "comfortable",
   selected,
@@ -78,6 +80,7 @@ export function KanbanColumn({
           <CandidateCard
             key={app.id}
             application={app}
+            jobId={jobId}
             candidateName={candidates?.get(app.candidate_id)?.full_name ?? undefined}
             density={density}
             selected={selected?.has(app.id) ?? false}
