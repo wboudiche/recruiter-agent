@@ -9,6 +9,22 @@ import { useCurrentUser } from "@/hooks/use-current-user";
 
 export default function Settings() {
   const me = useCurrentUser();
+
+  // `me.data?.role === "admin"` is false both while the role is unknown
+  // (query still loading) and once it resolves to a non-admin — those are
+  // different situations. Rendering the tab set on the former would flash
+  // the non-admin tabs for an admin (extra tabs popping in a moment
+  // later); waiting for the role to be known avoids it, without changing
+  // the eventual non-admin gating that the tests below cover.
+  if (me.isLoading) {
+    return (
+      <div className="space-y-6">
+        <h2 className="text-2xl font-semibold tracking-tight">Settings</h2>
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
+
   const isAdmin = me.data?.role === "admin";
 
   return (

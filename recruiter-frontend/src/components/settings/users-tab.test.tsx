@@ -41,6 +41,18 @@ describe("UsersTab", () => {
     expect(screen.getByText("rec@acme.com")).toBeInTheDocument();
   });
 
+  it("notes that viewer restrictions are not enforced yet", async () => {
+    // M4: the role selector offers "Viewer" but nothing enforces it yet
+    // (Slice 2) — a viewer today can do everything a recruiter can.
+    // Shipping the selector without a caveat implies read-only
+    // behaviour that doesn't exist.
+    renderTab();
+    await screen.findByText("boss@acme.com");
+
+    expect(screen.getByText(/viewer/i, { selector: "p" })).toBeInTheDocument();
+    expect(screen.getByText(/not.*enforced/i)).toBeInTheDocument();
+  });
+
   it("deactivates a user through PATCH", async () => {
     renderTab();
     await screen.findByText("rec@acme.com");

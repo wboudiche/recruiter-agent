@@ -432,10 +432,12 @@ export default function Login() {
       // table login/deactivation/require_role work in the backend
       // deliberately dropped the old {"redirect": ...} response). `next`
       // is already in hand from the URL this page was loaded with, so
-      // navigate to it directly rather than reading anything back.
+      // navigate to it directly rather than reading anything back — the
+      // backend has no use for `next` either (it never sanitizes a
+      // redirect for this endpoint), so it isn't sent.
       await api("/api/auth/login/password", {
         method: "POST",
-        json: { email, password, next },
+        json: { email, password },
         noAuthRedirect: true,
       });
       window.location.href = safeNextPath(next);

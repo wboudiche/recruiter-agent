@@ -50,6 +50,10 @@ export function UsersTab() {
     <div className="space-y-8 max-w-2xl">
       <div className="space-y-3">
         <h3 className="font-medium">Users</h3>
+        <p className="text-xs text-muted-foreground">
+          Viewer restrictions are not enforced yet — a viewer can currently do
+          everything a recruiter can.
+        </p>
         {users.isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (

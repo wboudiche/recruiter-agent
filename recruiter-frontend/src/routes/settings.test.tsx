@@ -70,6 +70,37 @@ function renderSettings() {
 }
 
 describe("Settings — role gating", () => {
+  it("does not flash the non-admin tab set before /api/auth/me resolves for an admin", async () => {
+    // M3: isAdmin is false while /api/auth/me is still loading, so an
+    // admin who briefly sees the recruiter tab set (no LLM/Users/etc.)
+    // would get a layout flash as the extra tabs pop in once the role
+    // resolves. The fix must not render ANY tab set — admin or not —
+    // until the role is known.
+    let resolveMe: (value: unknown) => void = () => {};
+    const mePromise = new Promise((resolve) => {
+      resolveMe = resolve;
+    });
+    apiMock.mockReset();
+    apiMock.mockImplementation((path: string) => {
+      if (path === "/api/auth/me") return mePromise;
+      if (path === "/api/settings") return Promise.resolve(SETTINGS_STUB);
+      return Promise.resolve({});
+    });
+
+    renderSettings();
+
+    // While /api/auth/me is still pending, neither tab set should be on
+    // the page — not the recruiter-only "Profile" tab as if isAdmin were
+    // simply false, and certainly not the full admin set.
+    expect(screen.queryByRole("tab", { name: "Profile" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Users" })).not.toBeInTheDocument();
+
+    resolveMe(meResponse("admin"));
+
+    expect(await screen.findByRole("tab", { name: "Users" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Profile" })).toBeInTheDocument();
+  });
+
   it("shows LLM, Sourcing, Notifications, Enrichment, and Users tabs for an admin", async () => {
     mockApiForRole("admin");
     renderSettings();
