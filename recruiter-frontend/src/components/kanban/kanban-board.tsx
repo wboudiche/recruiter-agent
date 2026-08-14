@@ -107,6 +107,7 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
               title={c.title}
               stage={c.stage}
               applications={grouped.get(c.stage) ?? []}
+              jobId={jobId}
               candidates={candidates}
               density={density}
               selected={selection.selected}
