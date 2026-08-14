@@ -29,8 +29,18 @@ export function ProfileTab() {
           saves through it. Non-admins never had a use for these fields as
           individual "profile" settings — recruiter_name/email is the
           org-wide sender identity, not a per-user setting — so the section
-          is hidden rather than shown-then-403'd. */}
-      {isAdmin && <RecruiterProfileSection />}
+          is hidden rather than shown-then-403'd. The `me.data &&` guard
+          holds the explanatory line back until the role is actually known,
+          so an admin doesn't see it flash during the initial fetch. */}
+      {isAdmin ? (
+        <RecruiterProfileSection />
+      ) : (
+        me.data && (
+          <p className="text-xs text-muted-foreground">
+            Integration and workspace settings are managed by an admin.
+          </p>
+        )
+      )}
 
       <section className="space-y-2">
         <h3 className="font-medium">Change password</h3>
