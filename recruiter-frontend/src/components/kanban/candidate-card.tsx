@@ -133,7 +133,18 @@ export function CandidateCard({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={retryMut.isPending}
+                // Stay disabled after a successful retry, not just while
+                // in flight. The 202 response resolves in well under a
+                // second, but `last_error` stays stale until the NEW
+                // pipeline run writes its own event 10-60s later — so an
+                // `isPending`-only guard re-enables the button on refetch
+                // while the same stale error line is still showing.
+                // Clicking again would start a second `process_application`
+                // background task on the same application (double LLM
+                // spend, duplicate scored events): the retry endpoint has
+                // no idempotency guard and stage stays EXTRACTING, so every
+                // repeat passes its 409 check.
+                disabled={retryMut.isPending || retryMut.isSuccess}
                 onClick={(e) => {
                   // The whole card is a <Link>; without this the click
                   // navigates to the detail page instead of retrying.
@@ -142,7 +153,7 @@ export function CandidateCard({
                   retryMut.mutate();
                 }}
               >
-                {retryMut.isPending ? "Retrying…" : "Retry"}
+                {retryMut.isPending || retryMut.isSuccess ? "Retrying…" : "Retry"}
               </Button>
             )}
           </div>

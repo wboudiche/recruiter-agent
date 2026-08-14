@@ -69,6 +69,27 @@ async def test_last_error_is_none_when_nothing_has_happened(
 
 
 @pytest.mark.asyncio
+async def test_enrichment_failed_does_not_surface_as_last_error(
+    api_client: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """`enrichment.failed` is non-fatal: the orchestrator logs it and then
+    restores the application to SCORED. A scored, usable card must not show
+    a permanent, undismissable error for a failure that didn't halt anything."""
+    app_row = await _seed(db_session_with_schema)
+    app_row.stage = Stage.SCORED
+    db_session_with_schema.add(EventLog(
+        application_id=app_row.id,
+        event_type="enrichment.failed",
+        payload={"error": "github lookup timed out"},
+    ))
+    await db_session_with_schema.commit()
+
+    body = (await api_client.get(f"/api/applications/{app_row.id}")).json()
+
+    assert body["last_error"] is None
+
+
+@pytest.mark.asyncio
 async def test_list_endpoint_includes_last_error(
     api_client: AsyncClient, db_session_with_schema: AsyncSession,
 ) -> None:
@@ -88,7 +109,12 @@ async def test_list_endpoint_does_not_query_per_application(
     api_client: AsyncClient, db_session_with_schema: AsyncSession,
 ) -> None:
     """`_to_read` runs per row, so a per-row error lookup would be N+1.
-    The count must not grow with the number of applications on the board."""
+    The count must not grow with the number of applications on the board.
+
+    Seeds failure events on 3 of 5 applications so the query count can't
+    trivially pass by never querying `event_logs` at all — the assertion
+    also checks that the returned `last_error` values are actually correct,
+    proving the single query really did the batched lookup."""
     from sqlalchemy import event as sa_event
 
     from recruiter.api.candidates import get_engine_dep
@@ -101,11 +127,22 @@ async def test_list_endpoint_does_not_query_per_application(
     extra_candidates = [Candidate(full_name=None) for _ in range(4)]
     db_session_with_schema.add_all(extra_candidates)
     await db_session_with_schema.flush()
-    for candidate in extra_candidates:
-        extra = Application(
-            job_id=first.job_id, candidate_id=candidate.id, stage=Stage.EXTRACTING,
-        )
-        db_session_with_schema.add(extra)
+    extras = [
+        Application(job_id=first.job_id, candidate_id=candidate.id, stage=Stage.EXTRACTING)
+        for candidate in extra_candidates
+    ]
+    db_session_with_schema.add_all(extras)
+    await db_session_with_schema.commit()
+
+    db_session_with_schema.add(EventLog(
+        application_id=first.id, event_type="extract.failed", payload={"error": "boom 1"},
+    ))
+    db_session_with_schema.add(EventLog(
+        application_id=extras[0].id, event_type="score.failed", payload={"error": "boom 2"},
+    ))
+    db_session_with_schema.add(EventLog(
+        application_id=extras[1].id, event_type="extract.failed", payload={"error": "boom 3"},
+    ))
     await db_session_with_schema.commit()
 
     # `db_session_with_schema` and `api_client` are backed by two distinct
@@ -123,9 +160,18 @@ async def test_list_endpoint_does_not_query_per_application(
 
     sa_event.listen(engine.sync_engine, "before_cursor_execute", _record)
     try:
-        await api_client.get(f"/api/jobs/{first.job_id}/applications")
+        response = await api_client.get(f"/api/jobs/{first.job_id}/applications")
     finally:
         sa_event.remove(engine.sync_engine, "before_cursor_execute", _record)
 
     event_log_queries = [s for s in statements if "event_logs" in s.lower()]
-    assert len(event_log_queries) <= 1, f"expected one batched query, got {len(event_log_queries)}"
+    got = len(event_log_queries)
+    assert got == 1, f"expected exactly one batched query, got {got}"
+
+    rows = response.json()
+    errors_by_id = {r["id"]: r["last_error"] for r in rows}
+    assert errors_by_id[first.id] == "boom 1"
+    assert errors_by_id[extras[0].id] == "boom 2"
+    assert errors_by_id[extras[1].id] == "boom 3"
+    assert errors_by_id[extras[2].id] is None
+    assert errors_by_id[extras[3].id] is None

@@ -73,4 +73,25 @@ describe("CandidateCard retry", () => {
       expect(apiMock).toHaveBeenCalledWith("/api/applications/68/retry", { method: "POST" }),
     );
   });
+
+  it("disables Retry after a successful click so a second click can't fire a duplicate POST", async () => {
+    // last_error stays stale until the NEW pipeline run writes an event
+    // 10-60s later, so a naive `isPending`-only disable re-enables the
+    // button on refetch while the old error line is still showing. That
+    // lets a user fire a second `process_application` background task on
+    // top of the first — double LLM spend and duplicate scored events.
+    renderCard(baseApp({ last_error: "boom" }));
+    const button = screen.getByRole("button", { name: /retry/i });
+
+    await userEvent.click(button);
+    await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(1));
+
+    // The mutation has settled (the 202 resolved) but `last_error` on the
+    // application prop is still the stale value — nothing has re-fetched
+    // a cleared error yet. The button must remain disabled regardless.
+    await waitFor(() => expect(button).toBeDisabled());
+    await userEvent.click(button, { pointerEventsCheck: 0 });
+
+    expect(apiMock).toHaveBeenCalledTimes(1);
+  });
 });

@@ -108,11 +108,20 @@ async def list_applications_for_job(
     return [_to_read(r, errors.get(r.id)) for r in rows]
 
 
+# Event types that actually halt the pipeline and are worth surfacing as
+# `last_error`. Deliberately NOT a `.endswith(".failed")` suffix match:
+# `enrichment.failed` also ends in ".failed" but is non-fatal — the
+# orchestrator logs it and then restores the application to SCORED, so
+# treating it as a halting error would pin a permanently visible,
+# undismissable error onto an otherwise healthy, fully scored card.
+_HALTING_FAILURE_EVENT_TYPES = {"extract.failed", "score.failed"}
+
+
 async def _latest_errors(
     session: AsyncSession, application_ids: list[int]
 ) -> dict[int, str]:
     """Map application id → error message, for those whose most recent
-    event is a failure.
+    event is a halting failure (see `_HALTING_FAILURE_EVENT_TYPES`).
 
     Ordered by `id` rather than `created_at`: two events written in the
     same second tie on the timestamp, and a tie here would flip a card
@@ -136,7 +145,7 @@ async def _latest_errors(
     ).scalars().all()
     out: dict[int, str] = {}
     for row in rows:
-        if not row.event_type.endswith(".failed") or row.application_id is None:
+        if row.event_type not in _HALTING_FAILURE_EVENT_TYPES:
             continue
         error = (row.payload or {}).get("error")
         if error:
