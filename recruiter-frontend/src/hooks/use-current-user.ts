@@ -7,6 +7,7 @@ export interface UserRead {
   email: string;
   name: string | null;
   picture: string | null;
+  role: "admin" | "recruiter" | "viewer";
 }
 
 export function useCurrentUser() {
