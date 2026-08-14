@@ -19,7 +19,7 @@ from recruiter.auth.oidc import (
 )
 from recruiter.auth.sessions import create_session, revoke_session
 from recruiter.config import get_config
-from recruiter.models import OAuthState, User
+from recruiter.models import OAuthState, Role, User
 from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -153,9 +153,14 @@ async def callback(
     )).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if user is None:
+        # This deployment supports exactly one human today, so a freshly
+        # provisioned OIDC user gets the same unrestricted access the
+        # migration backfilled onto existing rows. Slice 2 gives admins a
+        # real way to invite recruiter/viewer accounts.
         user = User(
             email=info["email"], sub=info["sub"], issuer=cfg.oidc_issuer,
             name=info.get("name"), picture=info.get("picture"), last_login_at=now,
+            role=Role.ADMIN,
         )
         session.add(user)
     else:
@@ -261,6 +266,7 @@ async def login_password(
             issuer="default",
             name="Default Admin",
             last_login_at=now,
+            role=Role.ADMIN,
         )
         session.add(user)
     else:

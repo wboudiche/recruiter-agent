@@ -14,7 +14,7 @@ from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
 from recruiter.config import get_config
 from recruiter.db import get_engine, get_session_factory
-from recruiter.models import User
+from recruiter.models import Role, User
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ async def _seed_default_user() -> None:
                 return
             session.add(User(
                 email=canonical_email, sub=sub, issuer="default", name="Default Admin",
+                role=Role.ADMIN,
             ))
             await session.commit()
             _log.info("seeded default user %s", canonical_email)

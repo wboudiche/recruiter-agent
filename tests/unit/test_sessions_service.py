@@ -10,11 +10,11 @@ from recruiter.auth.sessions import (
     revoke_session,
     touch_session,
 )
-from recruiter.models import AuthSession, User
+from recruiter.models import AuthSession, Role, User
 
 
 async def _seed_user(session: AsyncSession, email: str = "alice@acme.com") -> int:
-    user = User(email=email, sub=f"sub-{email}", issuer="x")
+    user = User(email=email, sub=f"sub-{email}", issuer="x", role=Role.ADMIN)
     session.add(user); await session.commit()
     return user.id
 

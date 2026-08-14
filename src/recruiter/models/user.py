@@ -1,13 +1,20 @@
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Index, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from recruiter.models.base import Base
 
 if TYPE_CHECKING:
     from recruiter.models.session import AuthSession
+
+
+class Role(str, Enum):
+    ADMIN = "admin"          # manage users + credential-bearing settings
+    RECRUITER = "recruiter"  # recruiting work; Slice 2 defines the boundary
+    VIEWER = "viewer"        # read-only; enforced in Slice 2
 
 
 class User(Base):
@@ -23,6 +30,12 @@ class User(Base):
     issuer: Mapped[str | None] = mapped_column(String(512))
     name: Mapped[str | None] = mapped_column(String(255))
     picture: Mapped[str | None] = mapped_column(String(2048))
+    # NULL for OIDC users, who never have a password.
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    # No DB default on purpose: creating a user must state the role, so a
+    # code path that forgets cannot silently grant recruiting rights.
+    role: Mapped[Role] = mapped_column(String(32), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

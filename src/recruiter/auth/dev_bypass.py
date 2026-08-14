@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.config import get_config
-from recruiter.models import User
+from recruiter.models import Role, User
 
 
 async def maybe_resolve(session: AsyncSession) -> User | None:
@@ -24,7 +24,7 @@ async def maybe_resolve(session: AsyncSession) -> User | None:
     if user is not None:
         return user
     user = User(email=email, sub=f"dev-bypass:{email}", issuer="dev-bypass",
-                name="Dev User")
+                name="Dev User", role=Role.ADMIN)
     session.add(user)
     await session.commit()
     return user
