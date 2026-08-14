@@ -11,7 +11,7 @@ from recruiter.auth import dev_bypass
 from recruiter.auth.sessions import lookup_session, touch_session
 from recruiter.config import get_config
 from recruiter.db import get_engine
-from recruiter.models import User
+from recruiter.models import Role, User
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
@@ -47,6 +47,9 @@ async def require_user(
     """
     bypass_user = await dev_bypass.maybe_resolve(session)
     if bypass_user is not None:
+        if not bypass_user.is_active:
+            # Deactivation must bite now, not at cookie expiry.
+            raise HTTPException(status_code=401, detail="session expired")
         return bypass_user
 
     cookie = request.cookies.get("recruiter_session")
@@ -54,6 +57,9 @@ async def require_user(
         raise HTTPException(status_code=401, detail="not authenticated")
     user = await lookup_session(session, token=cookie)
     if user is None:
+        raise HTTPException(status_code=401, detail="session expired")
+    if not user.is_active:
+        # Deactivation must bite now, not at cookie expiry.
         raise HTTPException(status_code=401, detail="session expired")
 
     cfg = get_config()
@@ -64,3 +70,15 @@ async def require_user(
     except Exception:
         logger.warning("touch_session failed; continuing without bump", exc_info=True)
     return user
+
+
+def require_role(*allowed: Role):
+    """Gate a route on role. Layers on `require_user`, so the 401 path is
+    unchanged and only the 403 is new."""
+
+    async def _guard(user: User = Depends(require_user)) -> User:
+        if user.role not in allowed:
+            raise HTTPException(status_code=403, detail="insufficient role")
+        return user
+
+    return _guard

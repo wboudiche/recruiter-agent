@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,9 @@ from recruiter.auth.oidc import (
     generate_pkce,
     validate_id_token_claims,
 )
+from recruiter.auth.passwords import DUMMY_HASH, hash_password, needs_rehash, verify_password
 from recruiter.auth.sessions import create_session, revoke_session
-from recruiter.config import get_config
+from recruiter.config import Config, get_config
 from recruiter.models import OAuthState, Role, User
 from recruiter.schemas.auth import AuthMethods, PasswordLoginRequest, UserRead
 
@@ -228,55 +229,16 @@ async def methods() -> AuthMethods:
     )
 
 
-@router.post("/login/password")
-@limiter.limit("5/minute")
-async def login_password(
-    request: Request,
-    payload: PasswordLoginRequest,
-    session: AsyncSession = Depends(get_session),
-) -> Response:
-    """Sign in via the seed "default account" credentials.
+async def _issue_session(session: AsyncSession, request: Request, user: User) -> Response:
+    """Stamp last_login_at, create the session row, and return the 204
+    response with the session cookie set.
 
-    Both email and password are compared constant-time against the values
-    in `RECRUITER_DEFAULT_ACCOUNT_EMAIL` / `_PASSWORD`. Both comparisons
-    always run (no short-circuit on email mismatch) so timing cannot be
-    used to enumerate the configured email.
+    The cookie MUST be set on the same Response instance that gets
+    returned — building a fresh `Response(status_code=204)` in the caller
+    after this returns would silently drop the Set-Cookie header.
     """
     cfg = get_config()
-    if not cfg.default_account_email or not cfg.default_account_password:
-        # Don't reveal whether OIDC is the only option — generic 404.
-        raise HTTPException(status_code=404, detail="password login not configured")
-
-    email_ok = secrets.compare_digest(
-        payload.email.strip().lower().encode("utf-8"),
-        cfg.default_account_email.strip().lower().encode("utf-8"),
-    )
-    pw_ok = secrets.compare_digest(
-        payload.password.encode("utf-8"),
-        cfg.default_account_password.encode("utf-8"),
-    )
-    if not (email_ok and pw_ok):
-        raise HTTPException(status_code=401, detail="invalid credentials")
-
-    canonical_email = cfg.default_account_email.strip().lower()
-    user = (await session.execute(
-        select(User)
-        .where(User.issuer == "default")
-        .where(User.sub == f"default:{canonical_email}")
-    )).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if user is None:
-        user = User(
-            email=canonical_email,
-            sub=f"default:{canonical_email}",
-            issuer="default",
-            name="Default Admin",
-            last_login_at=now,
-            role=Role.ADMIN,
-        )
-        session.add(user)
-    else:
-        user.last_login_at = now
+    user.last_login_at = datetime.now(timezone.utc)
     await session.commit()
 
     token = await create_session(
@@ -285,9 +247,89 @@ async def login_password(
         ip=request.client.host if request.client else None,
     )
 
-    response = JSONResponse({"redirect": _safe_next(payload.next)})
+    response = Response(status_code=204)
     response.set_cookie(
         key="recruiter_session", value=token, httponly=True, samesite="strict",
         secure=cfg.secure_cookies, max_age=cfg.session_ttl_days * 86400, path="/",
     )
     return response
+
+
+async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User:
+    """Find-or-create the break-glass admin row for the configured env pair.
+
+    Uses the same (issuer="default", sub=f"default:{email}") identity as
+    the startup seeder in main.py, so an operator who already has a seeded
+    — or migration-promoted — admin resolves to that same row instead of
+    creating a duplicate.
+    """
+    canonical_email = cfg.default_account_email.strip().lower()
+    user = (await session.execute(
+        select(User)
+        .where(User.issuer == "default")
+        .where(User.sub == f"default:{canonical_email}")
+    )).scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=canonical_email,
+            sub=f"default:{canonical_email}",
+            issuer="default",
+            name="Default Admin",
+            role=Role.ADMIN,
+        )
+        session.add(user)
+        await session.commit()
+    return user
+
+
+@router.post("/login/password")
+@limiter.limit("5/minute")
+async def login_password(
+    request: Request,
+    payload: PasswordLoginRequest,
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    """Sign in against the users table, with the env pair as break-glass.
+
+    Password login is no longer gated on the env pair being configured —
+    any active user with a password_hash can sign in. The env pair
+    (`RECRUITER_DEFAULT_ACCOUNT_EMAIL` / `_PASSWORD`), when set, still
+    authenticates as a break-glass path resolving to an admin row, for an
+    operator who has lost every admin password.
+    """
+    cfg = get_config()
+
+    email = payload.email.strip().lower()
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+
+    # Always verify SOMETHING. On unknown email we burn the same CPU against
+    # a dummy hash so "no such account" and "wrong password" cost the same —
+    # otherwise timing re-opens the enumeration hole that the identical 401
+    # bodies below exist to close.
+    stored = user.password_hash if user and user.is_active else None
+    password_ok = verify_password(payload.password, stored or DUMMY_HASH) and stored is not None
+
+    if password_ok and user is not None:
+        if needs_rehash(user.password_hash or ""):
+            user.password_hash = hash_password(payload.password)
+        return await _issue_session(session, request, user)
+
+    # Break-glass: the env pair still authenticates, resolving to the seeded
+    # admin row. Kept so an operator who loses every admin password can
+    # recover without hand-editing the database.
+    if cfg.default_account_email and cfg.default_account_password:
+        email_ok = secrets.compare_digest(
+            email.encode("utf-8"),
+            cfg.default_account_email.strip().lower().encode("utf-8"),
+        )
+        pw_ok = secrets.compare_digest(
+            payload.password.encode("utf-8"),
+            cfg.default_account_password.encode("utf-8"),
+        )
+        if email_ok and pw_ok:
+            fallback = await _resolve_break_glass_admin(session, cfg)
+            return await _issue_session(session, request, fallback)
+
+    # One message for every failure: wrong password, unknown email, and
+    # deactivated account are indistinguishable to the caller.
+    raise HTTPException(status_code=401, detail="invalid credentials")
