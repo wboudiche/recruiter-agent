@@ -9,6 +9,18 @@ interface AuthMethods {
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "";
 
+// Client-side mirror of the backend's `_safe_next` (recruiter/api/auth.py).
+// `next` comes straight off the URL, so an attacker can set it to an
+// absolute or protocol-relative URL to turn this page into an open
+// redirect. The password-login response is a bare 204 (no body to read a
+// server-validated redirect back from — see the docstring on `onSubmit`),
+// so this page must sanitize `next` itself before navigating to it.
+function safeNextPath(value: string): string {
+  if (!value.startsWith("/")) return "/";
+  if (value.startsWith("//") || value.startsWith("/\\")) return "/";
+  return value;
+}
+
 // Editorial cinematic styling — kept in-file so the aesthetic doesn't bleed
 // into the rest of the app, which uses the conservative shadcn palette.
 const STYLE = `
@@ -416,12 +428,17 @@ export default function Login() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await api<{ redirect: string }>("/api/auth/login/password", {
+      // Password login returns a bare 204 on success (no body — the users-
+      // table login/deactivation/require_role work in the backend
+      // deliberately dropped the old {"redirect": ...} response). `next`
+      // is already in hand from the URL this page was loaded with, so
+      // navigate to it directly rather than reading anything back.
+      await api("/api/auth/login/password", {
         method: "POST",
         json: { email, password, next },
         noAuthRedirect: true,
       });
-      window.location.href = res.redirect ?? "/";
+      window.location.href = safeNextPath(next);
     } catch (err) {
       const msg =
         err instanceof ApiError && err.status === 401

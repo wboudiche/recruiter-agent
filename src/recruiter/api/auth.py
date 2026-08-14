@@ -309,7 +309,10 @@ async def login_password(
     stored = user.password_hash if user and user.is_active else None
     password_ok = verify_password(payload.password, stored or DUMMY_HASH) and stored is not None
 
-    if password_ok and user is not None:
+    # `user is not None` is implied by password_ok: `stored` (and hence
+    # password_ok) can only be truthy when `user` was truthy above.
+    if password_ok:
+        assert user is not None
         if needs_rehash(user.password_hash or ""):
             user.password_hash = hash_password(payload.password)
         return await _issue_session(session, request, user)
