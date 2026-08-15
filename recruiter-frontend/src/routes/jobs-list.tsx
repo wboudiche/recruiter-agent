@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Briefcase, ChevronRight, ListChecks, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useCanWrite } from "@/hooks/use-current-user";
 import { useJobs, type JobRead } from "@/hooks/use-jobs";
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -23,6 +24,7 @@ function formatRelative(iso: string): string {
 
 export default function JobsList() {
   const { data, isLoading, isError } = useJobs();
+  const canWrite = useCanWrite();
   const [showClosed, setShowClosed] = useState(false);
 
   const { closedJobs, visibleJobs } = useMemo(() => {
@@ -48,13 +50,17 @@ export default function JobsList() {
         <h2 className="text-2xl font-semibold tracking-tight">Jobs</h2>
         <div className="rounded-xl border border-dashed p-12 text-center">
           <Briefcase className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground mb-4">No jobs yet.</p>
-          <Button asChild>
-            <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
-              <Plus className="h-4 w-4" />
-              Create your first job
-            </Link>
-          </Button>
+          <p className="text-muted-foreground mb-4">
+            {canWrite ? "No jobs yet." : "No jobs yet — ask an admin to create one."}
+          </p>
+          {canWrite && (
+            <Button asChild>
+              <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
+                <Plus className="h-4 w-4" />
+                Create your first job
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -84,12 +90,14 @@ export default function JobsList() {
                 : `Show closed (${closedJobs.length})`}
             </button>
           )}
-          <Button asChild>
-            <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
-              <Plus className="h-4 w-4" />
-              New job
-            </Link>
-          </Button>
+          {canWrite && (
+            <Button asChild>
+              <Link to="/jobs/new" className="inline-flex items-center gap-1.5">
+                <Plus className="h-4 w-4" />
+                New job
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
       {visibleJobs.length === 0 ? (

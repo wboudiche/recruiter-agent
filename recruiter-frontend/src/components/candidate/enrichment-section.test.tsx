@@ -134,4 +134,22 @@ describe("EnrichmentSection", () => {
     });
     expect(container.textContent).toBe("");
   });
+
+  it("offers Re-enrich now when canWrite is true (default)", () => {
+    renderSection({ applicationId: 1, enrichment: bundle() });
+    expect(screen.getByRole("button", { name: /re-enrich/i })).toBeInTheDocument();
+  });
+
+  it("hides Re-enrich now when canWrite is false", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <EnrichmentSection applicationId={1} enrichment={bundle()} canWrite={false} />
+        <Toaster />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByRole("button", { name: /re-enrich/i })).not.toBeInTheDocument();
+  });
 });

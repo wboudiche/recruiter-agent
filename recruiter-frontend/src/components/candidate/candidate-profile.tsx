@@ -28,12 +28,13 @@ import { Avatar } from "./avatar";
 
 interface Props {
   candidate: CandidateRead;
+  canWrite?: boolean;
 }
 
-export function CandidateProfile({ candidate }: Props) {
+export function CandidateProfile({ candidate, canWrite = true }: Props) {
   return (
     <section className="space-y-5">
-      <ProfileHeader candidate={candidate} />
+      <ProfileHeader candidate={candidate} canWrite={canWrite} />
       {candidate.summary && (
         <p className="text-sm text-muted-foreground leading-relaxed max-w-3xl">
           {candidate.summary}
@@ -51,7 +52,13 @@ export function CandidateProfile({ candidate }: Props) {
   );
 }
 
-function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
+function ProfileHeader({
+  candidate,
+  canWrite,
+}: {
+  candidate: CandidateRead;
+  canWrite: boolean;
+}) {
   const [editing, setEditing] = useState<"photo" | "identity" | null>(null);
   const [photoUrl, setPhotoUrl] = useState(candidate.photo_url ?? "");
   const [fullName, setFullName] = useState(candidate.full_name ?? "");
@@ -114,29 +121,33 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
           photoUrl={candidate.photo_url}
           size="lg"
         />
-        <button
-          type="button"
-          onClick={startEditingPhoto}
-          aria-label="Edit photo"
-          className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full bg-card border shadow-sm hover:bg-accent transition-colors"
-        >
-          <ImageIcon className="h-3.5 w-3.5" />
-        </button>
+        {canWrite && (
+          <button
+            type="button"
+            onClick={startEditingPhoto}
+            aria-label="Edit photo"
+            className="absolute -bottom-1 -right-1 grid h-7 w-7 place-items-center rounded-full bg-card border shadow-sm hover:bg-accent transition-colors"
+          >
+            <ImageIcon className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-start gap-2">
           <h1 className="text-2xl font-semibold tracking-tight truncate">
             {candidate.full_name ?? `Candidate #${candidate.id}`}
           </h1>
-          <button
-            type="button"
-            onClick={startEditingIdentity}
-            aria-label="Edit profile details"
-            title="Edit name, email, phone, headline, location, summary"
-            className="mt-1 grid h-6 w-6 place-items-center rounded-md border shadow-sm hover:bg-accent transition-colors shrink-0"
-          >
-            <Pencil className="h-3 w-3" />
-          </button>
+          {canWrite && (
+            <button
+              type="button"
+              onClick={startEditingIdentity}
+              aria-label="Edit profile details"
+              title="Edit name, email, phone, headline, location, summary"
+              className="mt-1 grid h-6 w-6 place-items-center rounded-md border shadow-sm hover:bg-accent transition-colors shrink-0"
+            >
+              <Pencil className="h-3 w-3" />
+            </button>
+          )}
         </div>
         {candidate.headline && (
           <p className="text-base text-muted-foreground mt-0.5">{candidate.headline}</p>

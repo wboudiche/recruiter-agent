@@ -58,7 +58,9 @@ export default function ApplicationDetail() {
       />
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 flex-1 min-h-0">
       <div className="space-y-6 overflow-y-auto pr-2">
-        {candidate.data && <CandidateProfile candidate={candidate.data} />}
+        {candidate.data && (
+          <CandidateProfile candidate={candidate.data} canWrite={canWrite} />
+        )}
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             stage:
@@ -90,10 +92,11 @@ export default function ApplicationDetail() {
             </p>
           </div>
         )}
-        <RejectionBanner application={application.data} />
+        <RejectionBanner application={application.data} canWrite={canWrite} />
         <ScoreBreakdown application={application.data} />
         <EnrichmentSection
           applicationId={id}
+          canWrite={canWrite}
           enrichment={
             (application.data.enrichment as EnrichmentBundle | null) ?? null
           }

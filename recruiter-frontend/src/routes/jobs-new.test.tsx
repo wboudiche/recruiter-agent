@@ -9,11 +9,20 @@ import { MemoryRouter } from "react-router-dom";
 import { Toaster } from "sonner";
 import JobsNew from "./jobs-new";
 
-const server = setupServer();
+// JobsNew now gates the whole form behind useCanWrite() (a viewer is
+// redirected to a read-only notice — see the "role gating" describe
+// block below), so every test needs a resolvable /api/auth/me. Recruiter
+// is the default identity for the pre-existing form-behaviour tests,
+// which predate that gating and don't care about role.
+const server = setupServer(
+  http.get("http://localhost:8000/api/auth/me", () =>
+    HttpResponse.json({ id: 1, email: "u@acme.com", name: null, picture: null, role: "recruiter" }),
+  ),
+);
 
-function renderJobsNew() {
+async function renderJobsNew() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <JobsNew />
@@ -21,6 +30,10 @@ function renderJobsNew() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  // The form is gated behind the resolved role (see the role-gating
+  // block below); wait for it past the initial "Loading…" state.
+  await screen.findByLabelText(/title/i);
+  return utils;
 }
 
 describe("JobsNew — Suggest from JD", () => {
@@ -31,7 +44,7 @@ describe("JobsNew — Suggest from JD", () => {
   });
 
   it("disables the button while the description is short", async () => {
-    renderJobsNew();
+    await renderJobsNew();
     const btn = screen.getByRole("button", { name: /suggest from jd/i });
     expect(btn).toBeDisabled();
 
@@ -40,7 +53,7 @@ describe("JobsNew — Suggest from JD", () => {
   });
 
   it("enables the button when description reaches 50 chars", async () => {
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(
       screen.getByLabelText(/description/i),
       "a".repeat(60),
@@ -60,7 +73,7 @@ describe("JobsNew — Suggest from JD", () => {
         }),
       ),
     );
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/description/i), "a".repeat(60));
     await userEvent.click(screen.getByRole("button", { name: /suggest from jd/i }));
 
@@ -72,7 +85,7 @@ describe("JobsNew — Suggest from JD", () => {
   });
 
   it("shows confirm dialog when criteria already exist; cancel preserves rows", async () => {
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/description/i), "a".repeat(60));
 
     // Add a manual criterion first.
@@ -102,7 +115,7 @@ describe("JobsNew — Suggest from JD", () => {
         }),
       ),
     );
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/description/i), "a".repeat(60));
     await userEvent.click(screen.getByRole("button", { name: /add criterion/i }));
     await userEvent.type(await screen.findByPlaceholderText(/PyTorch expertise/i), "MyCustom");
@@ -122,7 +135,7 @@ describe("JobsNew — Suggest from JD", () => {
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
     );
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/description/i), "a".repeat(60));
     await userEvent.click(screen.getByRole("button", { name: /suggest from jd/i }));
 
@@ -147,7 +160,7 @@ describe("JobsNew — enrichment consent", () => {
       }),
     );
 
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/title/i), "Rust");
     await userEvent.type(
       screen.getByLabelText(/description/i),
@@ -172,7 +185,7 @@ describe("JobsNew — enrichment consent", () => {
       }),
     );
 
-    renderJobsNew();
+    await renderJobsNew();
     await userEvent.type(screen.getByLabelText(/title/i), "Rust");
     await userEvent.type(
       screen.getByLabelText(/description/i),
@@ -183,5 +196,39 @@ describe("JobsNew — enrichment consent", () => {
     await waitFor(() => {
       expect(captured.body?.enrichment_consent).toBe(false);
     });
+  });
+});
+
+describe("JobsNew — role gating", () => {
+  beforeEach(() => server.listen({ onUnhandledRequest: "error" }));
+  afterEach(() => {
+    server.resetHandlers();
+    server.close();
+  });
+
+  it("shows the create-job form to a recruiter", async () => {
+    await renderJobsNew();
+    expect(screen.getByRole("button", { name: /create job/i })).toBeInTheDocument();
+  });
+
+  it("shows a read-only notice instead of the form to a viewer", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/auth/me", () =>
+        HttpResponse.json({ id: 2, email: "v@acme.com", name: null, picture: null, role: "viewer" }),
+      ),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <JobsNew />
+          <Toaster />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText(/read-only access/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/title/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /create job/i })).not.toBeInTheDocument();
   });
 });

@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useCanWrite, useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
@@ -50,6 +51,8 @@ const DESCRIPTION_MIN_FOR_SUGGEST = 50;
 export default function JobsNew() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const me = useCurrentUser();
+  const canWrite = useCanWrite();
   const form = useForm<FormValues>({
     resolver: zodResolver(Schema),
     defaultValues: { title: "", description: "", criteria: [], enrichment_consent: false },
@@ -102,6 +105,26 @@ export default function JobsNew() {
 
   const suggestDisabled =
     description.length < DESCRIPTION_MIN_FOR_SUGGEST || suggestCriteria.isPending;
+
+  // The only in-app link to this route (jobs-list.tsx) is already hidden
+  // for a viewer; this is the backstop for someone who navigates here
+  // directly by URL. Wait for the role to resolve before deciding —
+  // `canWrite` starts false while loading, and a bare-URL visit has no
+  // other content on the page yet to mask a false-negative flash.
+  if (me.isLoading) return <p>Loading…</p>;
+  if (!canWrite) {
+    return (
+      <div className="space-y-4 max-w-3xl">
+        <h2 className="text-xl font-semibold">New job</h2>
+        <p className="text-sm text-muted-foreground">
+          Read-only access — ask an admin for a recruiter account to create jobs.
+        </p>
+        <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+          Back
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <form
