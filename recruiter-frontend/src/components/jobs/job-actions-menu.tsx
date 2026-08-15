@@ -16,6 +16,7 @@ import { EditJobDetailsSheet } from "./edit-job-details-sheet";
 
 interface Props {
   job: JobRead;
+  canWrite?: boolean;
 }
 
 /**
@@ -25,8 +26,13 @@ interface Props {
  * Both go through the same PATCH /api/jobs/{id} endpoint the
  * criteria sheet already uses; we just invalidate the job + jobs
  * queries on success so the kanban header reflects the new state.
+ *
+ * For a viewer (`canWrite=false`), Close/Reopen has no read-only
+ * equivalent — it's a single click that PATCHes the job with zero
+ * confirmation — so it's dropped from the menu entirely. Edit details
+ * stays, but opens `EditJobDetailsSheet` in its read-only mode.
  */
-export function JobActionsMenu({ job }: Props) {
+export function JobActionsMenu({ job, canWrite = true }: Props) {
   const qc = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
 
@@ -64,24 +70,26 @@ export function JobActionsMenu({ job }: Props) {
         <DropdownMenuContent align="end" className="min-w-[180px]">
           <DropdownMenuItem onSelect={() => setEditOpen(true)}>
             <Pencil className="h-4 w-4 mr-2" />
-            Edit details
+            {canWrite ? "Edit details" : "View details"}
           </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => toggleStatus.mutate()}
-            disabled={toggleStatus.isPending}
-          >
-            {isOpen ? (
-              <>
-                <Lock className="h-4 w-4 mr-2" />
-                Close job
-              </>
-            ) : (
-              <>
-                <Unlock className="h-4 w-4 mr-2" />
-                Reopen job
-              </>
-            )}
-          </DropdownMenuItem>
+          {canWrite && (
+            <DropdownMenuItem
+              onSelect={() => toggleStatus.mutate()}
+              disabled={toggleStatus.isPending}
+            >
+              {isOpen ? (
+                <>
+                  <Lock className="h-4 w-4 mr-2" />
+                  Close job
+                </>
+              ) : (
+                <>
+                  <Unlock className="h-4 w-4 mr-2" />
+                  Reopen job
+                </>
+              )}
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -89,6 +97,7 @@ export function JobActionsMenu({ job }: Props) {
         job={job}
         open={editOpen}
         onOpenChange={setEditOpen}
+        canWrite={canWrite}
       />
     </>
   );

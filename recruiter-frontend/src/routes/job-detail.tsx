@@ -82,7 +82,7 @@ export default function JobDetail() {
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
           </Button>
-          <JobActionsMenu job={job.data} />
+          <JobActionsMenu job={job.data} canWrite={canWrite} />
           {canWrite && (
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus className="h-4 w-4 mr-1" />
@@ -108,6 +108,7 @@ export default function JobDetail() {
         job={job.data}
         open={criteriaOpen}
         onOpenChange={setCriteriaOpen}
+        canWrite={canWrite}
       />
     </div>
   );

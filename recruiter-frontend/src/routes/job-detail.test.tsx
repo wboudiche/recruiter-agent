@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import JobDetail from "./job-detail";
@@ -61,5 +62,60 @@ describe("JobDetail write controls", () => {
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /add candidate/i })).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("JobDetail write controls — job actions menu", () => {
+  it("offers Close job to a recruiter via the Manage menu", async () => {
+    mockApiForRole("recruiter");
+    renderJob();
+    await screen.findByRole("heading", { name: /senior data scientist/i });
+
+    await userEvent.click(screen.getByRole("button", { name: /manage job/i }));
+
+    expect(await screen.findByRole("menuitem", { name: /close job/i })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /^edit details$/i })).toBeInTheDocument();
+  });
+
+  it("hides Close job from a viewer, offering View details instead", async () => {
+    mockApiForRole("viewer");
+    renderJob();
+    await screen.findByRole("heading", { name: /senior data scientist/i });
+
+    await userEvent.click(screen.getByRole("button", { name: /manage job/i }));
+
+    expect(await screen.findByRole("menuitem", { name: /view details/i })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /close job/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /^edit details$/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("JobDetail write controls — criteria sheet", () => {
+  it("shows Save, Suggest from JD, and Add criterion to a recruiter", async () => {
+    mockApiForRole("recruiter");
+    renderJob();
+    await screen.findByRole("heading", { name: /senior data scientist/i });
+
+    await userEvent.click(screen.getByRole("button", { name: /^criteria/i }));
+
+    expect(await screen.findByRole("heading", { name: /^edit criteria$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /suggest from jd/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add criterion/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeInTheDocument();
+  });
+
+  it("shows the criteria sheet read-only to a viewer, without Save, Suggest, or Add", async () => {
+    mockApiForRole("viewer");
+    renderJob();
+    await screen.findByRole("heading", { name: /senior data scientist/i });
+
+    await userEvent.click(screen.getByRole("button", { name: /^criteria/i }));
+
+    // Still reachable — a viewer is entitled to see what a job is scored
+    // against — just without any control that would only 403.
+    expect(await screen.findByRole("heading", { name: /^criteria$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /suggest from jd/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add criterion/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument();
   });
 });

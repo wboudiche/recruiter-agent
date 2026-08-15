@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 
 export interface UserRead {
@@ -14,7 +14,14 @@ export function useCurrentUser() {
   return useQuery({
     queryKey: queryKeys.currentUser(),
     queryFn: () => api<UserRead>("/api/auth/me"),
-    retry: false,
+    // A single transient failure here now hides every write control on
+    // the board (useCanWrite defaults to false), which nothing depended
+    // on before this query grew that consumer. Retry a couple of times so
+    // a network blip self-heals instead of stranding a recruiter until
+    // they reload. Never retry a 401 — that's an auth decision (api()
+    // already redirects to /login for it), not a blip.
+    retry: (failureCount, error) =>
+      failureCount < 2 && !(error instanceof ApiError && error.status === 401),
   });
 }
 

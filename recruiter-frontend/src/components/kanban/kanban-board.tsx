@@ -118,13 +118,18 @@ export function KanbanBoard({
               candidates={candidates}
               density={density}
               selected={selection.selected}
-              onShiftClick={selection.toggle}
+              // Shift-click selection only feeds BulkActionsBar (below),
+              // which is itself write-only. Dropping the handler for a
+              // viewer disables selection at the source instead of
+              // leaving cards "selectable" into a dead end with no bar
+              // to act on them.
+              onShiftClick={canWrite ? selection.toggle : undefined}
               canWrite={canWrite}
             />
           ))}
         </div>
       </DndContext>
-      {jobId !== undefined && (
+      {canWrite && jobId !== undefined && (
         <BulkActionsBar
           selected={selection.selected}
           applications={applications}

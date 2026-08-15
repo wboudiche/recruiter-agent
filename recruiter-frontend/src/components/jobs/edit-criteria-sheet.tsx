@@ -21,6 +21,7 @@ interface Props {
   job: JobRead;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  canWrite?: boolean;
 }
 
 interface SuggestResponse {
@@ -29,7 +30,7 @@ interface SuggestResponse {
 
 const DESCRIPTION_MIN_FOR_SUGGEST = 50;
 
-export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
+export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = true }: Props) {
   const qc = useQueryClient();
   // Editable working copy of the criteria. Initialised from the job when
   // the sheet opens, persisted on Save.
@@ -88,28 +89,33 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col">
         <SheetHeader>
-          <SheetTitle>Edit criteria</SheetTitle>
+          <SheetTitle>{canWrite ? "Edit criteria" : "Criteria"}</SheetTitle>
           <SheetDescription>
-            Each candidate's score is a weighted average across these criteria.
-            Weights should sum to 1.0 — if they don't, the backend will normalise them.
+            {canWrite
+              ? "Each candidate's score is a weighted average across these criteria. Weights should sum to 1.0 — if they don't, the backend will normalise them."
+              : "Read-only access — ask an admin for a recruiter account to edit criteria. Each candidate's score is a weighted average across these."}
           </SheetDescription>
         </SheetHeader>
 
         <div className="flex items-center gap-2 py-3 border-b">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={suggestDisabled}
-            onClick={() => suggest.mutate()}
-          >
-            <Sparkles className="h-4 w-4 mr-1" />
-            {suggest.isPending ? "Suggesting…" : "Suggest from JD"}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={add}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add criterion
-          </Button>
+          {canWrite && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={suggestDisabled}
+                onClick={() => suggest.mutate()}
+              >
+                <Sparkles className="h-4 w-4 mr-1" />
+                {suggest.isPending ? "Suggesting…" : "Suggest from JD"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={add}>
+                <Plus className="h-4 w-4 mr-1" />
+                Add criterion
+              </Button>
+            </>
+          )}
           <span
             className={`ml-auto text-xs ${totalOff ? "text-[hsl(var(--ed-amber))]" : "text-muted-foreground"}`}
           >
@@ -120,7 +126,11 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
         <div className="flex-1 overflow-y-auto space-y-4 py-4">
           {items.length === 0 && (
             <p className="text-sm text-muted-foreground italic">
-              No criteria yet. Use <em>Suggest from JD</em> or <em>Add criterion</em> to start.
+              {canWrite ? (
+                <>No criteria yet. Use <em>Suggest from JD</em> or <em>Add criterion</em> to start.</>
+              ) : (
+                "No criteria set for this job yet."
+              )}
             </p>
           )}
           {items.map((it, idx) => (
@@ -128,13 +138,14 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
               key={idx}
               className="space-y-2 border border-border p-3"
             >
-              <div className="grid grid-cols-[1fr_110px_auto] gap-2 items-end">
+              <div className={`grid gap-2 items-end ${canWrite ? "grid-cols-[1fr_110px_auto]" : "grid-cols-[1fr_110px]"}`}>
                 <div className="space-y-1">
                   <Label htmlFor={`name-${idx}`}>Name</Label>
                   <Input
                     id={`name-${idx}`}
                     value={it.name}
                     onChange={(e) => update(idx, { name: e.target.value })}
+                    readOnly={!canWrite}
                   />
                 </div>
                 <div className="space-y-1">
@@ -149,17 +160,20 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
                     onChange={(e) =>
                       update(idx, { weight: Number(e.target.value) })
                     }
+                    readOnly={!canWrite}
                   />
                 </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => remove(idx)}
-                  aria-label="Remove criterion"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {canWrite && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => remove(idx)}
+                    aria-label="Remove criterion"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor={`desc-${idx}`}>Description</Label>
@@ -170,6 +184,7 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
                   onChange={(e) =>
                     update(idx, { description: e.target.value })
                   }
+                  readOnly={!canWrite}
                 />
               </div>
             </div>
@@ -183,11 +198,13 @@ export function EditCriteriaSheet({ job, open, onOpenChange }: Props) {
             onClick={() => onOpenChange(false)}
             disabled={save.isPending}
           >
-            Cancel
+            {canWrite ? "Cancel" : "Close"}
           </Button>
-          <Button type="button" onClick={() => save.mutate()} disabled={save.isPending}>
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
+          {canWrite && (
+            <Button type="button" onClick={() => save.mutate()} disabled={save.isPending}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>
