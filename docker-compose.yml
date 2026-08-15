@@ -34,6 +34,19 @@ services:
       RECRUITER_SETTINGS_KEY: ${RECRUITER_SETTINGS_KEY:?RECRUITER_SETTINGS_KEY is required — see .env.example}
       RECRUITER_RESUME_STORAGE_PATH: /app/var/resumes
       RECRUITER_LOG_LEVEL: INFO
+      # Which peers uvicorn will believe about X-Forwarded-For. Uvicorn
+      # already enables --proxy-headers by default but trusts only
+      # 127.0.0.1, so without this it ignored nginx entirely and saw the
+      # nginx container's address as the client for EVERY request — the
+      # whole deployment shared one rate-limit bucket.
+      #
+      # Private ranges rather than a pinned subnet: Docker assigns compose
+      # network subnets dynamically, so a hardcoded one silently stops
+      # matching. The backend is `expose`-only (never published to the
+      # host), so its only possible peers are containers on a Docker
+      # network — always private addresses. Publishing the backend port
+      # would weaken that assumption; keep it internal.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       RECRUITER_OIDC_ISSUER: ""
       # Dev bypass disabled by default in this compose so the seed admin
       # login path is what you actually exercise. Re-enable by setting
