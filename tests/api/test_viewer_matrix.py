@@ -7,7 +7,7 @@ the property the whole design exists for — if it is ever deleted as
 """
 
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,6 +70,72 @@ def test_the_route_inventory_is_not_empty() -> None:
     """Guards the guard: if introspection silently returned nothing, the
     parametrised test below would vacuously pass for every route."""
     assert len(_mutating_routes()) >= 15
+
+
+def test_every_api_route_carries_the_viewer_guard() -> None:
+    """Checks the WIRING, not just the observed behaviour.
+
+    main.py mounts every /api router through an intermediate
+    `_api_router = APIRouter(dependencies=[Depends(viewer_readonly_guard)])`
+    rather than putting the dependency on `app` directly, because the
+    latter also gates /health and forces it to touch the database (see
+    task-1-report.md). That indirection only holds the default-deny
+    promise if every /api router is actually mounted on `_api_router`.
+    A router mounted on `app` directly would still show up in
+    `_mutating_routes()` above (which walks `app.routes` regardless of
+    wiring) and get caught by the parametrised behavioural test — but
+    catching it here, by inspecting the dependency graph FastAPI actually
+    built, points straight at the fix instead of leaving someone to
+    guess why a route is unexpectedly reachable.
+    """
+    missing = []
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if not path or not path.startswith("/api"):
+            continue
+        guard_calls = [dep.dependency for dep in getattr(route, "dependencies", []) or []]
+        if viewer_readonly_guard not in guard_calls:
+            missing.append(path)
+    assert missing == [], (
+        "these /api routes do not carry viewer_readonly_guard in "
+        f"route.dependencies: {missing}. Mount the router that owns them "
+        "on `_api_router` in main.py (via `_api_router.include_router(...)`), "
+        "not on `app` directly."
+    )
+
+
+def test_no_mutating_route_exists_outside_api() -> None:
+    """The guard is wired onto /api routers only (see the test above), so
+    a mutating route mounted OUTSIDE /api — e.g. `/admin/purge` or
+    `/webhooks/stripe` — would be both unguarded and invisible to
+    `_mutating_routes()`, which filters on `path.startswith("/api/")`.
+    Under the app-level wiring this task's brief originally specified,
+    such a route WOULD have been covered; the /health fix (see
+    task-1-report.md) narrowed the guard's reach to /api on purpose, and
+    this test is what keeps that narrowing from becoming a silent gap.
+
+    If this fails, you added a mutating route outside /api. Either mount
+    it under /api on `_api_router` (main.py) so the existing guard covers
+    it, or, if it genuinely must live outside /api, extend
+    viewer_readonly_guard's wiring to cover it explicitly and update this
+    test's exemption alongside that change — do not just delete this
+    assertion.
+    """
+    offenders = []
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or set()
+        if not path or path.startswith("/api"):
+            continue
+        hit = methods & MUTATING_METHODS
+        if hit:
+            offenders.append((sorted(hit), path))
+    assert offenders == [], (
+        f"mutating routes exist outside /api and are NOT covered by "
+        f"viewer_readonly_guard: {offenders}. Mount them under /api on "
+        "_api_router (main.py), or extend the guard's wiring plus this "
+        "test's exemption together."
+    )
 
 
 @pytest.mark.asyncio
@@ -136,6 +202,12 @@ async def test_every_allowlisted_route_is_reachable_by_a_viewer(
 
     assert chat.status_code != 403
 
+    # Logout is allowlisted too: deleting that entry breaks no other test
+    # while a viewer silently loses the ability to log out.
+    logout = await api_client_unauth.post("/api/auth/logout")
+
+    assert logout.status_code != 403
+
 
 @pytest.mark.asyncio
 async def test_anonymous_callers_still_reach_login(
@@ -156,14 +228,27 @@ async def test_a_brand_new_mutating_route_is_denied_without_being_listed(
 ) -> None:
     """THE load-bearing test. Default-deny means a route nobody thought
     about is refused. If this is ever deleted, the design's whole promise
-    is gone and nothing else would notice."""
+    is gone and nothing else would notice.
+
+    The probe app mirrors main.py's ACTUAL wiring: the guard lives on an
+    `APIRouter(dependencies=[Depends(viewer_readonly_guard)])` that the
+    route is registered on, `include_router`ed into a plain `FastAPI()`
+    with no dependencies of its own — not `FastAPI(dependencies=[...])`
+    directly. Testing the latter would exercise the guard's LOGIC without
+    exercising the WIRING main.py depends on; a future `_api_router =
+    APIRouter()` with the dependency dropped would then still pass this
+    test while shipping wide open.
+    """
     from recruiter.api.deps import get_session
 
-    probe = FastAPI(dependencies=[Depends(viewer_readonly_guard)])
+    guarded_router = APIRouter(dependencies=[Depends(viewer_readonly_guard)])
 
-    @probe.post("/api/invented/tomorrow")
+    @guarded_router.post("/api/invented/tomorrow")
     async def invented() -> dict:
         return {"reached": True}
+
+    probe = FastAPI()
+    probe.include_router(guarded_router)
 
     viewer = await _add(db_session_with_schema, "viewer3@acme.com", Role.VIEWER)
 
