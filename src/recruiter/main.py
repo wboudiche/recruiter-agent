@@ -1,7 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -10,6 +10,7 @@ from sqlalchemy import select
 from recruiter.api import (
     applications, auth, candidates, chat, events, jobs, notifications, settings, sourcing, users,
 )
+from recruiter.api.deps import viewer_readonly_guard
 from recruiter.api.origin_check import OriginCheckMiddleware
 from recruiter.api.rate_limit import limiter
 from recruiter.config import get_config
@@ -74,17 +75,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
-app.include_router(jobs.router)
-app.include_router(auth.router)
-app.include_router(candidates.router)
-app.include_router(candidates.paste_router)
-app.include_router(chat.router)
-app.include_router(applications.router)
-app.include_router(notifications.router)
-app.include_router(settings.router)
-app.include_router(events.router)
-app.include_router(sourcing.router)
-app.include_router(users.router)
+
+# Every /api/* router is mounted through this umbrella so the read-only
+# guard covers routers added later without anyone remembering to opt in.
+# NOT applied to `app` directly: that would also gate /health (below),
+# which must answer liveness probes without ever touching the database.
+# See api/permissions.py for the policy.
+_api_router = APIRouter(dependencies=[Depends(viewer_readonly_guard)])
+_api_router.include_router(jobs.router)
+_api_router.include_router(auth.router)
+_api_router.include_router(candidates.router)
+_api_router.include_router(candidates.paste_router)
+_api_router.include_router(chat.router)
+_api_router.include_router(applications.router)
+_api_router.include_router(notifications.router)
+_api_router.include_router(settings.router)
+_api_router.include_router(events.router)
+_api_router.include_router(sourcing.router)
+_api_router.include_router(users.router)
+app.include_router(_api_router)
 
 
 @app.get("/health")
