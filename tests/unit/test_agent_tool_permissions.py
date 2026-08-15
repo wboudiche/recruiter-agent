@@ -44,7 +44,7 @@ def test_recruiters_and_admins_keep_every_tool(role: Role) -> None:
 @pytest.mark.parametrize("tool_name", sorted(WRITE_TOOL_NAMES))
 @pytest.mark.asyncio
 async def test_write_handlers_refuse_a_viewer_even_if_called_directly(
-    tool_name: str, db_session_with_schema, monkeypatch,
+    tool_name: str, db_session_with_schema,
 ) -> None:
     """The second layer, deliberately redundant. If a later refactor
     rebuilds the tool list and forgets the filter, the mutation must still

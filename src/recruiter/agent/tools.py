@@ -28,11 +28,18 @@ class ToolContext:
     session: AsyncSession
     application_id: int
     undo_store: UndoStore
-    frontend_events: list[dict] = field(default_factory=list)
     # The caller's authorization level. `role`, not the whole User: the
     # handlers need an authorization decision, not an identity, and a
     # narrower field is harder to misuse later for something else.
-    role: Role = Role.RECRUITER
+    #
+    # No default: a future consumer of the agent (a background job, a CLI,
+    # a new endpoint) that builds a ToolContext and forgets `role=` would
+    # otherwise get WRITE access silently. Required means it fails loudly
+    # at construction instead. There is exactly one production call site
+    # (agent/chat.py, which already passes `role=role` explicitly), so the
+    # cost of this is confined to test call sites.
+    role: Role
+    frontend_events: list[dict] = field(default_factory=list)
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict | list]]
