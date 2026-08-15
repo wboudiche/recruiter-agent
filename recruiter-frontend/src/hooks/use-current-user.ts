@@ -17,3 +17,10 @@ export function useCurrentUser() {
     retry: false,
   });
 }
+
+/** False for viewers. Cosmetic only — the server's 403s are the real
+ *  gate; this exists so a viewer is not shown buttons that cannot work. */
+export function useCanWrite(): boolean {
+  const me = useCurrentUser();
+  return me.data ? me.data.role !== "viewer" : false;
+}

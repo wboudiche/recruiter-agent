@@ -24,6 +24,7 @@ interface Props {
   density?: Density;
   selected?: Set<number>;
   onShiftClick?: (id: number) => void;
+  canWrite?: boolean;
 }
 
 const STAGE_META: Record<ApplicationRead["stage"], { icon: ReactNode; cls: string }> = {
@@ -50,6 +51,7 @@ export function KanbanColumn({
   density = "comfortable",
   selected,
   onShiftClick,
+  canWrite = true,
 }: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${stage}`,
@@ -85,6 +87,7 @@ export function KanbanColumn({
             density={density}
             selected={selected?.has(app.id) ?? false}
             onShiftClick={onShiftClick}
+            canWrite={canWrite}
           />
         ))}
       </div>

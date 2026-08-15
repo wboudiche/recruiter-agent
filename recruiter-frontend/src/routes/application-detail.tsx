@@ -15,11 +15,13 @@ import { Spinner } from "@/components/ui/spinner";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
+import { useCanWrite } from "@/hooks/use-current-user";
 import { useJob } from "@/hooks/use-job";
 
 export default function ApplicationDetail() {
   const { appId } = useParams<{ appId: string }>();
   const id = Number(appId);
+  const canWrite = useCanWrite();
   const application = useApplication(id);
   const candidate = useCandidate(application.data?.candidate_id);
   // Job is only needed for the breadcrumb. We pass `enabled` via the
@@ -67,10 +69,12 @@ export default function ApplicationDetail() {
               : application.data.stage}
           </span>
           <div className="ml-auto">
-            <ActionBar
-              application={application.data}
-              candidateEmail={candidate.data?.email}
-            />
+            {canWrite && (
+              <ActionBar
+                application={application.data}
+                candidateEmail={candidate.data?.email}
+              />
+            )}
           </div>
         </div>
         {application.data.awaiting_paste && (
@@ -97,10 +101,20 @@ export default function ApplicationDetail() {
       </div>
       <aside className="rounded border overflow-hidden">
         {application.data.awaiting_paste ? (
-          <PasteProfileForm
-            applicationId={id}
-            sourceUrl={candidate.data?.source_url}
-          />
+          canWrite ? (
+            <PasteProfileForm
+              applicationId={id}
+              sourceUrl={candidate.data?.source_url}
+            />
+          ) : (
+            // Without this, a viewer sees an empty bordered box here
+            // instead of a permission boundary — same reasoning as the
+            // read-only note on the job board toolbar.
+            <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
+              Read-only access — ask an admin for a recruiter account to
+              submit this profile.
+            </div>
+          )
         ) : application.data.stage === "extracting"
           || application.data.stage === "enriching" ? (
           <ExtractionLoader

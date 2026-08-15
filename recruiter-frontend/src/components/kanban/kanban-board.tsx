@@ -31,9 +31,16 @@ interface Props {
   jobId?: number;
   showRejected?: boolean;
   density?: Density;
+  canWrite?: boolean;
 }
 
-export function KanbanBoard({ applications, jobId, showRejected = false, density = "comfortable" }: Props) {
+export function KanbanBoard({
+  applications,
+  jobId,
+  showRejected = false,
+  density = "comfortable",
+  canWrite = true,
+}: Props) {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();
   const selection = useKanbanSelection();
@@ -112,6 +119,7 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
               density={density}
               selected={selection.selected}
               onShiftClick={selection.toggle}
+              canWrite={canWrite}
             />
           ))}
         </div>

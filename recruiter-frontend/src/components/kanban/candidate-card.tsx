@@ -22,6 +22,7 @@ interface Props {
   density?: Density;
   selected?: boolean;
   onShiftClick?: (id: number) => void;
+  canWrite?: boolean;
 }
 
 export function CandidateCard({
@@ -32,8 +33,9 @@ export function CandidateCard({
   density = "comfortable",
   selected = false,
   onShiftClick,
+  canWrite = true,
 }: Props) {
-  const isDraggable = draggable && application.stage !== "extracting";
+  const isDraggable = draggable && canWrite && application.stage !== "extracting";
   const awaitingPaste = application.awaiting_paste;
   const compact = density === "compact";
   const { attributes, listeners, setNodeRef, transform, isDragging } =
@@ -148,7 +150,7 @@ export function CandidateCard({
             >
               ⚠ {lastError}
             </p>
-            {canRetry && (
+            {canWrite && canRetry && (
               <Button
                 type="button"
                 size="sm"
