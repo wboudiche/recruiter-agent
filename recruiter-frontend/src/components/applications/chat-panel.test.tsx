@@ -94,6 +94,33 @@ describe("ChatPanel", () => {
     await userEvent.click(button);
     await waitFor(() => expect(undoCalls).toBe(1));
   });
+
+  it("hides the Undo action from a viewer but keeps the tool-result info visible", async () => {
+    // /api/applications/{id}/undo is not in VIEWER_ALLOWED_ROUTES, so a
+    // viewer who clicked this would get a 403. Chat history is
+    // per-application, not per-user, so a viewer can land on an
+    // application a recruiter previously validated/rejected through
+    // chat — the row (and its undo_token) is real, regardless of who's
+    // looking at it now.
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/chat", () =>
+        HttpResponse.json([
+          { id: 1, application_id: 1, role: "tool", content: null, tool_calls: null,
+            tool_call_id: "tc1", tool_name: "validate_application",
+            tool_result: { ok: true, previous_stage: "scored", undo_token: "tok-123" },
+            created_at: "2026-05-01T00:00:00Z" },
+        ]),
+      ),
+    );
+    render(<ChatPanel applicationId={1} jobId={1} canWrite={false} />, { wrapper: wrap() });
+
+    // The information — that this row validated the candidate — stays
+    // visible and expandable; only the reversal action is withheld.
+    const toggle = await screen.findByText(/validate_application/);
+    expect(screen.queryByRole("button", { name: /undo/i })).not.toBeInTheDocument();
+    await userEvent.click(toggle);
+    expect(screen.getByText(/previous_stage/)).toBeInTheDocument();
+  });
 });
 
 describe("ChatPanel — tool.search_results rendering", () => {
@@ -158,5 +185,74 @@ describe("ChatPanel — tool.search_results rendering", () => {
 
     await screen.findByText("Alice Doe", undefined, { timeout: 3000 });
     expect(screen.getByRole("button", { name: /add/i })).toBeInTheDocument();
+  });
+
+  it("keeps search results visible for a viewer but hides the Add action", async () => {
+    // Viewers keep the search tools — tools_for() only withholds
+    // save_note/validate_application/reject_application — so chat search
+    // is a live path for a viewer to reach SearchResultCard's Add button
+    // (POST /api/jobs/{id}/candidates), same as SearchTab's, which is
+    // gated by hiding its entry point instead since it has no other
+    // reachability. This entry point can't be hidden without also hiding
+    // chat, so the card's own Add button is what has to give.
+    let postCalled = false;
+    server.use(
+      http.get("http://localhost:8000/api/applications/43/chat", () => {
+        if (!postCalled) return HttpResponse.json([]);
+        return HttpResponse.json([
+          { id: 1, application_id: 43, role: "user", content: "find rust devs",
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:00Z" },
+          { id: 2, application_id: 43, role: "tool", content: null, tool_calls: null,
+            tool_call_id: "t1", tool_name: "search_linkedin",
+            tool_result: { summary: "Found 1." },
+            created_at: "2026-05-01T00:00:01Z" },
+          { id: 3, application_id: 43, role: "assistant", content: "Found 1.",
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:02Z" },
+        ]);
+      }),
+      http.post("http://localhost:8000/api/applications/43/chat", () => {
+        postCalled = true;
+        const events = [
+          { type: "message", role: "user", id: 1, content: "find rust devs" },
+          { type: "tool_call_start", id: "t1", name: "search_linkedin", arguments: { query: "rust" } },
+          { type: "tool_call_result", id: "t1", name: "search_linkedin", result: { summary: "Found 1." } },
+          {
+            type: "tool.search_results",
+            tool_name: "search_linkedin",
+            source: "linkedin",
+            results: [{
+              name: "Bob Roe",
+              url: "https://www.linkedin.com/in/bob/",
+              snippet: "Rust dev",
+              source: "linkedin",
+            }],
+          },
+          { type: "message_delta", text: "Found 1." },
+          { type: "message_done", id: 2 },
+        ];
+        const ndjson = events.map((e) => JSON.stringify(e)).join("\n") + "\n";
+        return new HttpResponse(ndjson, {
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }),
+    );
+
+    const Wrapper = wrap();
+    render(
+      <Wrapper>
+        <ChatPanel applicationId={43} jobId={1} canWrite={false} />
+      </Wrapper>,
+    );
+
+    const input = await screen.findByPlaceholderText(/ask anything/i);
+    fireEvent.change(input, { target: { value: "find rust devs" } });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    // The result itself — the information a viewer legitimately asked
+    // chat search for — stays visible; only the write action is gone.
+    await screen.findByText("Bob Roe", undefined, { timeout: 3000 });
+    expect(screen.queryByRole("button", { name: /add/i })).not.toBeInTheDocument();
   });
 });

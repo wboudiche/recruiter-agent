@@ -48,8 +48,13 @@ describe("JobsList — New job gating", () => {
 
   it("hides New job from a viewer", async () => {
     renderList("viewer");
-    // Wait for the board to settle so this isn't just an early render.
-    await screen.findByText(/senior data scientist/i);
+    // `New job` is absent both while /api/auth/me is still loading and
+    // once it resolves to viewer — asserting on its absence alone would
+    // pass vacuously even if the role request never completed. Wait for
+    // the read-only note instead: it's gated on `!me.isLoading &&
+    // !canWrite`, so its presence specifically proves the role resolved
+    // to viewer, not just that nothing has rendered yet.
+    await screen.findByText(/read-only access/i);
     expect(screen.queryByRole("link", { name: /new job/i })).not.toBeInTheDocument();
   });
 });

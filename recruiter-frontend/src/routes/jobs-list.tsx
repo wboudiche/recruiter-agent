@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Briefcase, ChevronRight, ListChecks, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { useCanWrite } from "@/hooks/use-current-user";
+import { useCanWrite, useCurrentUser } from "@/hooks/use-current-user";
 import { useJobs, type JobRead } from "@/hooks/use-jobs";
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -24,7 +24,14 @@ function formatRelative(iso: string): string {
 
 export default function JobsList() {
   const { data, isLoading, isError } = useJobs();
+  const me = useCurrentUser();
   const canWrite = useCanWrite();
+  // `canWrite` alone can't distinguish "role still loading" from "role
+  // resolved to viewer" — both read false. The New-job link correctly
+  // stays hidden either way (never flash it), but the explanatory note
+  // below needs the stronger condition so it doesn't appear for an
+  // admin/recruiter mid-fetch.
+  const knownViewer = !me.isLoading && !canWrite;
   const [showClosed, setShowClosed] = useState(false);
 
   const { closedJobs, visibleJobs } = useMemo(() => {
@@ -51,7 +58,7 @@ export default function JobsList() {
         <div className="rounded-xl border border-dashed p-12 text-center">
           <Briefcase className="h-10 w-10 text-muted-foreground mx-auto mb-3" />
           <p className="text-muted-foreground mb-4">
-            {canWrite ? "No jobs yet." : "No jobs yet — ask an admin to create one."}
+            {knownViewer ? "No jobs yet — ask an admin to create one." : "No jobs yet."}
           </p>
           {canWrite && (
             <Button asChild>
@@ -77,6 +84,11 @@ export default function JobsList() {
           <p className="text-sm text-muted-foreground mt-3 max-w-md">
             Active hiring tracks, ordered by most recent activity.
           </p>
+          {knownViewer && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Read-only access — ask an admin for a recruiter account to create jobs.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {closedJobs.length > 0 && (

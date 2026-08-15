@@ -125,7 +125,11 @@ export default function ApplicationDetail() {
             sourceUrl={candidate.data?.source_url ?? null}
           />
         ) : (
-          <ChatPanel applicationId={id} jobId={application.data.job_id} />
+          <ChatPanel
+            applicationId={id}
+            jobId={application.data.job_id}
+            canWrite={canWrite}
+          />
         )}
       </aside>
       </div>
