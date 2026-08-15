@@ -11,7 +11,7 @@ from recruiter.agent.types import ToolDef
 from recruiter.agent.undo import UndoStore
 from typing import Literal
 
-from recruiter.models import Application, Candidate, Job, Stage, SettingsRow
+from recruiter.models import Application, Candidate, Job, Role, Stage, SettingsRow
 from recruiter.sourcing.provider import SearchError, SearchResult
 from recruiter.sourcing.search import search_one_source
 
@@ -29,6 +29,10 @@ class ToolContext:
     application_id: int
     undo_store: UndoStore
     frontend_events: list[dict] = field(default_factory=list)
+    # The caller's authorization level. `role`, not the whole User: the
+    # handlers need an authorization decision, not an identity, and a
+    # narrower field is harder to misuse later for something else.
+    role: Role = Role.RECRUITER
 
 
 ToolHandler = Callable[[ToolContext, dict], Awaitable[dict | list]]
@@ -285,6 +289,11 @@ def _append_note(app: Application, text: str) -> None:
 
 @_register("save_note")
 async def _save_note(ctx: ToolContext, args: dict) -> dict:
+    if ctx.role == Role.VIEWER:
+        # Unreachable while `tools_for` filters correctly — which is the
+        # point. This survives a refactor that rebuilds the tool list and
+        # forgets the filter.
+        raise PermissionError("read-only role cannot modify applications")
     text = (args.get("text") or "").strip()
     if not text:
         return {"error": "text is required"}
@@ -302,6 +311,11 @@ _REJECT_FROM = {Stage.SCORED, Stage.VALIDATED, Stage.REJECTED}
 
 @_register("validate_application")
 async def _validate_application(ctx: ToolContext, args: dict) -> dict:
+    if ctx.role == Role.VIEWER:
+        # Unreachable while `tools_for` filters correctly — which is the
+        # point. This survives a refactor that rebuilds the tool list and
+        # forgets the filter.
+        raise PermissionError("read-only role cannot modify applications")
     app = await ctx.session.get(Application, ctx.application_id)
     if app is None:
         return {"error": "application not found"}
@@ -329,6 +343,11 @@ async def _validate_application(ctx: ToolContext, args: dict) -> dict:
 
 @_register("reject_application")
 async def _reject_application(ctx: ToolContext, args: dict) -> dict:
+    if ctx.role == Role.VIEWER:
+        # Unreachable while `tools_for` filters correctly — which is the
+        # point. This survives a refactor that rebuilds the tool list and
+        # forgets the filter.
+        raise PermissionError("read-only role cannot modify applications")
     reason = (args.get("reason") or "").strip()
     if not reason:
         return {"error": "reason is required"}
@@ -388,3 +407,17 @@ TOOLS.extend([
 ])
 
 
+# The tools that change state. Named once, so the tool list filter and
+# the handler re-checks below cannot drift apart.
+WRITE_TOOL_NAMES = frozenset({"save_note", "validate_application", "reject_application"})
+
+
+def tools_for(role: Role) -> list[ToolDef]:
+    """The tools a caller of this role may use.
+
+    A model cannot call a tool it was never given, so withholding here is
+    a real boundary rather than a prompt instruction asking it not to.
+    """
+    if role == Role.VIEWER:
+        return [t for t in TOOLS if t.name not in WRITE_TOOL_NAMES]
+    return list(TOOLS)

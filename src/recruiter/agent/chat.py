@@ -11,11 +11,11 @@ from recruiter.agent.events import (
     tool_call_result_event,
     tool_call_start_event,
 )
-from recruiter.agent.tools import TOOLS, ToolContext, get_tool_handler
+from recruiter.agent.tools import ToolContext, get_tool_handler, tools_for
 from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall
 from recruiter.agent.undo import UndoStore
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, ChatMessage, Job, MessageRole, SettingsRow
+from recruiter.models import Application, ChatMessage, Job, MessageRole, Role, SettingsRow
 
 MAX_STEPS_DEFAULT = 8
 
@@ -80,6 +80,7 @@ async def run_turn(
     user_message: str,
     llm: LLMClient,
     undo_store: UndoStore,
+    role: Role,
     max_steps: int = MAX_STEPS_DEFAULT,
 ) -> AsyncIterator[dict]:
     """Yield NDJSON event dicts for one user turn.
@@ -108,7 +109,10 @@ async def run_turn(
     # Build the per-turn tool context. Same instance flows to every handler
     # so future cross-cutting concerns (request_id, principal, dry_run) plug
     # in here without growing the dispatch.
-    ctx = ToolContext(session=session, application_id=application_id, undo_store=undo_store)
+    ctx = ToolContext(
+        session=session, application_id=application_id,
+        undo_store=undo_store, role=role,
+    )
 
     # Load history ONCE; we already know what we persisted ourselves below,
     # so we accumulate in memory instead of re-querying every iteration.
@@ -118,7 +122,7 @@ async def run_turn(
     for step in range(max_steps):
         try:
             turn: AssistantTurn = await llm.chat_with_tools(
-                history, TOOLS, system=system,
+                history, tools_for(role), system=system,
             )
         except Exception as exc:
             err_row = ChatMessage(
