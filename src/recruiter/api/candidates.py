@@ -95,6 +95,27 @@ def get_engine_dep() -> AsyncEngine:
     return get_engine(get_config().database_url)
 
 
+def resume_storage_name(original_filename: str) -> str:
+    """Build the on-disk filename for an uploaded resume.
+
+    Prefixed with a uuid so concurrent uploads of same-named files never
+    collide; `resume_display_name` is the inverse, used when serving the
+    file back so recruiters see the name they actually uploaded.
+    """
+    return f"{uuid.uuid4().hex}_{os.path.basename(original_filename)}"
+
+
+def resume_display_name(stored_filename: str) -> str:
+    """Recover the original filename from a `resume_storage_name` result."""
+    if (
+        len(stored_filename) > 33
+        and stored_filename[32] == "_"
+        and all(c in "0123456789abcdef" for c in stored_filename[:32])
+    ):
+        return stored_filename[33:]
+    return stored_filename
+
+
 class CandidateCreateUrl(BaseModel):
     kind: Literal["url"]
     url: str
@@ -392,7 +413,7 @@ async def upload_resume(
 
     storage_dir = Path(get_config().resume_storage_path)
     storage_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = storage_dir / f"{uuid.uuid4().hex}_{os.path.basename(name)}"
+    stored_path = storage_dir / resume_storage_name(name)
     stored_path.write_bytes(data)
 
     candidate = Candidate(source_type=SourceType.RESUME, resume_path=str(stored_path))
