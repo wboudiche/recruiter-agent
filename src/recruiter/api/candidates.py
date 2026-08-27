@@ -107,13 +107,14 @@ def resume_storage_name(original_filename: str) -> str:
 
 def resume_display_name(stored_filename: str) -> str:
     """Recover the original filename from a `resume_storage_name` result."""
-    if (
-        len(stored_filename) > 33
-        and stored_filename[32] == "_"
-        and all(c in "0123456789abcdef" for c in stored_filename[:32])
-    ):
-        return stored_filename[33:]
-    return stored_filename
+    prefix, sep, original = stored_filename.partition("_")
+    if not sep:
+        return stored_filename
+    try:
+        uuid.UUID(hex=prefix)
+    except ValueError:
+        return stored_filename
+    return original
 
 
 class CandidateCreateUrl(BaseModel):
@@ -400,20 +401,24 @@ async def upload_resume(
         raise HTTPException(status_code=404, detail="job not found")
 
     data = await file.read()
-    name = (file.filename or "").lower()
+    # Case preserved for storage/display; only the extension check is
+    # case-insensitive.
+    original_name = os.path.basename(file.filename or "")
     kind: Literal["pdf", "docx"]
-    if name.endswith(".pdf"):
+    if original_name.lower().endswith(".pdf"):
         parsed = parse_pdf(data)
         kind = "pdf"
-    elif name.endswith(".docx"):
+    elif original_name.lower().endswith(".docx"):
         parsed = parse_docx(data)
         kind = "docx"
     else:
         raise HTTPException(status_code=415, detail="only .pdf and .docx are accepted")
 
-    storage_dir = Path(get_config().resume_storage_path)
+    # Resolved so the stored path stays valid for the download endpoint
+    # even if the process's cwd differs at request time vs. upload time.
+    storage_dir = Path(get_config().resume_storage_path).resolve()
     storage_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = storage_dir / resume_storage_name(name)
+    stored_path = storage_dir / resume_storage_name(original_name)
     stored_path.write_bytes(data)
 
     candidate = Candidate(source_type=SourceType.RESUME, resume_path=str(stored_path))

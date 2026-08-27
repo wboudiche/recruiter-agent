@@ -35,7 +35,7 @@ async def test_download_resume_returns_uploaded_pdf_with_original_filename(
         with PDF_FIXTURE.open("rb") as fh:
             upload = await api_client.post(
                 f"/api/jobs/{job_id}/candidates/upload",
-                files={"file": ("alice_resume.pdf", fh, "application/pdf")},
+                files={"file": ("Alice_Resume.pdf", fh, "application/pdf")},
             )
         candidate_id = upload.json()["application_id"]
         # application_id and candidate_id are assigned back-to-back on a
@@ -47,7 +47,9 @@ async def test_download_resume_returns_uploaded_pdf_with_original_filename(
         assert resp.status_code == 200, resp.text
         assert resp.content == PDF_FIXTURE.read_bytes()
         assert resp.headers["content-disposition"].startswith("inline;")
-        assert "alice_resume.pdf" in resp.headers["content-disposition"]
+        # Original casing preserved, not lowercased by the upload's
+        # case-insensitive extension check.
+        assert "Alice_Resume.pdf" in resp.headers["content-disposition"]
         assert resp.headers["x-content-type-options"] == "nosniff"
     finally:
         app.dependency_overrides.pop(get_llm, None)
