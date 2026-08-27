@@ -95,6 +95,28 @@ def get_engine_dep() -> AsyncEngine:
     return get_engine(get_config().database_url)
 
 
+def resume_storage_name(original_filename: str) -> str:
+    """Build the on-disk filename for an uploaded resume.
+
+    Prefixed with a uuid so concurrent uploads of same-named files never
+    collide; `resume_display_name` is the inverse, used when serving the
+    file back so recruiters see the name they actually uploaded.
+    """
+    return f"{uuid.uuid4().hex}_{os.path.basename(original_filename)}"
+
+
+def resume_display_name(stored_filename: str) -> str:
+    """Recover the original filename from a `resume_storage_name` result."""
+    prefix, sep, original = stored_filename.partition("_")
+    if not sep:
+        return stored_filename
+    try:
+        uuid.UUID(hex=prefix)
+    except ValueError:
+        return stored_filename
+    return original
+
+
 class CandidateCreateUrl(BaseModel):
     kind: Literal["url"]
     url: str
@@ -379,20 +401,24 @@ async def upload_resume(
         raise HTTPException(status_code=404, detail="job not found")
 
     data = await file.read()
-    name = (file.filename or "").lower()
+    # Case preserved for storage/display; only the extension check is
+    # case-insensitive.
+    original_name = os.path.basename(file.filename or "")
     kind: Literal["pdf", "docx"]
-    if name.endswith(".pdf"):
+    if original_name.lower().endswith(".pdf"):
         parsed = parse_pdf(data)
         kind = "pdf"
-    elif name.endswith(".docx"):
+    elif original_name.lower().endswith(".docx"):
         parsed = parse_docx(data)
         kind = "docx"
     else:
         raise HTTPException(status_code=415, detail="only .pdf and .docx are accepted")
 
-    storage_dir = Path(get_config().resume_storage_path)
+    # Resolved so the stored path stays valid for the download endpoint
+    # even if the process's cwd differs at request time vs. upload time.
+    storage_dir = Path(get_config().resume_storage_path).resolve()
     storage_dir.mkdir(parents=True, exist_ok=True)
-    stored_path = storage_dir / f"{uuid.uuid4().hex}_{os.path.basename(name)}"
+    stored_path = storage_dir / resume_storage_name(original_name)
     stored_path.write_bytes(data)
 
     candidate = Candidate(source_type=SourceType.RESUME, resume_path=str(stored_path))

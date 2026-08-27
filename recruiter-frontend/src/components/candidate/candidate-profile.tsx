@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ExternalLink,
+  FileText,
   GraduationCap,
   Github,
   Globe,
@@ -162,6 +163,17 @@ function ProfileHeader({ candidate }: { candidate: CandidateRead }) {
               <Phone className="h-3.5 w-3.5" />
               {candidate.phone}
             </span>
+          )}
+          {candidate.resume_path && (
+            <a
+              href={`/api/candidates/${candidate.id}/resume`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Resume
+            </a>
           )}
         </div>
         {editing === "photo" && (

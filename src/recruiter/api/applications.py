@@ -1,12 +1,21 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import selectinload
 
-from recruiter.api.candidates import ApplicationCreated, get_engine_dep, get_event_bus, get_llm
+from recruiter.api.candidates import (
+    ApplicationCreated,
+    get_engine_dep,
+    get_event_bus,
+    get_llm,
+    resume_display_name,
+)
 from recruiter.api.deps import get_session, require_user
+from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, EventLog, Stage
@@ -55,6 +64,32 @@ async def get_candidate(
     if candidate is None:
         raise HTTPException(status_code=404, detail="candidate not found")
     return CandidateRead.model_validate(candidate)
+
+
+@router.get("/candidates/{candidate_id}/resume")
+async def get_candidate_resume(
+    candidate_id: int, session: AsyncSession = Depends(get_session)
+) -> FileResponse:
+    candidate = await session.get(Candidate, candidate_id)
+    if candidate is None or not candidate.resume_path:
+        raise HTTPException(status_code=404, detail="no resume on file for this candidate")
+
+    storage_dir = Path(get_config().resume_storage_path).resolve()
+    path = Path(candidate.resume_path).resolve()
+    if not path.is_relative_to(storage_dir) or not path.is_file():
+        raise HTTPException(status_code=404, detail="resume file missing on disk")
+
+    # "inline" so clicking the link previews the CV in the browser tab instead
+    # of forcing a download. Upload only ever accepts .pdf/.docx (415s
+    # anything else), so the guessed media type is trustworthy — nosniff
+    # still pins it, in case a stored file's actual bytes disagree with its
+    # extension, so the browser never reinterprets it as HTML/script.
+    return FileResponse(
+        path,
+        filename=resume_display_name(path.name),
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.patch("/candidates/{candidate_id}", response_model=CandidateRead)
