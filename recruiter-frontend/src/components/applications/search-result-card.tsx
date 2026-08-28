@@ -16,6 +16,10 @@ export interface SearchResult {
 interface Props {
   result: SearchResult;
   jobId: number;
+  /** False for viewers. The card itself — name, snippet, URL — is
+   *  information the viewer legitimately asked chat/search for; only the
+   *  "Add" action (which creates a candidate/application) is a write. */
+  canWrite?: boolean;
 }
 
 const SOURCE_LABEL: Record<SearchResult["source"], string> = {
@@ -24,7 +28,7 @@ const SOURCE_LABEL: Record<SearchResult["source"], string> = {
   web: "Web",
 };
 
-export function SearchResultCard({ result, jobId }: Props) {
+export function SearchResultCard({ result, jobId, canWrite = false }: Props) {
   const qc = useQueryClient();
   const [added, setAdded] = useState(false);
   // Block aggregator / job-board URLs at the UI level: adding them creates
@@ -76,14 +80,16 @@ export function SearchResultCard({ result, jobId }: Props) {
           {result.url}
         </a>
         {classification.kind === "profile" ? (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => add.mutate()}
-            disabled={add.isPending || added}
-          >
-            {added ? "Added ✓" : add.isPending ? "Adding…" : "Add"}
-          </Button>
+          canWrite && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => add.mutate()}
+              disabled={add.isPending || added}
+            >
+              {added ? "Added ✓" : add.isPending ? "Adding…" : "Add"}
+            </Button>
+          )
         ) : (
           <span
             className="shrink-0 border border-[hsl(var(--ed-amber)/0.4)] px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-[hsl(var(--ed-amber))]"

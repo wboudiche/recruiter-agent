@@ -9,9 +9,15 @@ import { SearchResultCard, type SearchResult } from "./search-result-card";
 interface Props {
   applicationId: number;
   jobId: number;
+  /** False for viewers. Chat itself stays fully usable for a viewer (the
+   *  server allowlists it) — this only withholds the two write-y bits
+   *  that ride inside tool-result rows: reversing a validate/reject via
+   *  Undo, and adding a search result as a candidate. Everything else in
+   *  the transcript (including what those tools reported) stays visible. */
+  canWrite?: boolean;
 }
 
-export function ChatPanel({ applicationId, jobId }: Props) {
+export function ChatPanel({ applicationId, jobId, canWrite = false }: Props) {
   const { messages, sendMessage, isStreaming, error, undo, searchResults } = useChat(applicationId);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -56,6 +62,7 @@ export function ChatPanel({ applicationId, jobId }: Props) {
             onUndo={(t) => undo(t)}
             searchResults={searchResults}
             jobId={jobId}
+            canWrite={canWrite}
           />
         ))}
         {isStreaming && (
@@ -91,12 +98,13 @@ export function ChatPanel({ applicationId, jobId }: Props) {
 }
 
 function MessageRow({
-  row, onUndo, searchResults, jobId,
+  row, onUndo, searchResults, jobId, canWrite,
 }: {
   row: ChatRow;
   onUndo: (token: string) => void;
   searchResults: Record<string, SearchResult[]>;
   jobId: number;
+  canWrite: boolean;
 }) {
   if (row.role === "user") {
     return (
@@ -134,11 +142,11 @@ function MessageRow({
     const cards = row.tool_call_id ? searchResults[row.tool_call_id] : undefined;
     return (
       <div className="space-y-2">
-        <ToolResultCard row={row} onUndo={onUndo} />
+        <ToolResultCard row={row} onUndo={onUndo} canWrite={canWrite} />
         {cards && cards.length > 0 && (
           <div className="space-y-2 pl-4 border-l border-l-primary/30">
             {cards.map((c) => (
-              <SearchResultCard key={c.url} result={c} jobId={jobId} />
+              <SearchResultCard key={c.url} result={c} jobId={jobId} canWrite={canWrite} />
             ))}
           </div>
         )}
@@ -148,7 +156,13 @@ function MessageRow({
   return null;
 }
 
-function ToolResultCard({ row, onUndo }: { row: ChatRow; onUndo: (token: string) => void }) {
+function ToolResultCard({
+  row, onUndo, canWrite,
+}: {
+  row: ChatRow;
+  onUndo: (token: string) => void;
+  canWrite: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const isAction =
     row.tool_name === "validate_application" || row.tool_name === "reject_application";
@@ -171,7 +185,7 @@ function ToolResultCard({ row, onUndo }: { row: ChatRow; onUndo: (token: string)
           {JSON.stringify(row.tool_result, null, 2)}
         </pre>
       )}
-      {undoToken && (
+      {undoToken && canWrite && (
         <Button size="sm" variant="outline" onClick={() => onUndo(undoToken)}>
           Undo
         </Button>

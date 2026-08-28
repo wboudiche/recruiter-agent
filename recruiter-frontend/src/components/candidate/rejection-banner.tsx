@@ -6,6 +6,7 @@ import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 interface Props {
   application: ApplicationRead;
+  canWrite?: boolean;
 }
 
 /**
@@ -13,7 +14,7 @@ interface Props {
  * the structured `rejection_reason` and offers an Unreject affordance
  * (rejected → scored, allowed by the backend). Returns null otherwise.
  */
-export function RejectionBanner({ application }: Props) {
+export function RejectionBanner({ application, canWrite = false }: Props) {
   const m = useApplicationMutations(application.id, application.job_id);
   const [confirming, setConfirming] = useState(false);
 
@@ -48,45 +49,47 @@ export function RejectionBanner({ application }: Props) {
           )}
         </div>
       </div>
-      <div className="flex justify-end">
-        {confirming ? (
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">
-              Move back to Scored?
-            </span>
+      {canWrite && (
+        <div className="flex justify-end">
+          {confirming ? (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-muted-foreground">
+                Move back to Scored?
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirming(false)}
+                disabled={m.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  m.unreject();
+                  setConfirming(false);
+                }}
+                disabled={m.isPending}
+              >
+                Unreject
+              </Button>
+            </div>
+          ) : (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={() => setConfirming(false)}
-              disabled={m.isPending}
+              onClick={() => setConfirming(true)}
             >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => {
-                m.unreject();
-                setConfirming(false);
-              }}
-              disabled={m.isPending}
-            >
+              <RotateCcw className="h-3.5 w-3.5 mr-1" />
               Unreject
             </Button>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirming(true)}
-          >
-            <RotateCcw className="h-3.5 w-3.5 mr-1" />
-            Unreject
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

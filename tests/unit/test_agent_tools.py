@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.agent.tools import TOOLS, ToolContext, get_tool_handler
 from recruiter.agent.undo import InMemoryUndoStore, UndoStore
-from recruiter.models import Application, Candidate, Job, Stage
+from recruiter.models import Application, Candidate, Job, Role, Stage
 
 
 async def _seed(session: AsyncSession) -> int:
@@ -33,6 +33,7 @@ def _ctx(session: AsyncSession, application_id: int, undo_store: UndoStore | Non
         session=session,
         application_id=application_id,
         undo_store=undo_store or InMemoryUndoStore(ttl_seconds=60),
+        role=Role.RECRUITER,
     )
 
 

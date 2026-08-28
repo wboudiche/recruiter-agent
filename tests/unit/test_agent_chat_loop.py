@@ -5,7 +5,7 @@ from recruiter.agent.chat import run_turn
 from recruiter.agent.types import AssistantTurn, ToolCall
 from recruiter.agent.undo import InMemoryUndoStore
 from recruiter.llm.client import FakeLLMClient
-from recruiter.models import Application, Candidate, ChatMessage, Job, Stage
+from recruiter.models import Application, Candidate, ChatMessage, Job, Role, Stage
 
 
 async def _seed_app(session: AsyncSession) -> int:
@@ -32,6 +32,7 @@ async def test_zero_tool_turn(db_session_with_schema: AsyncSession) -> None:
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="tell me about her", llm=fake, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
     ))
 
     types = [e["type"] for e in events]
@@ -59,6 +60,7 @@ async def test_one_tool_then_text(db_session_with_schema: AsyncSession) -> None:
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="email?", llm=fake, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
     ))
     types = [e["type"] for e in events]
     assert types == [
@@ -80,6 +82,7 @@ async def test_tool_failure_is_non_terminal(db_session_with_schema: AsyncSession
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="?", llm=fake, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
     ))
     # tool_call_result carries an error payload, but the turn still completes
     result_event = next(e for e in events if e["type"] == "tool_call_result")
@@ -98,6 +101,7 @@ async def test_llm_exception_is_terminal(db_session_with_schema: AsyncSession) -
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="?", llm=Boom(), undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
     ))
     types = [e["type"] for e in events]
     assert types[-1] == "error"
@@ -117,7 +121,7 @@ async def test_max_iterations_terminal(db_session_with_schema: AsyncSession) -> 
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="loop", llm=fake, undo_store=InMemoryUndoStore(),
-        max_steps=3,
+        role=Role.RECRUITER, max_steps=3,
     ))
     err = events[-1]
     assert err["type"] == "error" and err["phase"] == "agent"
@@ -136,9 +140,38 @@ async def test_validate_tool_through_loop(db_session_with_schema: AsyncSession) 
     events = await _collect(run_turn(
         session=db_session_with_schema, application_id=app_id,
         user_message="validate her", llm=fake, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
     ))
     result_event = next(e for e in events if e["type"] == "tool_call_result")
     assert result_event["result"]["ok"] is True
     assert "undo_token" in result_event["result"]
     app = await db_session_with_schema.get(Application, app_id)
     assert app.stage.value == "validated"
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_matches_tools_for_role(db_session_with_schema: AsyncSession) -> None:
+    """The prompt's claimed capabilities must match `tools_for(role)` — a
+    viewer told it can validate/reject would attempt a tool call it was
+    never given."""
+    app_id = await _seed_app(db_session_with_schema)
+
+    viewer_llm = FakeLLMClient(tool_turn_responses=[AssistantTurn(text="ok", tool_calls=[])])
+    await _collect(run_turn(
+        session=db_session_with_schema, application_id=app_id,
+        user_message="hi", llm=viewer_llm, undo_store=InMemoryUndoStore(),
+        role=Role.VIEWER,
+    ))
+    viewer_system = viewer_llm.calls[0]["system"]
+    assert "read-only" in viewer_system
+    assert "validate or reject" not in viewer_system
+
+    recruiter_llm = FakeLLMClient(tool_turn_responses=[AssistantTurn(text="ok", tool_calls=[])])
+    await _collect(run_turn(
+        session=db_session_with_schema, application_id=app_id,
+        user_message="hi", llm=recruiter_llm, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
+    ))
+    recruiter_system = recruiter_llm.calls[0]["system"]
+    assert "validate or reject" in recruiter_system
+    assert "read-only" not in recruiter_system

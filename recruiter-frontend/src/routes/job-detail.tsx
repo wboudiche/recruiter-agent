@@ -13,6 +13,8 @@ import { EditCriteriaSheet } from "@/components/jobs/edit-criteria-sheet";
 import { JobActionsMenu } from "@/components/jobs/job-actions-menu";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
+import { useCanWrite } from "@/hooks/use-current-user";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 const DENSITY_KEY = "kanban.density";
 
@@ -30,6 +32,7 @@ export default function JobDetail() {
   const id = Number(jobId);
   const job = useJob(id);
   const apps = useJobApplications(id);
+  const canWrite = useCanWrite();
   const [showRejected, setShowRejected] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
@@ -80,24 +83,38 @@ export default function JobDetail() {
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
           </Button>
-          <JobActionsMenu job={job.data} />
-          <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add candidate
-          </Button>
+          <JobActionsMenu job={job.data} canWrite={canWrite} />
+          {canWrite && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add candidate
+            </Button>
+          )}
         </div>
       </header>
+      {!canWrite && (
+        <p className="text-xs text-muted-foreground">
+          {readOnlyNotice("add or move candidates")}
+        </p>
+      )}
       <KanbanBoard
         applications={apps.data ?? []}
         jobId={id}
         showRejected={showRejected}
         density={density}
+        canWrite={canWrite}
       />
-      <AddCandidatePanel jobId={id} open={addOpen} onOpenChange={setAddOpen} />
+      <AddCandidatePanel
+        jobId={id}
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        canWrite={canWrite}
+      />
       <EditCriteriaSheet
         job={job.data}
         open={criteriaOpen}
         onOpenChange={setCriteriaOpen}
+        canWrite={canWrite}
       />
     </div>
   );

@@ -15,11 +15,14 @@ import { Spinner } from "@/components/ui/spinner";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
+import { useCanWrite } from "@/hooks/use-current-user";
 import { useJob } from "@/hooks/use-job";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 export default function ApplicationDetail() {
   const { appId } = useParams<{ appId: string }>();
   const id = Number(appId);
+  const canWrite = useCanWrite();
   const application = useApplication(id);
   const candidate = useCandidate(application.data?.candidate_id);
   // Job is only needed for the breadcrumb. We pass `enabled` via the
@@ -56,7 +59,9 @@ export default function ApplicationDetail() {
       />
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 flex-1 min-h-0">
       <div className="space-y-6 overflow-y-auto pr-2">
-        {candidate.data && <CandidateProfile candidate={candidate.data} />}
+        {candidate.data && (
+          <CandidateProfile candidate={candidate.data} canWrite={canWrite} />
+        )}
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             stage:
@@ -67,10 +72,12 @@ export default function ApplicationDetail() {
               : application.data.stage}
           </span>
           <div className="ml-auto">
-            <ActionBar
-              application={application.data}
-              candidateEmail={candidate.data?.email}
-            />
+            {canWrite && (
+              <ActionBar
+                application={application.data}
+                candidateEmail={candidate.data?.email}
+              />
+            )}
           </div>
         </div>
         {application.data.awaiting_paste && (
@@ -86,10 +93,11 @@ export default function ApplicationDetail() {
             </p>
           </div>
         )}
-        <RejectionBanner application={application.data} />
+        <RejectionBanner application={application.data} canWrite={canWrite} />
         <ScoreBreakdown application={application.data} />
         <EnrichmentSection
           applicationId={id}
+          canWrite={canWrite}
           enrichment={
             (application.data.enrichment as EnrichmentBundle | null) ?? null
           }
@@ -97,10 +105,19 @@ export default function ApplicationDetail() {
       </div>
       <aside className="rounded border overflow-hidden">
         {application.data.awaiting_paste ? (
-          <PasteProfileForm
-            applicationId={id}
-            sourceUrl={candidate.data?.source_url}
-          />
+          canWrite ? (
+            <PasteProfileForm
+              applicationId={id}
+              sourceUrl={candidate.data?.source_url}
+            />
+          ) : (
+            // Without this, a viewer sees an empty bordered box here
+            // instead of a permission boundary — same reasoning as the
+            // read-only note on the job board toolbar.
+            <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
+              {readOnlyNotice("submit this profile")}
+            </div>
+          )
         ) : application.data.stage === "extracting"
           || application.data.stage === "enriching" ? (
           <ExtractionLoader
@@ -108,7 +125,11 @@ export default function ApplicationDetail() {
             sourceUrl={candidate.data?.source_url ?? null}
           />
         ) : (
-          <ChatPanel applicationId={id} jobId={application.data.job_id} />
+          <ChatPanel
+            applicationId={id}
+            jobId={application.data.job_id}
+            canWrite={canWrite}
+          />
         )}
       </aside>
       </div>

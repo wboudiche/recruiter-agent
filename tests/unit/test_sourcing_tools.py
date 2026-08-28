@@ -1,6 +1,7 @@
 import pytest
 
 from recruiter.agent.tools import ToolContext, get_tool_handler
+from recruiter.models import Role
 from recruiter.sourcing.provider import SearchError, SearchResult
 
 
@@ -39,7 +40,7 @@ async def test_search_linkedin_returns_summary_and_emits_event(
     async def _load_settings(_session): return fake_settings
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
 
-    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    ctx = ToolContext(session=None, application_id=1, undo_store=None, role=Role.RECRUITER)  # type: ignore[arg-type]
     handler = get_tool_handler("search_linkedin")
     result = await handler(ctx, {"query": "rust dev", "limit": 5})
 
@@ -68,7 +69,7 @@ async def test_search_linkedin_returns_error_text_when_provider_unconfigured(
     async def _load_settings(_session): return type("S", (), {"search_provider": None})()
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
 
-    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    ctx = ToolContext(session=None, application_id=1, undo_store=None, role=Role.RECRUITER)  # type: ignore[arg-type]
     handler = get_tool_handler("search_linkedin")
     result = await handler(ctx, {"query": "x"})
     assert "isn't configured" in result["summary"].lower() or "not configured" in result["summary"].lower()
@@ -86,7 +87,7 @@ async def test_search_linkedin_returns_text_when_provider_raises_transient(
     async def _load_settings(_session): return fake_settings
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
 
-    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    ctx = ToolContext(session=None, application_id=1, undo_store=None, role=Role.RECRUITER)  # type: ignore[arg-type]
     handler = get_tool_handler("search_linkedin")
     result = await handler(ctx, {"query": "x"})
     assert "temporarily unavailable" in result["summary"].lower()
@@ -117,7 +118,7 @@ async def test_search_github_uses_github_client_not_provider(
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
     monkeypatch.setattr(search_mod, "GitHubSearchClient", _FakeGH)
 
-    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    ctx = ToolContext(session=None, application_id=1, undo_store=None, role=Role.RECRUITER)  # type: ignore[arg-type]
     handler = get_tool_handler("search_github")
     result = await handler(ctx, {"query": "rust"})
     assert "alice" in result["summary"]
@@ -138,7 +139,7 @@ async def test_search_linkedin_empty_results_does_not_emit_event(
     async def _load_settings(_session): return fake_settings
     monkeypatch.setattr(tools_mod, "_load_settings_for_tool", _load_settings)
 
-    ctx = ToolContext(session=None, application_id=1, undo_store=None)  # type: ignore[arg-type]
+    ctx = ToolContext(session=None, application_id=1, undo_store=None, role=Role.RECRUITER)  # type: ignore[arg-type]
     handler = get_tool_handler("search_linkedin")
     result = await handler(ctx, {"query": "zzznoresults"})
     assert result["summary"] == "No results found."

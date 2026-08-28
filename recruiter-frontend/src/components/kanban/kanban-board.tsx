@@ -31,9 +31,16 @@ interface Props {
   jobId?: number;
   showRejected?: boolean;
   density?: Density;
+  canWrite?: boolean;
 }
 
-export function KanbanBoard({ applications, jobId, showRejected = false, density = "comfortable" }: Props) {
+export function KanbanBoard({
+  applications,
+  jobId,
+  showRejected = false,
+  density = "comfortable",
+  canWrite = false,
+}: Props) {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();
   const selection = useKanbanSelection();
@@ -111,12 +118,18 @@ export function KanbanBoard({ applications, jobId, showRejected = false, density
               candidates={candidates}
               density={density}
               selected={selection.selected}
-              onShiftClick={selection.toggle}
+              // Shift-click selection only feeds BulkActionsBar (below),
+              // which is itself write-only. Dropping the handler for a
+              // viewer disables selection at the source instead of
+              // leaving cards "selectable" into a dead end with no bar
+              // to act on them.
+              onShiftClick={canWrite ? selection.toggle : undefined}
+              canWrite={canWrite}
             />
           ))}
         </div>
       </DndContext>
-      {jobId !== undefined && (
+      {canWrite && jobId !== undefined && (
         <BulkActionsBar
           selected={selection.selected}
           applications={applications}

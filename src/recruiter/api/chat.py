@@ -13,7 +13,7 @@ from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.api.deps import get_session, require_user, streaming_session
 from recruiter.api.rate_limit import chat_rate_limit, limiter
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, ChatMessage, Stage
+from recruiter.models import Application, ChatMessage, Stage, User
 from recruiter.schemas.application import ApplicationRead
 from recruiter.schemas.chat import ChatMessageRead, ChatRequest, UndoRequest
 
@@ -50,6 +50,7 @@ async def post_chat(
     llm: LLMClient = Depends(get_llm),
     undo_store: UndoStore = Depends(get_undo_store),
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ) -> StreamingResponse:
     app_row = await session.get(Application, application_id)
     if app_row is None:
@@ -69,6 +70,7 @@ async def post_chat(
                     user_message=payload.message,
                     llm=llm,
                     undo_store=undo_store,
+                    role=user.role,
                 ):
                     yield serialize_event(event).encode("utf-8")
             except Exception as exc:  # last-resort guard

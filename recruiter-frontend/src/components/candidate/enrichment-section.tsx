@@ -30,9 +30,11 @@ export interface Bundle {
 export function EnrichmentSection({
   applicationId,
   enrichment,
+  canWrite = false,
 }: {
   applicationId: number;
   enrichment: Bundle | null;
+  canWrite?: boolean;
 }) {
   const reEnrich = useReEnrich();
   const [showLow, setShowLow] = useState(false);
@@ -50,14 +52,16 @@ export function EnrichmentSection({
             cached {new Date(enrichment.fetched_at).toLocaleDateString()},
             expires {new Date(enrichment.expires_at).toLocaleDateString()}
           </span>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => reEnrich.mutate(applicationId)}
-            disabled={reEnrich.isPending}
-          >
-            {reEnrich.isPending ? "Queuing…" : "Re-enrich now"}
-          </Button>
+          {canWrite && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => reEnrich.mutate(applicationId)}
+              disabled={reEnrich.isPending}
+            >
+              {reEnrich.isPending ? "Queuing…" : "Re-enrich now"}
+            </Button>
+          )}
         </div>
       </header>
 

@@ -14,15 +14,17 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 import type { JobRead } from "@/hooks/use-jobs";
 
 interface Props {
   job: JobRead;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  canWrite?: boolean;
 }
 
-export function EditJobDetailsSheet({ job, open, onOpenChange }: Props) {
+export function EditJobDetailsSheet({ job, open, onOpenChange, canWrite = false }: Props) {
   const qc = useQueryClient();
   const [title, setTitle] = useState(job.title);
   const [description, setDescription] = useState(job.description);
@@ -59,10 +61,11 @@ export function EditJobDetailsSheet({ job, open, onOpenChange }: Props) {
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col">
         <SheetHeader>
-          <SheetTitle>Edit job details</SheetTitle>
+          <SheetTitle>{canWrite ? "Edit job details" : "Job details"}</SheetTitle>
           <SheetDescription>
-            Update the title and the JD. Use the Criteria button to edit
-            weighted criteria; this sheet doesn't touch them.
+            {canWrite
+              ? "Update the title and the JD. Use the Criteria button to edit weighted criteria; this sheet doesn't touch them."
+              : readOnlyNotice("edit the title or JD")}
           </SheetDescription>
         </SheetHeader>
 
@@ -73,6 +76,7 @@ export function EditJobDetailsSheet({ job, open, onOpenChange }: Props) {
               id="job-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              readOnly={!canWrite}
             />
           </div>
           <div className="space-y-1">
@@ -82,6 +86,7 @@ export function EditJobDetailsSheet({ job, open, onOpenChange }: Props) {
               rows={16}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+              readOnly={!canWrite}
             />
           </div>
         </div>
@@ -93,15 +98,17 @@ export function EditJobDetailsSheet({ job, open, onOpenChange }: Props) {
             onClick={() => onOpenChange(false)}
             disabled={save.isPending}
           >
-            Cancel
+            {canWrite ? "Cancel" : "Close"}
           </Button>
-          <Button
-            type="button"
-            onClick={() => save.mutate()}
-            disabled={save.isPending || !canSave}
-          >
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
+          {canWrite && (
+            <Button
+              type="button"
+              onClick={() => save.mutate()}
+              disabled={save.isPending || !canSave}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>

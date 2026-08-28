@@ -23,14 +23,17 @@ function baseApp(overrides: Partial<ApplicationRead> = {}): ApplicationRead {
   };
 }
 
-function renderCard(application: ApplicationRead) {
+// Retry is a write action, so these tests need an explicit writer —
+// `canWrite` fails closed (defaults false) and there's no reason for a
+// retry test to exercise the viewer path.
+function renderCard(application: ApplicationRead, canWrite = true) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const utils = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <CandidateCard application={application} jobId={8} draggable={false} />
+        <CandidateCard application={application} jobId={8} draggable={false} canWrite={canWrite} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -44,7 +47,7 @@ function renderCard(application: ApplicationRead) {
     utils.rerender(
       <QueryClientProvider client={qc}>
         <MemoryRouter>
-          <CandidateCard application={nextApplication} jobId={8} draggable={false} />
+          <CandidateCard application={nextApplication} jobId={8} draggable={false} canWrite={canWrite} />
         </MemoryRouter>
       </QueryClientProvider>,
     );

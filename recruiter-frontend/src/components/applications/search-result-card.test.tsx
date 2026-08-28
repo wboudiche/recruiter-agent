@@ -47,7 +47,7 @@ describe("SearchResultCard", () => {
       }),
     );
     const Wrapper = wrap();
-    render(<Wrapper><SearchResultCard result={RESULT} jobId={1} /></Wrapper>);
+    render(<Wrapper><SearchResultCard result={RESULT} jobId={1} canWrite /></Wrapper>);
     fireEvent.click(screen.getByRole("button", { name: /add/i }));
     await waitFor(() =>
       expect(received).toEqual({
@@ -68,7 +68,7 @@ describe("SearchResultCard — added state", () => {
       ),
     );
     const Wrapper = wrap();
-    render(<Wrapper><SearchResultCard result={RESULT} jobId={1} /></Wrapper>);
+    render(<Wrapper><SearchResultCard result={RESULT} jobId={1} canWrite /></Wrapper>);
     const btn = screen.getByRole("button", { name: /add/i });
     fireEvent.click(btn);
     await waitFor(() => {
