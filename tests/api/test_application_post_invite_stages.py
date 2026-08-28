@@ -27,6 +27,33 @@ class FakeSmtp:
         pass
 
 
+async def _seed_scored_application(api_client: AsyncClient) -> int:
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
+        structured_responses=[
+            ExtractedCandidate(full_name="Alice"),
+            ScoreResult(
+                score=70,
+                breakdown=[ScoreBreakdownItem(criterion="x", weight=1.0, score=70, rationale="ok")],
+                rationale="ok",
+            ),
+        ]
+    )
+    job_id = (
+        await api_client.post("/api/jobs", json={"title": "T", "description": "D", "criteria": []})
+    ).json()["id"]
+    app_id = (
+        await api_client.post(
+            f"/api/jobs/{job_id}/candidates", json={"kind": "paste", "content": "Alice"}
+        )
+    ).json()["application_id"]
+    for _ in range(50):
+        await asyncio.sleep(0.05)
+        r = await api_client.get(f"/api/applications/{app_id}")
+        if r.json()["stage"] == "scored":
+            break
+    return app_id
+
+
 async def _seed_invited_application(api_client: AsyncClient) -> int:
     app.dependency_overrides[get_smtp_factory] = lambda: (lambda h, p: FakeSmtp())
     app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
@@ -119,6 +146,37 @@ async def test_cannot_skip_a_stage(api_client: AsyncClient) -> None:
         assert resp.status_code == 409, resp.text
     finally:
         app.dependency_overrides.pop(get_smtp_factory, None)
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_cannot_jump_to_a_late_stage_from_an_unrelated_stage(
+    api_client: AsyncClient,
+) -> None:
+    """Each late stage requires its specific predecessor, not just "not
+    the wrong forward-skip" — validated (never invited) must not be able
+    to PATCH straight to scheduled, scored must not jump to offer, and a
+    rejected application must not jump straight to hired."""
+    try:
+        app_id = await _seed_scored_application(api_client)
+        resp = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        assert resp.status_code == 200, resp.text
+
+        resp = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+        assert resp.status_code == 409, resp.text
+
+        resp = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "offer"})
+        assert resp.status_code == 409, resp.text
+
+        rejected_id = await _seed_scored_application(api_client)
+        await api_client.patch(
+            f"/api/applications/{rejected_id}", json={"stage": "rejected"}
+        )
+        resp = await api_client.patch(
+            f"/api/applications/{rejected_id}", json={"stage": "hired"}
+        )
+        assert resp.status_code == 409, resp.text
+    finally:
         app.dependency_overrides.pop(get_llm, None)
 
 

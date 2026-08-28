@@ -261,6 +261,13 @@ _FORWARD_STAGE_AFTER = {
     Stage.INTERVIEWED: Stage.OFFER,
     Stage.OFFER: Stage.HIRED,
 }
+# Inverse of the above: the one current stage each late stage may be
+# entered from. Without this, _FORWARD_STAGE_AFTER only blocks the wrong
+# forward step FROM one of its keys — it says nothing about reaching
+# SCHEDULED/INTERVIEWED/OFFER/HIRED from a current stage that isn't a key
+# at all (e.g. VALIDATED → SCHEDULED, or REJECTED → HIRED), which would
+# otherwise sail through unguarded.
+_REQUIRED_PREDECESSOR = {target: source for source, target in _FORWARD_STAGE_AFTER.items()}
 
 
 def _validate_transition(current: Stage, target: Stage) -> None:
@@ -275,6 +282,12 @@ def _validate_transition(current: Stage, target: Stage) -> None:
                 detail=f"cannot move from {current.value} to {target.value}; "
                 f"expected {expected.value} or rejected",
             )
+    if target in _REQUIRED_PREDECESSOR and current != _REQUIRED_PREDECESSOR[target]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot move to {target.value} from {current.value}; "
+            f"expected {_REQUIRED_PREDECESSOR[target].value}",
+        )
     # Moving to SCORED is allowed from VALIDATED (unvalidate) and from
     # REJECTED (unreject). Other source stages don't have a meaningful
     # "back to scored" semantic and are blocked.
