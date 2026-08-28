@@ -4,6 +4,67 @@ All notable user-facing changes are recorded here. The format is loosely based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 follows semantic versioning post-1.0.
 
+## v0.2.0-alpha.1 — 2026-08-29
+
+User accounts with roles, a real read-only viewer mode, and a more complete
+hiring pipeline: retry a stalled extraction, keep scores in sync when
+criteria change, and carry a candidate through interview → offer → hired.
+
+### Added
+
+- **User accounts with roles.** Password-based login alongside OIDC, with
+  three roles — admin, recruiter, viewer. An admin-only Users tab in
+  Settings creates/deactivates accounts, resets passwords, and changes
+  roles. A break-glass recovery account exists for when the last admin is
+  locked out; privilege changes and break-glass restores are audit-logged.
+- **The viewer role is now actually enforced.** Previously the role
+  existed with no effect; a default-deny guard now blocks viewer mutations
+  app-wide — API routes, agent tool access, and every write control in the
+  kanban, chat panel, and settings UI — rather than relying on any single
+  place remembering to check.
+- **Retry extraction from the kanban card.** A stalled or failed
+  application now shows why (`last_error`) directly on the card with a
+  Retry button, which re-arms correctly once a genuinely new failure
+  lands instead of staying stuck on the first one.
+- **Editing a job's criteria now rescores existing applicants.**
+  `PATCH /api/jobs/{id}` kicks off a background rescore of every
+  already-scored application against the new criteria, instead of
+  leaving scores silently stale. Saving a title/status-only change still
+  never requires an LLM to be configured.
+- **Interviewed → Offer → Hired stages.** The pipeline used to stop at
+  "Scheduled" with no way to actually reach it, let alone progress
+  further. Three new stages follow it, each reached one at a time via an
+  explicit action on the candidate page and enforced server-side as a
+  strict forward sequence; Hired is now a true terminal stage, including
+  against Reject. Reject itself is now available from Scheduled,
+  Interviewed, and Offer too.
+
+### Changed
+
+- **Rate limiting is keyed per caller, not shared across the whole
+  deployment.** One user tripping a limit no longer throttles everyone
+  else behind the same process.
+- `RECRUITER_LOG_LEVEL` is now actually honored — it was previously read
+  but silently ignored.
+- Candidate full name extraction is more reliable, and a candidate's CV
+  can now be viewed inline from their profile instead of only downloaded.
+
+### Fixed
+
+- A TOCTOU race that could leave a deployment with zero active admins,
+  and a break-glass bypass that worked even with an empty password hash.
+- The agent's write tools now fail closed by default instead of requiring
+  every call site to remember to pass a role.
+
+### Known limitations
+
+- **Per-account login throttling is still not implemented** — the rate
+  limiter can key on IP/session but not on the account being targeted,
+  since SlowAPI can't see the request body. Noted as a gap in the viewer
+  permission matrix design.
+
+---
+
 ## v0.1.0-alpha.1 — 2026-05-25
 
 Post-alpha polish: free-by-default search, more honest UI feedback, and a
