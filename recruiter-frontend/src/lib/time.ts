@@ -10,6 +10,9 @@ const STAGE_TIMESTAMP: Record<ApplicationRead["stage"], keyof ApplicationRead | 
   validated: "validated_at",
   invited: "invited_at",
   scheduled: "scheduled_at",
+  interviewed: "interviewed_at",
+  offer: "offer_at",
+  hired: "hired_at",
   rejected: "rejected_at",
 };
 

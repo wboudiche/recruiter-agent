@@ -1,11 +1,14 @@
 import { useDroppable } from "@dnd-kit/core";
 import {
+  Award,
   Calendar,
   CheckCircle2,
   ClipboardEdit,
   Mail,
+  PartyPopper,
   Sparkles,
   Star,
+  Users,
   XCircle,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -39,6 +42,9 @@ const STAGE_META: Record<ApplicationRead["stage"], { icon: ReactNode; cls: strin
   validated:  { icon: <CheckCircle2  className="h-3.5 w-3.5" />, cls: "stage-validated" },
   invited:    { icon: <Mail          className="h-3.5 w-3.5" />, cls: "stage-invited" },
   scheduled:  { icon: <Calendar      className="h-3.5 w-3.5" />, cls: "stage-scheduled" },
+  interviewed:{ icon: <Users         className="h-3.5 w-3.5" />, cls: "stage-interviewed" },
+  offer:      { icon: <Award         className="h-3.5 w-3.5" />, cls: "stage-offer" },
+  hired:      { icon: <PartyPopper   className="h-3.5 w-3.5" />, cls: "stage-hired" },
   rejected:   { icon: <XCircle       className="h-3.5 w-3.5" />, cls: "stage-rejected" },
 };
 

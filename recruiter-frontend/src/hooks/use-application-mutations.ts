@@ -5,7 +5,14 @@ import { queryKeys } from "@/lib/query-keys";
 import type { ApplicationRead } from "./use-job-applications";
 
 interface PatchPayload {
-  stage?: "scored" | "validated" | "rejected";
+  stage?:
+    | "scored"
+    | "validated"
+    | "rejected"
+    | "scheduled"
+    | "interviewed"
+    | "offer"
+    | "hired";
   notes?: string;
   rejection_reason?: string;
 }
@@ -45,6 +52,10 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
         rejection_reason: reason || "",
       }),
     unreject: () => patch.mutate({ stage: "scored" }),
+    markScheduled: () => patch.mutate({ stage: "scheduled" }),
+    markInterviewed: () => patch.mutate({ stage: "interviewed" }),
+    extendOffer: () => patch.mutate({ stage: "offer" }),
+    markHired: () => patch.mutate({ stage: "hired" }),
     isPending: patch.isPending,
   };
 }

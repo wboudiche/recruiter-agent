@@ -25,6 +25,9 @@ class ApplicationRead(BaseModel):
     validated_at: datetime | None
     invited_at: datetime | None
     scheduled_at: datetime | None
+    interviewed_at: datetime | None
+    offer_at: datetime | None
+    hired_at: datetime | None
     rejected_at: datetime | None
     rejection_reason: str | None = None
     created_at: datetime
@@ -42,7 +45,9 @@ class ApplicationRead(BaseModel):
 
 
 class ApplicationUpdate(BaseModel):
-    stage: Literal["scored", "validated", "rejected"] | None = None
+    stage: Literal[
+        "scored", "validated", "rejected", "scheduled", "interviewed", "offer", "hired"
+    ] | None = None
     notes: str | None = None
     # Free-text reason captured by the Reject dialog. Empty string clears
     # it; None leaves the existing value alone. Cleared automatically

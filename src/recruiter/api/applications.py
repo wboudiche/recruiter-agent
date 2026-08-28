@@ -237,6 +237,9 @@ def _to_read(
         validated_at=app_row.validated_at,
         invited_at=app_row.invited_at,
         scheduled_at=app_row.scheduled_at,
+        interviewed_at=app_row.interviewed_at,
+        offer_at=app_row.offer_at,
+        hired_at=app_row.hired_at,
         rejected_at=app_row.rejected_at,
         rejection_reason=app_row.rejection_reason,
         created_at=app_row.created_at,
@@ -248,15 +251,42 @@ def _to_read(
     )
 
 
-_TERMINAL_AFTER_INVITED = {Stage.INVITED, Stage.SCHEDULED}
+# Past INVITED, applications advance one stage at a time (interview
+# scheduled → held → offer extended → hired), each also allowed to
+# fall through to REJECTED instead. HIRED has no entry here: it's fully
+# terminal, including to REJECTED (see the explicit check below).
+_FORWARD_STAGE_AFTER = {
+    Stage.INVITED: Stage.SCHEDULED,
+    Stage.SCHEDULED: Stage.INTERVIEWED,
+    Stage.INTERVIEWED: Stage.OFFER,
+    Stage.OFFER: Stage.HIRED,
+}
+# Inverse of the above: the one current stage each late stage may be
+# entered from. Without this, _FORWARD_STAGE_AFTER only blocks the wrong
+# forward step FROM one of its keys — it says nothing about reaching
+# SCHEDULED/INTERVIEWED/OFFER/HIRED from a current stage that isn't a key
+# at all (e.g. VALIDATED → SCHEDULED, or REJECTED → HIRED), which would
+# otherwise sail through unguarded.
+_REQUIRED_PREDECESSOR = {target: source for source, target in _FORWARD_STAGE_AFTER.items()}
 
 
 def _validate_transition(current: Stage, target: Stage) -> None:
     """Enforce business rules. Raises HTTPException(409) on illegal transitions."""
-    if current in _TERMINAL_AFTER_INVITED and target != Stage.REJECTED:
+    if current == Stage.HIRED:
+        raise HTTPException(status_code=409, detail="cannot move from hired")
+    if current in _FORWARD_STAGE_AFTER and target != Stage.REJECTED:
+        expected = _FORWARD_STAGE_AFTER[current]
+        if target != expected:
+            raise HTTPException(
+                status_code=409,
+                detail=f"cannot move from {current.value} to {target.value}; "
+                f"expected {expected.value} or rejected",
+            )
+    if target in _REQUIRED_PREDECESSOR and current != _REQUIRED_PREDECESSOR[target]:
         raise HTTPException(
             status_code=409,
-            detail=f"cannot move from {current.value} to {target.value} after invitation sent",
+            detail=f"cannot move to {target.value} from {current.value}; "
+            f"expected {_REQUIRED_PREDECESSOR[target].value}",
         )
     # Moving to SCORED is allowed from VALIDATED (unvalidate) and from
     # REJECTED (unreject). Other source stages don't have a meaningful
@@ -295,6 +325,14 @@ async def patch_application(
         now = datetime.now(timezone.utc)
         if new_stage == Stage.VALIDATED:
             app_row.validated_at = now
+        elif new_stage == Stage.SCHEDULED:
+            app_row.scheduled_at = now
+        elif new_stage == Stage.INTERVIEWED:
+            app_row.interviewed_at = now
+        elif new_stage == Stage.OFFER:
+            app_row.offer_at = now
+        elif new_stage == Stage.HIRED:
+            app_row.hired_at = now
         elif new_stage == Stage.REJECTED:
             app_row.rejected_at = now
         elif new_stage == Stage.SCORED:
