@@ -1,20 +1,47 @@
+import inspect
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from recruiter.api.candidates import get_llm
+from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
+from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Job, JobStatus
 from recruiter.pipeline.criteria_suggester import suggest_criteria
+from recruiter.pipeline.orchestrator import rescore_applications_for_job
 from recruiter.schemas.job import CriteriaItem, JobCreate, JobRead, JobUpdate
 from recruiter.schemas.job_suggest import SuggestCriteriaRequest, SuggestCriteriaResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(require_user)])
+
+
+async def get_llm_or_none(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> LLMClient | None:
+    """Like `get_llm`, but None instead of a 503 when no provider is
+    configured.
+
+    Saving a job's title/status must never fail for lack of an LLM —
+    only a criteria change actually needs one (to rescore). Declaring
+    `Depends(get_llm)` directly isn't an option: FastAPI resolves it
+    eagerly for every request regardless of what the route does with
+    it, so its 503 would propagate before the handler ever saw whether
+    criteria changed. Consulting `dependency_overrides` directly here
+    keeps this testable the same way `Depends(get_llm)` normally is.
+    """
+    override = request.app.dependency_overrides.get(get_llm)
+    if override is not None:
+        result = override()
+        return await result if inspect.isawaitable(result) else result
+    try:
+        return await get_llm(session=session)
+    except HTTPException:
+        return None
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
@@ -64,7 +91,13 @@ async def get_job(job_id: int, session: AsyncSession = Depends(get_session)) -> 
 
 @router.patch("/{job_id}", response_model=JobRead)
 async def update_job(
-    job_id: int, payload: JobUpdate, session: AsyncSession = Depends(get_session)
+    job_id: int,
+    payload: JobUpdate,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient | None = Depends(get_llm_or_none),
+    bus: EventBus = Depends(get_event_bus),
 ) -> JobRead:
     job = await session.get(Job, job_id)
     if job is None:
@@ -81,6 +114,19 @@ async def update_job(
         job.enrichment_consent = payload.enrichment_consent
     await session.commit()
     await session.refresh(job)
+
+    if payload.criteria is not None:
+        # Existing scores were computed against the old criteria and are
+        # now stale. Rescoring calls the LLM once per applicant, so it
+        # runs in the background rather than blocking this save.
+        if llm is not None:
+            background_tasks.add_task(
+                rescore_applications_for_job, job_id=job.id, engine=engine, llm=llm, bus=bus,
+            )
+        else:
+            logger.warning(
+                "job %s criteria changed but no LLM is configured; skipping rescore", job.id,
+            )
     return _to_read(job)
 
 
