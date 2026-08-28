@@ -14,6 +14,9 @@ export interface ApplicationRead {
     | "validated"
     | "invited"
     | "scheduled"
+    | "interviewed"
+    | "offer"
+    | "hired"
     | "rejected";
   score: number | null;
   score_breakdown:
@@ -24,6 +27,9 @@ export interface ApplicationRead {
   validated_at: string | null;
   invited_at: string | null;
   scheduled_at: string | null;
+  interviewed_at?: string | null;
+  offer_at?: string | null;
+  hired_at?: string | null;
   rejected_at: string | null;
   rejection_reason?: string | null;
   created_at: string;

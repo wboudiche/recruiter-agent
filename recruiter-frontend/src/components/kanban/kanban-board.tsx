@@ -24,7 +24,23 @@ const COLUMN_ORDER: { stage: ApplicationRead["stage"]; title: string }[] = [
   { stage: "validated", title: "Validated" },
   { stage: "invited", title: "Invited" },
   { stage: "scheduled", title: "Scheduled" },
+  { stage: "interviewed", title: "Interviewed" },
+  { stage: "offer", title: "Offer" },
+  { stage: "hired", title: "Hired" },
 ];
+
+// Forward progression past "invited" only happens via the explicit
+// ActionBar buttons on the candidate detail page (mirrors how "invited"
+// itself is only reached through the Notify wizard, never by drag).
+// Drag-and-drop stays limited to scored<->validated and any->rejected —
+// except once hired, which is fully terminal.
+export function isDragAllowed(fromStage: string, targetStage: string): boolean {
+  if (targetStage === "rejected") return fromStage !== "hired";
+  return (
+    (fromStage === "scored" && targetStage === "validated") ||
+    (fromStage === "validated" && targetStage === "scored")
+  );
+}
 
 interface Props {
   applications: ApplicationRead[];
@@ -91,13 +107,8 @@ export function KanbanBoard({
       ?.applicationId;
     if (!targetStage || !fromStage || !id || targetStage === fromStage) return;
 
-    // UI guards (server enforces too).
-    // Allow: scored→validated, validated→scored (unvalidate), any→rejected.
-    const allowed =
-      (fromStage === "scored" && targetStage === "validated") ||
-      (fromStage === "validated" && targetStage === "scored") ||
-      targetStage === "rejected";
-    if (!allowed) {
+    // UI guard (server enforces too).
+    if (!isDragAllowed(fromStage, targetStage)) {
       toast.error(`Cannot move from ${fromStage} to ${targetStage}`);
       return;
     }
@@ -107,7 +118,7 @@ export function KanbanBoard({
   return (
     <>
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
           {columns.map((c) => (
             <KanbanColumn
               key={c.stage}

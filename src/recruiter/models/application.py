@@ -19,6 +19,9 @@ class Stage(str, Enum):
     VALIDATED = "validated"
     INVITED = "invited"
     SCHEDULED = "scheduled"
+    INTERVIEWED = "interviewed"
+    OFFER = "offer"
+    HIRED = "hired"
     REJECTED = "rejected"
 
 
@@ -40,6 +43,9 @@ class Application(Base):
     validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     invited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    interviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    offer_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Structured rejection reason captured by the Reject dialog. Cleared
     # when stage transitions back out of rejected. Surfaced as a banner

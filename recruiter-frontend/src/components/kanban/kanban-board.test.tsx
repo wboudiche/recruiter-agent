@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import type { ReactNode } from "react";
-import { KanbanBoard } from "./kanban-board";
+import { KanbanBoard, isDragAllowed } from "./kanban-board";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 // Shift-click selection feeds BulkActionsBar, which PATCHes applications —
@@ -67,5 +67,49 @@ describe("KanbanBoard — bulk selection gating", () => {
     // settled DOM rather than a race against a timer.
     expect(screen.queryByText(/selected/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^validate$/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("KanbanBoard — post-invite stage columns", () => {
+  it("renders a column for each new stage", async () => {
+    render(
+      wrap(
+        <KanbanBoard
+          applications={[
+            mkApp(1, "scheduled"),
+            mkApp(2, "interviewed"),
+            mkApp(3, "offer"),
+            mkApp(4, "hired"),
+          ]}
+          jobId={1}
+        />,
+      ),
+    );
+
+    expect(await screen.findByText("Scheduled")).toBeInTheDocument();
+    expect(screen.getByText("Interviewed")).toBeInTheDocument();
+    expect(screen.getByText("Offer")).toBeInTheDocument();
+    expect(screen.getByText("Hired")).toBeInTheDocument();
+  });
+});
+
+describe("isDragAllowed", () => {
+  it("allows scored<->validated", () => {
+    expect(isDragAllowed("scored", "validated")).toBe(true);
+    expect(isDragAllowed("validated", "scored")).toBe(true);
+  });
+
+  it("allows dragging to rejected from any stage except hired", () => {
+    expect(isDragAllowed("scored", "rejected")).toBe(true);
+    expect(isDragAllowed("scheduled", "rejected")).toBe(true);
+    expect(isDragAllowed("offer", "rejected")).toBe(true);
+    expect(isDragAllowed("hired", "rejected")).toBe(false);
+  });
+
+  it("blocks forward progression by drag (buttons only)", () => {
+    expect(isDragAllowed("invited", "scheduled")).toBe(false);
+    expect(isDragAllowed("scheduled", "interviewed")).toBe(false);
+    expect(isDragAllowed("interviewed", "offer")).toBe(false);
+    expect(isDragAllowed("offer", "hired")).toBe(false);
   });
 });

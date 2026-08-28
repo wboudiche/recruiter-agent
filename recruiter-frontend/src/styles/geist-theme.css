@@ -21,6 +21,9 @@
   --stage-validated:  142 71% 45%;
   --stage-invited:    199 89% 48%;
   --stage-scheduled:  173 80% 40%;
+  --stage-interviewed: 258 85% 66%;
+  --stage-offer:      300 65% 60%;
+  --stage-hired:      84 55% 45%;
   --stage-rejected:   0 84% 60%;
   --stage-sourced:    36 18% 73%;
 
@@ -269,6 +272,9 @@
 .stage-validated  { color: hsl(var(--stage-validated)); }
 .stage-invited    { color: hsl(var(--stage-invited)); }
 .stage-scheduled  { color: hsl(var(--stage-scheduled)); }
+.stage-interviewed { color: hsl(var(--stage-interviewed)); }
+.stage-offer      { color: hsl(var(--stage-offer)); }
+.stage-hired      { color: hsl(var(--stage-hired)); }
 .stage-rejected   { color: hsl(var(--stage-rejected)); }
 .stage-sourced    { color: hsl(var(--stage-sourced)); }
 
