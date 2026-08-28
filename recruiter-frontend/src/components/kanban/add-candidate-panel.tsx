@@ -9,17 +9,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 import { SearchTab } from "./search-tab";
 
 interface Props {
   jobId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  canWrite?: boolean;
 }
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
+export function AddCandidatePanel({ jobId, open, onOpenChange, canWrite = false }: Props) {
   const queryClient = useQueryClient();
   const [url, setUrl] = useState("");
   const [content, setContent] = useState("");
@@ -79,6 +81,27 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
     else if (tab === "upload" && file) submitFile.mutate();
   }
 
+  // This whole panel exists to create candidates — there's no read-only
+  // use for it. Its only current trigger is already gated by `canWrite`
+  // in job-detail.tsx, but that's an external guarantee this component
+  // can't see; check again here so a future second trigger (deep link,
+  // command palette, restored state) can't open a live write form for a
+  // viewer.
+  if (!canWrite) {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent className="w-full sm:max-w-lg">
+          <SheetHeader className="pb-4 border-b">
+            <SheetTitle>Add candidate</SheetTitle>
+          </SheetHeader>
+          <p className="text-sm text-muted-foreground pt-4">
+            {readOnlyNotice("add candidates")}
+          </p>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent className="w-full sm:max-w-lg flex flex-col gap-0 overflow-hidden">
@@ -125,7 +148,7 @@ export function AddCandidatePanel({ jobId, open, onOpenChange }: Props) {
               />
             </TabsContent>
             <TabsContent value="search" className="space-y-2 mt-4">
-              <SearchTab jobId={jobId} />
+              <SearchTab jobId={jobId} canWrite={canWrite} />
             </TabsContent>
           </Tabs>
           {tab !== "search" && (

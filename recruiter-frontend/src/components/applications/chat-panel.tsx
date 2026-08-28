@@ -17,7 +17,7 @@ interface Props {
   canWrite?: boolean;
 }
 
-export function ChatPanel({ applicationId, jobId, canWrite = true }: Props) {
+export function ChatPanel({ applicationId, jobId, canWrite = false }: Props) {
   const { messages, sendMessage, isStreaming, error, undo, searchResults } = useChat(applicationId);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);

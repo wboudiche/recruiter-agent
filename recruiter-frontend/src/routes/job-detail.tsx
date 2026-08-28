@@ -14,6 +14,7 @@ import { JobActionsMenu } from "@/components/jobs/job-actions-menu";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
 import { useCanWrite } from "@/hooks/use-current-user";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 const DENSITY_KEY = "kanban.density";
 
@@ -93,7 +94,7 @@ export default function JobDetail() {
       </header>
       {!canWrite && (
         <p className="text-xs text-muted-foreground">
-          Read-only access — ask an admin for a recruiter account to add or move candidates.
+          {readOnlyNotice("add or move candidates")}
         </p>
       )}
       <KanbanBoard
@@ -103,7 +104,12 @@ export default function JobDetail() {
         density={density}
         canWrite={canWrite}
       />
-      <AddCandidatePanel jobId={id} open={addOpen} onOpenChange={setAddOpen} />
+      <AddCandidatePanel
+        jobId={id}
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        canWrite={canWrite}
+      />
       <EditCriteriaSheet
         job={job.data}
         open={criteriaOpen}

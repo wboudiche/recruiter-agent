@@ -17,6 +17,7 @@ import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
 import { useCanWrite } from "@/hooks/use-current-user";
 import { useJob } from "@/hooks/use-job";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 export default function ApplicationDetail() {
   const { appId } = useParams<{ appId: string }>();
@@ -114,8 +115,7 @@ export default function ApplicationDetail() {
             // instead of a permission boundary — same reasoning as the
             // read-only note on the job board toolbar.
             <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">
-              Read-only access — ask an admin for a recruiter account to
-              submit this profile.
+              {readOnlyNotice("submit this profile")}
             </div>
           )
         ) : application.data.stage === "extracting"

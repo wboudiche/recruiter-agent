@@ -31,3 +31,13 @@ export function useCanWrite(): boolean {
   const me = useCurrentUser();
   return me.data ? me.data.role !== "viewer" : false;
 }
+
+/** True only once the role has actually resolved to viewer — false while
+ *  loading, so a real admin/recruiter never sees a "read-only" notice
+ *  flash before their role has loaded. `useCanWrite()` alone can't make
+ *  this distinction: both "still loading" and "is a viewer" read false. */
+export function useIsKnownViewer(): boolean {
+  const me = useCurrentUser();
+  const canWrite = useCanWrite();
+  return !me.isLoading && !canWrite;
+}

@@ -25,6 +25,7 @@ interface SearchResponse {
 
 interface Props {
   jobId: number;
+  canWrite?: boolean;
 }
 
 const SOURCES: Source[] = ["linkedin", "github", "web"];
@@ -38,7 +39,7 @@ const LIMIT_MIN = 1;
 const LIMIT_MAX = 30;
 const LIMIT_DEFAULT = 5;
 
-export function SearchTab({ jobId }: Props) {
+export function SearchTab({ jobId, canWrite = false }: Props) {
   const [selected, setSelected] = useState<Set<Source>>(new Set());
   const [query, setQuery] = useState("");
   const [limitPerSource, setLimitPerSource] = useState<number>(LIMIT_DEFAULT);
@@ -185,7 +186,12 @@ export function SearchTab({ jobId }: Props) {
 
       <div className="space-y-2">
         {data?.results.map((r) => (
-          <SearchResultCard key={`${r.source}:${r.url}`} result={r} jobId={jobId} />
+          <SearchResultCard
+            key={`${r.source}:${r.url}`}
+            result={r}
+            jobId={jobId}
+            canWrite={canWrite}
+          />
         ))}
       </div>
     </div>

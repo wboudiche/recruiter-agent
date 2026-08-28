@@ -30,8 +30,8 @@ function renderProfile(canWrite?: boolean) {
 // gated by the server-side allowlist the way chat is, so a viewer who
 // clicks them gets a 403.
 describe("CandidateProfile — edit affordances", () => {
-  it("offers Edit photo and Edit profile details to a recruiter (canWrite defaults true)", () => {
-    renderProfile();
+  it("offers Edit photo and Edit profile details to a recruiter", () => {
+    renderProfile(true);
     expect(screen.getByRole("button", { name: /edit photo/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /edit profile details/i })).toBeInTheDocument();
   });

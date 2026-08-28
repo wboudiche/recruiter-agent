@@ -46,7 +46,7 @@ function bundle(overrides = {}) {
   };
 }
 
-function renderSection(props: { applicationId: number; enrichment: unknown }) {
+function renderSection(props: { applicationId: number; enrichment: unknown; canWrite?: boolean }) {
   const qc = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -59,6 +59,7 @@ function renderSection(props: { applicationId: number; enrichment: unknown }) {
         applicationId={props.applicationId}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         enrichment={props.enrichment as any}
+        canWrite={props.canWrite}
       />
       <Toaster />
     </QueryClientProvider>,
@@ -104,7 +105,7 @@ describe("EnrichmentSection", () => {
     );
     server.listen();
     try {
-      renderSection({ applicationId: 1, enrichment: bundle() });
+      renderSection({ applicationId: 1, enrichment: bundle(), canWrite: true });
       await userEvent.click(
         screen.getByRole("button", { name: /re-enrich/i }),
       );
@@ -135,8 +136,8 @@ describe("EnrichmentSection", () => {
     expect(container.textContent).toBe("");
   });
 
-  it("offers Re-enrich now when canWrite is true (default)", () => {
-    renderSection({ applicationId: 1, enrichment: bundle() });
+  it("offers Re-enrich now when canWrite is true", () => {
+    renderSection({ applicationId: 1, enrichment: bundle(), canWrite: true });
     expect(screen.getByRole("button", { name: /re-enrich/i })).toBeInTheDocument();
   });
 

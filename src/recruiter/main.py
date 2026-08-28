@@ -81,6 +81,14 @@ app.add_middleware(
 # NOT applied to `app` directly: that would also gate /health (below),
 # which must answer liveness probes without ever touching the database.
 # See api/permissions.py for the policy.
+#
+# IMPORTANT — this guarantee only holds if EVERY new router is added here
+# via `_api_router.include_router(...)`, never `app.include_router(...)`
+# directly (the pattern used elsewhere in this file for non-API routes).
+# A router mounted on `app` bypasses the guard entirely and ships open to
+# viewers. `tests/api/test_viewer_matrix.py` enforces this at test time —
+# it is not enforced by the framework — so a new router with no matching
+# test coverage is the one way this can silently regress.
 _api_router = APIRouter(dependencies=[Depends(viewer_readonly_guard)])
 _api_router.include_router(jobs.router)
 _api_router.include_router(auth.router)

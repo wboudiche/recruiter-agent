@@ -22,6 +22,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCanWrite, useCurrentUser } from "@/hooks/use-current-user";
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 const Criterion = z.object({
   name: z.string().min(1, "Required"),
@@ -116,9 +117,7 @@ export default function JobsNew() {
     return (
       <div className="space-y-4 max-w-3xl">
         <h2 className="text-xl font-semibold">New job</h2>
-        <p className="text-sm text-muted-foreground">
-          Read-only access — ask an admin for a recruiter account to create jobs.
-        </p>
+        <p className="text-sm text-muted-foreground">{readOnlyNotice("create jobs")}</p>
         <Button type="button" variant="outline" onClick={() => navigate(-1)}>
           Back
         </Button>

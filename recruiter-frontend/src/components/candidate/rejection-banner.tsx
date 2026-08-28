@@ -14,7 +14,7 @@ interface Props {
  * the structured `rejection_reason` and offers an Unreject affordance
  * (rejected → scored, allowed by the backend). Returns null otherwise.
  */
-export function RejectionBanner({ application, canWrite = true }: Props) {
+export function RejectionBanner({ application, canWrite = false }: Props) {
   const m = useApplicationMutations(application.id, application.job_id);
   const [confirming, setConfirming] = useState(false);
 

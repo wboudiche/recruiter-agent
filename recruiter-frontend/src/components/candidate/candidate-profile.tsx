@@ -31,7 +31,7 @@ interface Props {
   canWrite?: boolean;
 }
 
-export function CandidateProfile({ candidate, canWrite = true }: Props) {
+export function CandidateProfile({ candidate, canWrite = false }: Props) {
   return (
     <section className="space-y-5">
       <ProfileHeader candidate={candidate} canWrite={canWrite} />

@@ -29,8 +29,8 @@ function renderBanner(canWrite?: boolean) {
 
 // Unreject PATCHes the application back to "scored" — a write.
 describe("RejectionBanner — Unreject", () => {
-  it("offers Unreject to a recruiter (canWrite defaults true)", () => {
-    renderBanner();
+  it("offers Unreject to a recruiter", () => {
+    renderBanner(true);
     expect(screen.getByRole("button", { name: /unreject/i })).toBeInTheDocument();
   });
 

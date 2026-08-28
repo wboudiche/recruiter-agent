@@ -89,7 +89,7 @@ describe("ChatPanel", () => {
         });
       }),
     );
-    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
+    render(<ChatPanel applicationId={1} jobId={1} canWrite />, { wrapper: wrap() });
     const button = await screen.findByRole("button", { name: /undo/i });
     await userEvent.click(button);
     await waitFor(() => expect(undoCalls).toBe(1));
@@ -175,7 +175,7 @@ describe("ChatPanel — tool.search_results rendering", () => {
     const Wrapper = wrap();
     render(
       <Wrapper>
-        <ChatPanel applicationId={42} jobId={1} />
+        <ChatPanel applicationId={42} jobId={1} canWrite />
       </Wrapper>,
     );
 

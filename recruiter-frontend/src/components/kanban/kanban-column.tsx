@@ -51,7 +51,7 @@ export function KanbanColumn({
   density = "comfortable",
   selected,
   onShiftClick,
-  canWrite = true,
+  canWrite = false,
 }: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${stage}`,

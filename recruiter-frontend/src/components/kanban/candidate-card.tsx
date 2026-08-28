@@ -33,7 +33,7 @@ export function CandidateCard({
   density = "comfortable",
   selected = false,
   onShiftClick,
-  canWrite = true,
+  canWrite = false,
 }: Props) {
   const isDraggable = draggable && canWrite && application.stage !== "extracting";
   const awaitingPaste = application.awaiting_paste;

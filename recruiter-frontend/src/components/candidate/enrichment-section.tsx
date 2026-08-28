@@ -30,7 +30,7 @@ export interface Bundle {
 export function EnrichmentSection({
   applicationId,
   enrichment,
-  canWrite = true,
+  canWrite = false,
 }: {
   applicationId: number;
   enrichment: Bundle | null;

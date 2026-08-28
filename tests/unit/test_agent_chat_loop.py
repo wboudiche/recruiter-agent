@@ -147,3 +147,31 @@ async def test_validate_tool_through_loop(db_session_with_schema: AsyncSession) 
     assert "undo_token" in result_event["result"]
     app = await db_session_with_schema.get(Application, app_id)
     assert app.stage.value == "validated"
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_matches_tools_for_role(db_session_with_schema: AsyncSession) -> None:
+    """The prompt's claimed capabilities must match `tools_for(role)` — a
+    viewer told it can validate/reject would attempt a tool call it was
+    never given."""
+    app_id = await _seed_app(db_session_with_schema)
+
+    viewer_llm = FakeLLMClient(tool_turn_responses=[AssistantTurn(text="ok", tool_calls=[])])
+    await _collect(run_turn(
+        session=db_session_with_schema, application_id=app_id,
+        user_message="hi", llm=viewer_llm, undo_store=InMemoryUndoStore(),
+        role=Role.VIEWER,
+    ))
+    viewer_system = viewer_llm.calls[0]["system"]
+    assert "read-only" in viewer_system
+    assert "validate or reject" not in viewer_system
+
+    recruiter_llm = FakeLLMClient(tool_turn_responses=[AssistantTurn(text="ok", tool_calls=[])])
+    await _collect(run_turn(
+        session=db_session_with_schema, application_id=app_id,
+        user_message="hi", llm=recruiter_llm, undo_store=InMemoryUndoStore(),
+        role=Role.RECRUITER,
+    ))
+    recruiter_system = recruiter_llm.calls[0]["system"]
+    assert "validate or reject" in recruiter_system
+    assert "read-only" not in recruiter_system

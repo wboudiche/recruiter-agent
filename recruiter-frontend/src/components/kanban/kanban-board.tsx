@@ -39,7 +39,7 @@ export function KanbanBoard({
   jobId,
   showRejected = false,
   density = "comfortable",
-  canWrite = true,
+  canWrite = false,
 }: Props) {
   const sensors = useSensors(useSensor(PointerSensor), useSensor(KeyboardSensor));
   const queryClient = useQueryClient();

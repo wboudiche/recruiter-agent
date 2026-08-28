@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import { Briefcase, ChevronRight, ListChecks, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { useCanWrite, useCurrentUser } from "@/hooks/use-current-user";
+import { useCanWrite, useIsKnownViewer } from "@/hooks/use-current-user";
 import { useJobs, type JobRead } from "@/hooks/use-jobs";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
   open:    { label: "Open",   cls: "stage-extracting" },  // amber → editorial accent
@@ -24,14 +25,11 @@ function formatRelative(iso: string): string {
 
 export default function JobsList() {
   const { data, isLoading, isError } = useJobs();
-  const me = useCurrentUser();
   const canWrite = useCanWrite();
-  // `canWrite` alone can't distinguish "role still loading" from "role
-  // resolved to viewer" — both read false. The New-job link correctly
-  // stays hidden either way (never flash it), but the explanatory note
-  // below needs the stronger condition so it doesn't appear for an
-  // admin/recruiter mid-fetch.
-  const knownViewer = !me.isLoading && !canWrite;
+  // The New-job link stays hidden either way (never flash it) via
+  // `canWrite` alone, but the explanatory note below needs the stronger
+  // `knownViewer` so it doesn't appear for an admin/recruiter mid-fetch.
+  const knownViewer = useIsKnownViewer();
   const [showClosed, setShowClosed] = useState(false);
 
   const { closedJobs, visibleJobs } = useMemo(() => {
@@ -86,7 +84,7 @@ export default function JobsList() {
           </p>
           {knownViewer && (
             <p className="text-xs text-muted-foreground mt-1">
-              Read-only access — ask an admin for a recruiter account to create jobs.
+              {readOnlyNotice("create jobs")}
             </p>
           )}
         </div>

@@ -14,6 +14,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 import type { JobRead } from "@/hooks/use-jobs";
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
   canWrite?: boolean;
 }
 
-export function EditJobDetailsSheet({ job, open, onOpenChange, canWrite = true }: Props) {
+export function EditJobDetailsSheet({ job, open, onOpenChange, canWrite = false }: Props) {
   const qc = useQueryClient();
   const [title, setTitle] = useState(job.title);
   const [description, setDescription] = useState(job.description);
@@ -64,7 +65,7 @@ export function EditJobDetailsSheet({ job, open, onOpenChange, canWrite = true }
           <SheetDescription>
             {canWrite
               ? "Update the title and the JD. Use the Criteria button to edit weighted criteria; this sheet doesn't touch them."
-              : "Read-only access — ask an admin for a recruiter account to edit the title or JD."}
+              : readOnlyNotice("edit the title or JD")}
           </SheetDescription>
         </SheetHeader>
 

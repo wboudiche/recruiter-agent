@@ -32,7 +32,7 @@ interface Props {
  * confirmation — so it's dropped from the menu entirely. Edit details
  * stays, but opens `EditJobDetailsSheet` in its read-only mode.
  */
-export function JobActionsMenu({ job, canWrite = true }: Props) {
+export function JobActionsMenu({ job, canWrite = false }: Props) {
   const qc = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
 

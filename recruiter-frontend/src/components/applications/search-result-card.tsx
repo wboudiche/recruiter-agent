@@ -28,7 +28,7 @@ const SOURCE_LABEL: Record<SearchResult["source"], string> = {
   web: "Web",
 };
 
-export function SearchResultCard({ result, jobId, canWrite = true }: Props) {
+export function SearchResultCard({ result, jobId, canWrite = false }: Props) {
   const qc = useQueryClient();
   const [added, setAdded] = useState(false);
   // Block aggregator / job-board URLs at the UI level: adding them creates

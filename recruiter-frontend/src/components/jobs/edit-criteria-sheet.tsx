@@ -15,6 +15,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 import type { CriteriaItem, JobRead } from "@/hooks/use-jobs";
 
 interface Props {
@@ -30,7 +31,7 @@ interface SuggestResponse {
 
 const DESCRIPTION_MIN_FOR_SUGGEST = 50;
 
-export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = true }: Props) {
+export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = false }: Props) {
   const qc = useQueryClient();
   // Editable working copy of the criteria. Initialised from the job when
   // the sheet opens, persisted on Save.
@@ -93,7 +94,7 @@ export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = true }: 
           <SheetDescription>
             {canWrite
               ? "Each candidate's score is a weighted average across these criteria. Weights should sum to 1.0 — if they don't, the backend will normalise them."
-              : "Read-only access — ask an admin for a recruiter account to edit criteria. Each candidate's score is a weighted average across these."}
+              : `${readOnlyNotice("edit criteria")} Each candidate's score is a weighted average across these.`}
           </SheetDescription>
         </SheetHeader>
 
@@ -160,7 +161,10 @@ export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = true }: 
                     onChange={(e) =>
                       update(idx, { weight: Number(e.target.value) })
                     }
-                    readOnly={!canWrite}
+                    // `disabled`, not `readOnly` — a number input's spinner
+                    // and scroll-wheel stepper ignore `readOnly` in most
+                    // browsers and would still change the displayed value.
+                    disabled={!canWrite}
                   />
                 </div>
                 {canWrite && (
