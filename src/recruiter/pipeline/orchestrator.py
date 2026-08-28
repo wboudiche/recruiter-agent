@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from recruiter.enrichment.pipeline import enrich
@@ -10,6 +11,7 @@ from recruiter.models import Application, Candidate, EventLog, Job, SettingsRow,
 from recruiter.pipeline.extractor import extract_candidate
 from recruiter.pipeline.router import RoutedInput
 from recruiter.pipeline.scorer import score_candidate
+from recruiter.schemas.candidate import EducationItem, ExperienceItem, LinkItem
 from recruiter.schemas.extraction import ExtractedCandidate
 from recruiter.schemas.job import CriteriaItem
 
@@ -105,6 +107,84 @@ async def re_enrich_application(
         "type": "stage", "application_id": application_id,
         "stage": (Stage.SCORED if app.score is not None else prior_stage).value,
     })
+
+
+async def rescore_applications_for_job(
+    *,
+    job_id: int,
+    engine: AsyncEngine,
+    llm: LLMClient,
+    bus: EventBus,
+) -> None:
+    """Recompute score/breakdown/rationale for every already-scored
+    application under `job_id`, against the job's current criteria.
+
+    Only touches applications that already have a score. One still mid-
+    pipeline (extracting/enriching, `score is None`) has nothing stale to
+    fix — it will score against the current criteria on its own once its
+    run reaches the scoring step. Runs against the persisted candidate
+    fields (no re-extraction, no re-enrichment) since only the criteria
+    changed, not the candidate's data.
+    """
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        job = await session.get(Job, job_id)
+        if job is None:
+            return
+        criteria = [CriteriaItem.model_validate(c) for c in (job.criteria or [])]
+
+        rows = (
+            await session.execute(
+                select(Application, Candidate)
+                .join(Candidate, Application.candidate_id == Candidate.id)
+                .where(Application.job_id == job_id, Application.score.is_not(None))
+            )
+        ).all()
+
+        for app, candidate in rows:
+            extracted = ExtractedCandidate(
+                full_name=candidate.full_name,
+                email=candidate.email,
+                phone=candidate.phone,
+                location=candidate.location,
+                headline=candidate.headline,
+                summary=candidate.summary,
+                skills=candidate.skills or [],
+                experience=[ExperienceItem.model_validate(e) for e in (candidate.experience or [])],
+                education=[EducationItem.model_validate(e) for e in (candidate.education or [])],
+                links=[LinkItem.model_validate(link) for link in (candidate.links or [])],
+            )
+            try:
+                score = await score_candidate(
+                    job_title=job.title,
+                    job_description=job.description,
+                    criteria=criteria,
+                    candidate=extracted,
+                    llm=llm,
+                )
+            except Exception as exc:
+                detail = _failure_detail(exc, phase="rescoring", application_id=app.id)
+                session.add(EventLog(
+                    application_id=app.id, event_type="score.failed", payload={"error": detail},
+                ))
+                await session.commit()
+                continue
+
+            app.score = score.score
+            app.score_breakdown = [item.model_dump() for item in score.breakdown]
+            app.score_rationale = score.rationale
+            session.add(EventLog(
+                application_id=app.id,
+                event_type="application.scored",
+                payload={"score": score.score},
+            ))
+            await session.commit()
+            await bus.publish({
+                "type": "stage",
+                "application_id": app.id,
+                "stage": app.stage.value,
+                "score": score.score,
+            })
 
 
 def _has_fresh_bundle(app: Application) -> bool:
