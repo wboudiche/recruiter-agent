@@ -121,6 +121,52 @@ async def test_search_raises_when_response_is_not_json() -> None:
     assert "json" in str(ei.value).lower()
 
 
+@pytest.mark.asyncio
+async def test_search_raises_transient_when_every_engine_is_blocked() -> None:
+    """SearXNG answers 200 with an empty list when its upstream engines are
+    rate-limited or CAPTCHA'd, which is indistinguishable from a genuinely
+    empty result set unless `unresponsive_engines` is read."""
+    handler = lambda req: httpx.Response(200, json={
+        "results": [],
+        "unresponsive_engines": [
+            ["google", "Suspended: too many requests"],
+            ["duckduckgo", "CAPTCHA"],
+            ["startpage", "Suspended: CAPTCHA"],
+        ],
+    })
+    p = _make_provider(httpx.MockTransport(handler))
+    with pytest.raises(SearchError) as ei:
+        await p.search("devops Tunisia", 5)
+    assert ei.value.transient is True
+    msg = str(ei.value)
+    assert "google" in msg and "duckduckgo" in msg
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_results_when_only_some_engines_are_blocked() -> None:
+    """Partial degradation is not a failure — one live engine is enough."""
+    handler = lambda req: httpx.Response(200, json={
+        "results": [
+            {"title": "Alice Doe | LinkedIn",
+             "url": "https://www.linkedin.com/in/alice/", "content": "SRE"},
+        ],
+        "unresponsive_engines": [["duckduckgo", "CAPTCHA"]],
+    })
+    p = _make_provider(httpx.MockTransport(handler))
+    results = await p.search("sre", 5)
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_when_nothing_matched_and_nothing_blocked() -> None:
+    """A real zero-result query must stay a zero-result query, not an error."""
+    handler = lambda req: httpx.Response(200, json={
+        "results": [], "unresponsive_engines": [],
+    })
+    p = _make_provider(httpx.MockTransport(handler))
+    assert await p.search("no such person anywhere", 5) == []
+
+
 def test_factory_raises_when_url_missing() -> None:
     import recruiter.sourcing  # noqa: F401
     from recruiter.sourcing.provider import resolve
