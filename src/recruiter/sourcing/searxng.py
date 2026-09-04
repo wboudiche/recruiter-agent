@@ -35,6 +35,8 @@ class SearXNGProvider:
         url = f"{self._base_url}/search"
         out: list[SearchResult] = []
         seen_urls: set[str] = set()
+        # engine name -> why it failed, accumulated across pages
+        blocked: dict[str, str] = {}
         for pageno in range(1, self._MAX_PAGES + 1):
             if len(out) >= limit:
                 break
@@ -69,6 +71,13 @@ class SearXNGProvider:
                     "searxng returned non-JSON; enable formats: [json] in settings.yml",
                     transient=False,
                 ) from e
+            # SearXNG reports per-engine failures here while still answering
+            # 200. Entries are [name, reason] pairs.
+            for entry in payload.get("unresponsive_engines") or []:
+                if isinstance(entry, (list, tuple)) and entry:
+                    blocked.setdefault(str(entry[0]), str(entry[1]) if len(entry) > 1 else "")
+                elif entry:
+                    blocked.setdefault(str(entry), "")
             items = payload.get("results") or []
             # Empty page means SearXNG has no more results — stop early
             # rather than burning more HTTP calls.
@@ -95,6 +104,23 @@ class SearXNGProvider:
                     snippet=it.get("content", "") or "",
                     source="web",
                 ))
+        # Nothing came back AND engines failed: SearXNG returns 200 with an
+        # empty list in that case, so without this the caller cannot tell a
+        # blocked instance from a query that genuinely matched nothing, and
+        # the UI reports "no results found" for what is really a transient
+        # upstream block. Partial degradation stays silent — if even one
+        # engine answered, the results are worth showing.
+        if not out and blocked:
+            detail = ", ".join(
+                f"{name} ({reason})" if reason else name
+                for name, reason in sorted(blocked.items())
+            )
+            raise SearchError(
+                f"every search engine is currently blocking this SearXNG "
+                f"instance — {detail}. Try again shortly, or configure a "
+                f"keyed provider in Settings → Sourcing.",
+                transient=True,
+            )
         return out
 
 

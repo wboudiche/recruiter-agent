@@ -87,6 +87,30 @@ describe("SearchTab", () => {
     expect(screen.getByText(/not configured/i)).toBeInTheDocument();
   });
 
+  it("gives the error banner a readable text colour", async () => {
+    // bg-yellow-50 is near-white; with no text colour the copy inherits the
+    // theme's cream foreground and lands at ~1.05:1 contrast — invisible.
+    server.use(
+      http.post("http://localhost:8000/api/sourcing/search", () =>
+        HttpResponse.json({
+          results: [],
+          errors: [{ source: "linkedin", reason: "every engine blocked", transient: true }],
+        }),
+      ),
+    );
+    const Wrapper = wrap();
+    render(<Wrapper><SearchTab jobId={1} /></Wrapper>);
+    fireEvent.click(screen.getByRole("button", { name: /^linkedin$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/senior rust/i), {
+      target: { value: "rust" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
+
+    const banner = (await screen.findByText(/every engine blocked/i)).closest("div")!;
+    expect(banner.className).toMatch(/bg-yellow-50/);
+    expect(banner.className).toMatch(/text-yellow-\d{3}/);
+  });
+
   it("renders 'No results found' empty state when both arrays are empty", async () => {
     server.use(
       http.post("http://localhost:8000/api/sourcing/search", () =>

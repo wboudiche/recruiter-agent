@@ -168,8 +168,12 @@ export function SearchTab({ jobId, canWrite = false }: Props) {
         </p>
       )}
 
+      {/* text-yellow-900 is load-bearing: the app renders permanently dark
+          (cream --foreground), so an unstyled banner inherits cream text onto
+          near-white bg-yellow-50 and disappears. The red banner above pairs
+          its colours the same way. */}
       {data?.errors && data.errors.length > 0 && (
-        <div className="border border-yellow-400 bg-yellow-50 rounded p-2 space-y-1 text-xs">
+        <div className="border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2 space-y-1 text-xs">
           {data.errors.map((e) => (
             <p key={e.source}>
               <span className="font-medium uppercase">{e.source}</span>: {e.reason}
