@@ -50,6 +50,68 @@ describe("ChatPanel", () => {
     expect(screen.getByText("hello")).toBeInTheDocument();
   });
 
+  it("renders a GFM table in an assistant message as a real table", async () => {
+    const table = [
+      "Overall score: 57 / 100",
+      "",
+      "| Criterion | Weight | Score |",
+      "|---|---|---|",
+      "| DevOps experience | 30% | 30 |",
+      "| Location fit | 10% | 100 |",
+    ].join("\n");
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/chat", () =>
+        HttpResponse.json([
+          { id: 1, application_id: 1, role: "assistant", content: table,
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:00Z" },
+        ]),
+      ),
+    );
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
+    await waitFor(() =>
+      expect(screen.getByRole("table")).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("columnheader", { name: "Criterion" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "DevOps experience" })).toBeInTheDocument();
+    // The pipe syntax must be consumed by the parser, not printed verbatim.
+    expect(screen.queryByText(/\|---\|/)).not.toBeInTheDocument();
+  });
+
+  it("styles the markdown elements the agent actually emits", async () => {
+    const md = [
+      "## Summary",
+      "",
+      "- Strong **Terraform** background",
+      "- Uses `kubectl` daily",
+      "",
+      "> Needs production Kubernetes proof.",
+    ].join("\n");
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/chat", () =>
+        HttpResponse.json([
+          { id: 1, application_id: 1, role: "assistant", content: md,
+            tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+            created_at: "2026-05-01T00:00:00Z" },
+        ]),
+      ),
+    );
+    render(<ChatPanel applicationId={1} jobId={1} />, { wrapper: wrap() });
+
+    // Tailwind preflight strips bullets and heading sizes, so the renderer has
+    // to put them back — `prose` classes alone never did (no typography plugin,
+    // and `dark:` never matches: the theme is dark via :root, not a .dark class).
+    const list = await screen.findByRole("list");
+    expect(list.className).toMatch(/list-disc/);
+    expect(screen.getByRole("heading", { name: "Summary" }).className)
+      .toMatch(/font-/);
+    expect(screen.getByText("kubectl").className).toMatch(/bg-muted/);
+    expect(
+      screen.getByText(/Needs production Kubernetes proof/).closest("blockquote")!
+        .className,
+    ).toMatch(/border-l/);
+  });
+
   it("renders a tool-call card collapsed by default and expands on click", async () => {
     server.use(
       http.get("http://localhost:8000/api/applications/1/chat", () =>

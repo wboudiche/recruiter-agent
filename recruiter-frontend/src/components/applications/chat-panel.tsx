@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -97,6 +98,111 @@ export function ChatPanel({ applicationId, jobId, canWrite = false }: Props) {
   );
 }
 
+/** Assistant replies are LLM markdown, and the agent leans on the full GFM
+ *  vocabulary — pipe tables for score breakdowns, bullets for strengths and
+ *  gaps, inline code for tool and command names.
+ *
+ *  Two things have to be supplied here. react-markdown parses CommonMark
+ *  only, which has no table syntax, so remark-gfm is what turns a pipe block
+ *  into a real <table> instead of a paragraph of literal `| a | b |` text.
+ *  And every element needs explicit classes: Tailwind preflight strips
+ *  bullets, heading sizes and quote indents, and the `prose` classes that
+ *  used to sit on the callers generated nothing — @tailwindcss/typography
+ *  isn't installed, and its `dark:prose-invert` could never have matched
+ *  anyway, since the theme is dark through :root variables rather than a
+ *  .dark class. Styling against the app's own tokens keeps chat replies in
+ *  the editorial palette instead of importing a second type system. */
+function Markdown({ children }: { children: string }) {
+  return (
+    <div className="text-sm leading-relaxed">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: (props) => <p className="[&:not(:first-child)]:mt-2" {...props} />,
+          /* `!` throughout: geist-theme styles `.geist-theme h1/h2/h3` as the
+             page-title display face (italic Fraunces, up to 3.25rem), and that
+             selector outranks a bare utility class. Unqualified, an agent's
+             `## ` sub-heading rendered at the same scale as the candidate's
+             name in a 340px-wide column. */
+          h1: (props) => (
+            <h1
+              className="mt-3 mb-1 !font-sans !text-sm !font-semibold !not-italic !tracking-normal first:mt-0"
+              {...props}
+            />
+          ),
+          h2: (props) => (
+            <h2
+              className="mt-3 mb-1 !font-sans !text-sm !font-semibold !not-italic !tracking-normal first:mt-0"
+              {...props}
+            />
+          ),
+          h3: (props) => (
+            <h3
+              className="mt-3 mb-1 !font-sans !text-xs !font-semibold !not-italic !uppercase !tracking-wide !text-muted-foreground first:mt-0"
+              {...props}
+            />
+          ),
+          ul: (props) => (
+            <ul
+              className="my-2 list-disc space-y-1 pl-5 marker:text-muted-foreground"
+              {...props}
+            />
+          ),
+          ol: (props) => (
+            <ol
+              className="my-2 list-decimal space-y-1 pl-5 marker:text-muted-foreground"
+              {...props}
+            />
+          ),
+          a: (props) => (
+            <a
+              className="underline underline-offset-2 decoration-border hover:decoration-foreground"
+              {...props}
+            />
+          ),
+          blockquote: (props) => (
+            <blockquote
+              className="my-2 border-l-2 border-border pl-3 italic text-muted-foreground"
+              {...props}
+            />
+          ),
+          hr: (props) => <hr className="my-3 border-border" {...props} />,
+          /* Inline code only — the `pre` override neutralises these classes
+             for fenced blocks, which react-markdown nests as <pre><code>. */
+          code: (props) => (
+            <code
+              className="rounded bg-muted/60 px-1 py-0.5 font-mono text-[0.85em]"
+              {...props}
+            />
+          ),
+          pre: (props) => (
+            <pre
+              className="my-2 overflow-x-auto rounded border border-border bg-muted/40 p-2 text-xs [&_code]:bg-transparent [&_code]:p-0"
+              {...props}
+            />
+          ),
+          table: (props) => (
+            <div className="my-2 overflow-x-auto">
+              <table className="w-full border-collapse text-xs" {...props} />
+            </div>
+          ),
+          th: (props) => (
+            <th
+              className="border border-border bg-muted/40 px-2 py-1 text-left font-medium"
+              {...props}
+            />
+          ),
+          td: (props) => (
+            <td className="border border-border px-2 py-1 align-top" {...props} />
+          ),
+        }}
+      >
+        {children}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
 function MessageRow({
   row, onUndo, searchResults, jobId, canWrite,
 }: {
@@ -117,18 +223,14 @@ function MessageRow({
   }
   if (row.role === "assistant" && !row.tool_calls) {
     return (
-      <div className="prose prose-sm max-w-none dark:prose-invert">
-        <ReactMarkdown>{row.content || ""}</ReactMarkdown>
-      </div>
+      <Markdown>{row.content || ""}</Markdown>
     );
   }
   if (row.role === "assistant" && row.tool_calls) {
     return (
       <div className="space-y-1">
         {row.content && (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown>{row.content}</ReactMarkdown>
-          </div>
+          <Markdown>{row.content}</Markdown>
         )}
         {row.tool_calls.map((tc) => (
           <Card key={tc.id} className="p-2 text-xs text-muted-foreground bg-muted/40">
