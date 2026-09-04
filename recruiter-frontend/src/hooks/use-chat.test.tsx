@@ -38,11 +38,27 @@ describe("useChat", () => {
   });
 
   it("streams a turn and appends events to messages", async () => {
+    // When a turn finishes the hook invalidates the history query, so the
+    // canonical rows are refetched over the optimistic ones. The GET therefore
+    // has to model a server that actually persisted the turn: one that always
+    // answers [] silently empties `messages` again, and the test becomes a race
+    // between these assertions and that refetch — a race a loaded CI runner
+    // loses ("expected [] to include 'hi'").
+    let turnPersisted = false;
+    const canonical = [
+      { id: 10, application_id: APP_ID, role: "user", content: "hi",
+        tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+        created_at: "2026-05-01T00:00:00Z" },
+      { id: 11, application_id: APP_ID, role: "assistant", content: "hello back",
+        tool_calls: null, tool_call_id: null, tool_name: null, tool_result: null,
+        created_at: "2026-05-01T00:00:01Z" },
+    ];
     server.use(
       http.get(`http://localhost:8000/api/applications/${APP_ID}/chat`, () =>
-        HttpResponse.json([]),
+        HttpResponse.json(turnPersisted ? canonical : []),
       ),
       http.post(`http://localhost:8000/api/applications/${APP_ID}/chat`, () => {
+        turnPersisted = true;
         const body = [
           { type: "message", role: "user", id: 10, content: "hi" },
           { type: "message_delta", text: "hello back" },
@@ -55,16 +71,19 @@ describe("useChat", () => {
     );
 
     const { result } = renderHook(() => useChat(APP_ID), { wrapper: wrap() });
-    await waitFor(() => expect(result.current.messages).toEqual([]));
 
     await act(async () => {
       await result.current.sendMessage("hi");
     });
 
     expect(result.current.isStreaming).toBe(false);
-    const texts = result.current.messages.map((m) => m.content);
-    expect(texts).toContain("hi");
-    expect(texts).toContain("hello back");
+    // waitFor, not a bare expect: the assertions must describe the settled
+    // state after the refetch lands, not whichever side won the race.
+    await waitFor(() => {
+      const texts = result.current.messages.map((m) => m.content);
+      expect(texts).toContain("hi");
+      expect(texts).toContain("hello back");
+    });
   });
 
   it("renders an error event into the error state", async () => {
