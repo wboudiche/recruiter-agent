@@ -47,8 +47,29 @@ RUN chmod +x /usr/local/bin/backend-entrypoint.sh
 
 # Playwright browser cache: shared system path readable by the app user.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN /app/.venv/bin/python -m playwright install --with-deps chromium \
-    && chmod -R o+rx /ms-playwright
+# --only-shell: every launch in this codebase is
+# `chromium.launch(headless=True)` with no channel (sourcing/linkedin_login.py,
+# pipeline/fetchers/linkedin_playwright.py), which Playwright >=1.49 serves
+# from chromium-headless-shell. The full browser was 369MB of image that
+# nothing ever executed, and downloading it was ~25 minutes of the build.
+#
+# Retried: this is the one step that reaches the public internet, and a single
+# transient DNS failure killed the whole layer —
+#   Error: getaddrinfo EAI_AGAIN cdn.playwright.dev
+# — after the download had already been running successfully for 25 minutes,
+# with BuildKit then discarding all of it. Three attempts make a blip cost
+# seconds instead of a rebuild.
+RUN set -eu; \
+    for attempt in 1 2 3; do \
+        if /app/.venv/bin/python -m playwright install --with-deps --only-shell chromium; then \
+            chmod -R o+rx /ms-playwright; \
+            exit 0; \
+        fi; \
+        echo "playwright install failed (attempt ${attempt}/3); retrying in 15s"; \
+        sleep 15; \
+    done; \
+    echo "playwright install failed after 3 attempts"; \
+    exit 1
 
 RUN mkdir -p /app/var/resumes && chown -R app:app /app
 USER app
