@@ -4,6 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  SecretField,
+  secretToPayload,
+  UNCHANGED,
+  type SecretValue,
+} from "./secret-field";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -27,16 +33,16 @@ export function SourcingTab() {
   const settings = useSettings();
   const update = useUpdateSettings();
   const [provider, setProvider] = useState<Provider | undefined>();
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState<SecretValue>(UNCHANGED);
   const [cseOrUrl, setCseOrUrl] = useState<string | undefined>();
-  const [ghToken, setGhToken] = useState("");
-  const [apifyKey, setApifyKey] = useState("");
+  const [ghToken, setGhToken] = useState<SecretValue>(UNCHANGED);
+  const [apifyKey, setApifyKey] = useState<SecretValue>(UNCHANGED);
   const [apifyActorId, setApifyActorId] = useState<string | undefined>();
 
   // Reset typed inputs whenever the active provider changes so a stale
   // value typed under a previous provider can't leak into the next save.
   useEffect(() => {
-    setApiKey("");
+    setApiKey(UNCHANGED);
     setCseOrUrl(undefined);
   }, [provider]);
 
@@ -62,20 +68,25 @@ export function SourcingTab() {
     } else if (cur.search_provider === null) {
       body.search_provider = effProvider;
     }
-    if (showApiKey && apiKey) body.search_api_key = apiKey;
+    if (showApiKey) {
+      const v = secretToPayload(apiKey);
+      if (v !== undefined) body.search_api_key = v;
+    }
     if ((showCseId || showInstanceUrl) && cseOrUrl !== undefined && cseOrUrl !== (cur.search_engine_id ?? "")) {
       body.search_engine_id = cseOrUrl;
     }
-    if (ghToken) body.github_token = ghToken;
-    if (apifyKey) body.apify_api_key = apifyKey;
+    const ghPayload = secretToPayload(ghToken);
+    if (ghPayload !== undefined) body.github_token = ghPayload;
+    const apifyPayload = secretToPayload(apifyKey);
+    if (apifyPayload !== undefined) body.apify_api_key = apifyPayload;
     if (apifyActorId !== undefined && apifyActorId !== (cur.apify_actor_id ?? "")) {
       body.apify_actor_id = apifyActorId;
     }
     update.mutate(body, {
       onSuccess: () => {
-        setApiKey("");
-        setGhToken("");
-        setApifyKey("");
+        setApiKey(UNCHANGED);
+        setGhToken(UNCHANGED);
+        setApifyKey(UNCHANGED);
         setApifyActorId(undefined);
         toast.success("Sourcing settings saved");
       },
@@ -134,24 +145,20 @@ export function SourcingTab() {
       </div>
 
       {showApiKey && (
-        <div className="space-y-2">
-          <Label htmlFor="sourcing-api-key">API key</Label>
-          <Input
-            id="sourcing-api-key"
-            type="password"
-            placeholder={
-              cur.has_search_api_key
-                ? "•••••• (set)"
-                : effProvider === "brave"
-                  ? "brv_…"
-                  : effProvider === "serpapi"
-                    ? "serpapi key"
-                    : "AIza…"
-            }
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-        </div>
+        <SecretField
+          id="sourcing-api-key"
+          label="API key"
+          isSet={cur.has_search_api_key}
+          value={apiKey}
+          onChange={setApiKey}
+          unsetPlaceholder={
+            effProvider === "brave"
+              ? "brv_…"
+              : effProvider === "serpapi"
+                ? "serpapi key"
+                : "AIza…"
+          }
+        />
       )}
 
       {showCseId && (
@@ -178,51 +185,41 @@ export function SourcingTab() {
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor="sourcing-gh-token">GitHub personal access token (optional)</Label>
-        <Input
-          id="sourcing-gh-token"
-          type="password"
-          placeholder={
-            cur.has_github_token ? "•••••• (set)" : "ghp_… (raises rate limit)"
-          }
-          value={ghToken}
-          onChange={(e) => setGhToken(e.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">
-          GitHub search works without a token but is limited to 60 requests/hour.
-        </p>
-      </div>
+      <SecretField
+        id="sourcing-gh-token"
+        label="GitHub personal access token (optional)"
+        isSet={cur.has_github_token}
+        value={ghToken}
+        onChange={setGhToken}
+        unsetPlaceholder="ghp_… (raises rate limit)"
+        help="GitHub search works without a token but is limited to 60 requests/hour."
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="sourcing-apify">
-          Apify API token (optional, commercial LinkedIn extraction)
-        </Label>
-        <Input
-          id="sourcing-apify"
-          type="password"
-          placeholder={
-            cur.has_apify_api_key ? "•••••• (set)" : "apify_api_… (from apify.com)"
-          }
-          value={apifyKey}
-          onChange={(e) => setApifyKey(e.target.value)}
-        />
-        <p className="text-xs text-muted-foreground leading-snug">
-          When set, LinkedIn URL adds route through Apify first
-          (~$0.01/profile, reliable, no anti-bot fight) with the Playwright
-          path as fallback. Without it, Playwright is used directly. Sign
-          up at{" "}
-          <a
-            href="https://apify.com"
-            target="_blank"
-            rel="noreferrer"
-            className="underline"
-          >
-            apify.com
-          </a>
-          .
-        </p>
-      </div>
+      <SecretField
+        id="sourcing-apify"
+        label="Apify API token (optional, commercial LinkedIn extraction)"
+        isSet={cur.has_apify_api_key}
+        value={apifyKey}
+        onChange={setApifyKey}
+        unsetPlaceholder="apify_api_… (from apify.com)"
+        help={
+          <span className="leading-snug">
+            When set, LinkedIn URL adds route through Apify first
+            (~$0.01/profile, reliable, no anti-bot fight) with the Playwright
+            path as fallback. Without it, Playwright is used directly. Sign
+            up at{" "}
+            <a
+              href="https://apify.com"
+              target="_blank"
+              rel="noreferrer"
+              className="underline"
+            >
+              apify.com
+            </a>
+            .
+          </span>
+        }
+      />
 
       <div className="space-y-2">
         <Label htmlFor="sourcing-apify-actor">

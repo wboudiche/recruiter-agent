@@ -3,6 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  SecretField,
+  secretToPayload,
+  UNCHANGED,
+  type SecretValue,
+} from "./secret-field";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -24,10 +30,10 @@ export function LlmTab() {
   const settings = useSettings();
   const update = useUpdateSettings();
   const [provider, setProvider] = useState<string | undefined>();
-  const [anthropicKey, setAnthropicKey] = useState("");
+  const [anthropicKey, setAnthropicKey] = useState<SecretValue>(UNCHANGED);
   const [anthropicModel, setAnthropicModel] = useState<string | undefined>();
   const [localUrl, setLocalUrl] = useState<string | undefined>();
-  const [localKey, setLocalKey] = useState("");
+  const [localKey, setLocalKey] = useState<SecretValue>(UNCHANGED);
   const [localModel, setLocalModel] = useState<string | undefined>();
 
   if (settings.isLoading) return <p>Loading…</p>;
@@ -46,13 +52,15 @@ export function LlmTab() {
     const body: Record<string, unknown> = {};
     if (provider !== undefined && provider !== current.default_llm_provider)
       body.default_llm_provider = provider;
-    if (anthropicKey) body.anthropic_api_key = anthropicKey;
+    const anthropicPayload = secretToPayload(anthropicKey);
+    if (anthropicPayload !== undefined) body.anthropic_api_key = anthropicPayload;
     if (
       localUrl !== undefined &&
       localUrl !== (current.local_llm_url ?? "")
     )
       body.local_llm_url = localUrl;
-    if (localKey) body.local_llm_api_key = localKey;
+    const localKeyPayload = secretToPayload(localKey);
+    if (localKeyPayload !== undefined) body.local_llm_api_key = localKeyPayload;
 
     const nextOverrides: Record<string, string> = { ...currentOverrides };
     let overridesDirty = false;
@@ -70,8 +78,8 @@ export function LlmTab() {
 
     update.mutate(body, {
       onSuccess: () => {
-        setAnthropicKey("");
-        setLocalKey("");
+        setAnthropicKey(UNCHANGED);
+        setLocalKey(UNCHANGED);
       },
     });
   }
@@ -93,17 +101,14 @@ export function LlmTab() {
 
       {effProvider === "anthropic" && (
         <>
-          <div className="space-y-2">
-            <Label>Anthropic API key</Label>
-            <Input
-              type="password"
-              placeholder={
-                current.has_anthropic_api_key ? "•••••• (set)" : "sk-ant-…"
-              }
-              value={anthropicKey}
-              onChange={(e) => setAnthropicKey(e.target.value)}
-            />
-          </div>
+          <SecretField
+            id="llm-anthropic-key"
+            label="Anthropic API key"
+            isSet={current.has_anthropic_api_key}
+            value={anthropicKey}
+            onChange={setAnthropicKey}
+            unsetPlaceholder="sk-ant-…"
+          />
           <div className="space-y-2">
             <Label>Model</Label>
             <Input
@@ -137,23 +142,15 @@ export function LlmTab() {
               onChange={(e) => setLocalUrl(e.target.value)}
             />
           </div>
-          <div className="space-y-2">
-            <Label>Local LLM API key (optional)</Label>
-            <Input
-              type="password"
-              placeholder={
-                current.has_local_llm_api_key
-                  ? "•••••• (set)"
-                  : "leave blank for unauthenticated local servers"
-              }
-              value={localKey}
-              onChange={(e) => setLocalKey(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Required for hosted endpoints like ai.linagora.com or OpenRouter.
-              Skip for true-local Ollama / vLLM.
-            </p>
-          </div>
+          <SecretField
+            id="llm-local-key"
+            label="Local LLM API key (optional)"
+            isSet={current.has_local_llm_api_key}
+            value={localKey}
+            onChange={setLocalKey}
+            unsetPlaceholder="leave blank for unauthenticated local servers"
+            help="Required for hosted endpoints like ai.linagora.com or OpenRouter. Skip for true-local Ollama / vLLM."
+          />
           <div className="space-y-2">
             <Label>Model</Label>
             <Input

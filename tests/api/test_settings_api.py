@@ -70,3 +70,50 @@ async def test_get_settings_defaults_search_unset(api_client: AsyncClient) -> No
     assert body["search_engine_id"] is None
     assert body["has_search_api_key"] is False
     assert body["has_github_token"] is False
+
+
+# --- revoking stored credentials -----------------------------------------
+# Until these, a stored secret could only ever be overwritten, never removed:
+# the UI omits blank fields and the API only ever wrote a value. A key you
+# decided to stop trusting was stuck in the database.
+
+SECRET_FIELDS = [
+    ("anthropic_api_key", "has_anthropic_api_key"),
+    ("local_llm_api_key", "has_local_llm_api_key"),
+    ("search_api_key", "has_search_api_key"),
+    ("github_token", "has_github_token"),
+    ("apify_api_key", "has_apify_api_key"),
+    ("enrichment_twitter_api_key", "has_enrichment_twitter_api_key"),
+    ("enrichment_youtube_api_key", "has_enrichment_youtube_api_key"),
+    ("enrichment_stackexchange_key", "has_enrichment_stackexchange_key"),
+]
+
+
+@pytest.mark.parametrize("field,has_flag", SECRET_FIELDS)
+@pytest.mark.asyncio
+async def test_empty_string_revokes_stored_secret(
+    api_client: AsyncClient, field: str, has_flag: str,
+) -> None:
+    stored = await api_client.put("/api/settings", json={field: "some-secret-value"})
+    assert stored.status_code == 200
+    assert stored.json()[has_flag] is True
+
+    revoked = await api_client.put("/api/settings", json={field: ""})
+    assert revoked.status_code == 200
+    assert revoked.json()[has_flag] is False, f"{field} was not revoked"
+
+    # and it stays gone across a fresh read
+    assert (await api_client.get("/api/settings")).json()[has_flag] is False
+
+
+@pytest.mark.parametrize("field,has_flag", SECRET_FIELDS)
+@pytest.mark.asyncio
+async def test_omitting_a_secret_leaves_it_untouched(
+    api_client: AsyncClient, field: str, has_flag: str,
+) -> None:
+    """The counterpart guard: saving unrelated settings must not wipe keys."""
+    await api_client.put("/api/settings", json={field: "some-secret-value"})
+
+    resp = await api_client.put("/api/settings", json={"recruiter_name": "Walid"})
+    assert resp.status_code == 200
+    assert resp.json()[has_flag] is True, f"{field} was clobbered by an unrelated save"

@@ -109,6 +109,39 @@ describe("SourcingTab — multi-provider", () => {
     expect(screen.queryByLabelText(/Instance URL/i)).not.toBeInTheDocument();
   });
 
+  it("Clear on a stored GitHub token sends an explicit empty string", async () => {
+    // "" is the API's revoke signal. Omitting the field means "unchanged",
+    // which is why a dead credential used to be impossible to remove.
+    const cap: any = {};
+    mockSettingsRoutes(defaultSettings({ has_github_token: true }), cap);
+    renderTab();
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^GitHub personal access token \(optional\)$/i)).toBeInTheDocument(),
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /clear github personal access token/i }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(cap.lastBody).toBeDefined());
+    expect(cap.lastBody.github_token).toBe("");
+  });
+
+  it("an unrelated save leaves a stored GitHub token alone", async () => {
+    const cap: any = {};
+    mockSettingsRoutes(defaultSettings({ has_github_token: true }), cap);
+    renderTab();
+    await waitFor(() =>
+      expect(screen.getByLabelText(/^GitHub personal access token \(optional\)$/i)).toBeInTheDocument(),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(cap.lastBody).toBeDefined());
+    expect(cap.lastBody).not.toHaveProperty("github_token");
+  });
+
   it("save while SerpAPI is selected sends only search_provider + search_api_key", async () => {
     const cap: any = {};
     mockSettingsRoutes(defaultSettings(), cap);
