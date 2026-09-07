@@ -78,7 +78,7 @@ describe("EnrichmentTab", () => {
     const cap: { lastBody?: any } = {};
     mockRoutes(defaults({ has_enrichment_twitter_api_key: true }), cap);
     renderTab();
-    const twKey = await screen.findByLabelText(/Twitter.*API key/i);
+    const twKey = await screen.findByLabelText(/^Twitter \/ X API key$/i);
     expect(twKey).toHaveAttribute("placeholder", expect.stringContaining("(set)"));
   });
 
@@ -97,7 +97,7 @@ describe("EnrichmentTab", () => {
     const cap: { lastBody?: any } = {};
     mockRoutes(defaults({ enrichment_enabled: true }), cap);
     renderTab();
-    const tk = await screen.findByLabelText(/Twitter.*API key/i);
+    const tk = await screen.findByLabelText(/^Twitter \/ X API key$/i);
     await userEvent.type(tk, "tk-abc");
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(cap.lastBody).toBeDefined());

@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  SecretField,
+  secretToPayload,
+  UNCHANGED,
+  type SecretValue,
+} from "./secret-field";
 import { ApiError } from "@/lib/api";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 
@@ -24,9 +29,9 @@ export function EnrichmentTab() {
   const update = useUpdateSettings();
 
   const [enabled, setEnabled] = useState<boolean | undefined>();
-  const [twKey, setTwKey] = useState("");
-  const [ytKey, setYtKey] = useState("");
-  const [seKey, setSeKey] = useState("");
+  const [twKey, setTwKey] = useState<SecretValue>(UNCHANGED);
+  const [ytKey, setYtKey] = useState<SecretValue>(UNCHANGED);
+  const [seKey, setSeKey] = useState<SecretValue>(UNCHANGED);
   const [sourceMap, setSourceMap] = useState<Record<string, boolean> | undefined>();
 
   useEffect(() => {
@@ -49,15 +54,18 @@ export function EnrichmentTab() {
   function save() {
     const body: Record<string, unknown> = {};
     if (enabled !== undefined && enabled !== cur.enrichment_enabled) body.enrichment_enabled = enabled;
-    if (twKey) body.enrichment_twitter_api_key = twKey;
-    if (ytKey) body.enrichment_youtube_api_key = ytKey;
-    if (seKey) body.enrichment_stackexchange_key = seKey;
+    const twKeyPayload = secretToPayload(twKey);
+    if (twKeyPayload !== undefined) body.enrichment_twitter_api_key = twKeyPayload;
+    const ytKeyPayload = secretToPayload(ytKey);
+    if (ytKeyPayload !== undefined) body.enrichment_youtube_api_key = ytKeyPayload;
+    const seKeyPayload = secretToPayload(seKey);
+    if (seKeyPayload !== undefined) body.enrichment_stackexchange_key = seKeyPayload;
     if (sourceMap !== undefined) body.enrichment_sources = sourceMap;
     update.mutate(body, {
       onSuccess: () => {
-        setTwKey("");
-        setYtKey("");
-        setSeKey("");
+        setTwKey(UNCHANGED);
+        setYtKey(UNCHANGED);
+        setSeKey(UNCHANGED);
         toast.success("Enrichment settings saved");
       },
       onError: (err) => toast.error(err instanceof ApiError ? err.detail : "Save failed"),
@@ -81,40 +89,34 @@ export function EnrichmentTab() {
         Per-job consent is still required for discovery and Twitter/X.
       </p>
 
-      <div className="space-y-2">
-        <Label htmlFor="tw-key">Twitter / X API key</Label>
-        <Input
-          id="tw-key"
-          type="password"
-          placeholder={cur.has_enrichment_twitter_api_key ? "•••••• (set)" : "X API v2 Basic bearer"}
-          value={twKey}
-          onChange={(e) => setTwKey(e.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">X API Basic tier required (~$200/month).</p>
-      </div>
+      <SecretField
+        id="tw-key"
+        label="Twitter / X API key"
+        isSet={cur.has_enrichment_twitter_api_key}
+        value={twKey}
+        onChange={setTwKey}
+        unsetPlaceholder="X API v2 Basic bearer"
+        help="X API Basic tier required (~$200/month)."
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="yt-key">YouTube API key</Label>
-        <Input
-          id="yt-key"
-          type="password"
-          placeholder={cur.has_enrichment_youtube_api_key ? "•••••• (set)" : "AIza…"}
-          value={ytKey}
-          onChange={(e) => setYtKey(e.target.value)}
-        />
-        <p className="text-xs text-muted-foreground">Free 10,000 units/day from Google Cloud.</p>
-      </div>
+      <SecretField
+        id="yt-key"
+        label="YouTube API key"
+        isSet={cur.has_enrichment_youtube_api_key}
+        value={ytKey}
+        onChange={setYtKey}
+        unsetPlaceholder="AIza…"
+        help="Free 10,000 units/day from Google Cloud."
+      />
 
-      <div className="space-y-2">
-        <Label htmlFor="se-key">Stack Exchange key (optional)</Label>
-        <Input
-          id="se-key"
-          type="password"
-          placeholder={cur.has_enrichment_stackexchange_key ? "•••••• (set)" : "raises 300/d → 10k/d"}
-          value={seKey}
-          onChange={(e) => setSeKey(e.target.value)}
-        />
-      </div>
+      <SecretField
+        id="se-key"
+        label="Stack Exchange key (optional)"
+        isSet={cur.has_enrichment_stackexchange_key}
+        value={seKey}
+        onChange={setSeKey}
+        unsetPlaceholder="raises 300/d → 10k/d"
+      />
 
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium">Sources</legend>

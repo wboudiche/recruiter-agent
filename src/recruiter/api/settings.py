@@ -67,6 +67,24 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
     return _to_read(row)
 
 
+def _apply_secret(row: SettingsRow, attr: str, value: str | None, cipher) -> None:
+    """Write one encrypted credential, honouring three distinct states.
+
+    None  -> the client omitted the field: leave whatever is stored alone, so
+             saving unrelated settings never clobbers a key.
+    ""    -> an explicit revoke: drop the credential entirely (NULL), the same
+             end state `/linkedin/disconnect` produces for the LinkedIn cookie.
+    other -> store it encrypted.
+
+    Without the "" case a stored secret could only ever be overwritten, never
+    removed — the UI omits blank fields — so a key you had decided to stop
+    trusting was stuck in the database with no way out.
+    """
+    if value is None:
+        return
+    setattr(row, attr, cipher.encrypt(value) if value else None)
+
+
 @router.put("", response_model=SettingsRead)
 async def update_settings(
     payload: SettingsUpdate,
@@ -77,12 +95,10 @@ async def update_settings(
     cipher = _cipher()
     if payload.default_llm_provider is not None:
         row.default_llm_provider = payload.default_llm_provider
-    if payload.anthropic_api_key is not None:
-        row.anthropic_api_key_enc = cipher.encrypt(payload.anthropic_api_key)
+    _apply_secret(row, "anthropic_api_key_enc", payload.anthropic_api_key, cipher)
     if payload.local_llm_url is not None:
         row.local_llm_url = payload.local_llm_url
-    if payload.local_llm_api_key is not None:
-        row.local_llm_api_key_enc = cipher.encrypt(payload.local_llm_api_key)
+    _apply_secret(row, "local_llm_api_key_enc", payload.local_llm_api_key, cipher)
     if payload.model_overrides is not None:
         row.model_overrides = payload.model_overrides
     if payload.smtp_config is not None:
@@ -107,29 +123,21 @@ async def update_settings(
         row.monthly_llm_spend_cap_usd = payload.monthly_llm_spend_cap_usd
     if payload.search_provider is not None:
         row.search_provider = payload.search_provider
-    if payload.search_api_key is not None:
-        row.search_api_key_enc = cipher.encrypt(payload.search_api_key)
+    _apply_secret(row, "search_api_key_enc", payload.search_api_key, cipher)
     if payload.search_engine_id is not None:
         row.search_engine_id = payload.search_engine_id
-    if payload.github_token is not None:
-        row.github_token_enc = cipher.encrypt(payload.github_token)
-    if payload.apify_api_key is not None:
-        row.apify_api_key_enc = (
-            cipher.encrypt(payload.apify_api_key)
-            if payload.apify_api_key
-            else None
-        )
+    _apply_secret(row, "github_token_enc", payload.github_token, cipher)
+    _apply_secret(row, "apify_api_key_enc", payload.apify_api_key, cipher)
     if payload.apify_actor_id is not None:
         # Empty string → reset to NULL (caller falls back to default).
         row.apify_actor_id = payload.apify_actor_id.strip() or None
     if payload.enrichment_enabled is not None:
         row.enrichment_enabled = payload.enrichment_enabled
-    if payload.enrichment_twitter_api_key is not None:
-        row.enrichment_twitter_api_key_enc = cipher.encrypt(payload.enrichment_twitter_api_key)
-    if payload.enrichment_youtube_api_key is not None:
-        row.enrichment_youtube_api_key_enc = cipher.encrypt(payload.enrichment_youtube_api_key)
-    if payload.enrichment_stackexchange_key is not None:
-        row.enrichment_stackexchange_key_enc = cipher.encrypt(payload.enrichment_stackexchange_key)
+    _apply_secret(row, "enrichment_twitter_api_key_enc", payload.enrichment_twitter_api_key, cipher)
+    _apply_secret(row, "enrichment_youtube_api_key_enc", payload.enrichment_youtube_api_key, cipher)
+    _apply_secret(
+        row, "enrichment_stackexchange_key_enc", payload.enrichment_stackexchange_key, cipher
+    )
     if payload.enrichment_sources is not None:
         row.enrichment_sources = payload.enrichment_sources
     await session.commit()
