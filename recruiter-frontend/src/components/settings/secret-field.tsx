@@ -10,11 +10,16 @@ export const REVOKED = Symbol("revoked");
 
 export type SecretValue = typeof UNCHANGED | typeof REVOKED | string;
 
-/** Serialise for the request body: `undefined` means "leave this key out". */
+/** Serialise for the request body: `undefined` means "leave this key out".
+ *
+ *  A typed value is trimmed, and a whitespace-only entry serialises to
+ *  `undefined` rather than to the empty string: since "" now means revoke, a
+ *  stray space would otherwise delete a credential. Deleting one is what the
+ *  Clear button is for, and that path is deliberately two-step. */
 export function secretToPayload(value: SecretValue): string | undefined {
   if (value === UNCHANGED) return undefined;
   if (value === REVOKED) return "";
-  return value || undefined;
+  return value.trim() || undefined;
 }
 
 interface Props {

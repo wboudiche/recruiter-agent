@@ -142,6 +142,31 @@ describe("SourcingTab — multi-provider", () => {
     expect(cap.lastBody).not.toHaveProperty("github_token");
   });
 
+  it("offers no Clear for a provider that never stored the key", async () => {
+    // has_search_api_key is one column shared by every provider, so under a
+    // different provider it describes someone else's key. Offering Clear there
+    // invites deleting the Google key while looking at Brave. The component
+    // already scopes search_engine_id this way via persistedRelevant.
+    mockSettingsRoutes(
+      defaultSettings({ search_provider: "google_cse", has_search_api_key: true }),
+      {},
+    );
+    renderTab();
+    await waitFor(() => expect(screen.getByLabelText(/CSE ID/i)).toBeInTheDocument());
+
+    // Under the stored provider, Clear is legitimate.
+    expect(
+      screen.getByRole("button", { name: /clear api key/i }),
+    ).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("combobox", { name: /provider/i }));
+    await userEvent.click(screen.getByRole("option", { name: /brave/i }));
+
+    expect(
+      screen.queryByRole("button", { name: /clear api key/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("save while SerpAPI is selected sends only search_provider + search_api_key", async () => {
     const cap: any = {};
     mockSettingsRoutes(defaultSettings(), cap);

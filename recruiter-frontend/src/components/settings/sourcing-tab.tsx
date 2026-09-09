@@ -148,7 +148,11 @@ export function SourcingTab() {
         <SecretField
           id="sourcing-api-key"
           label="API key"
-          isSet={cur.has_search_api_key}
+          // Scoped by persistedRelevant for the same reason effCseOrUrl is: one
+          // column serves every provider, so under a different provider it
+          // describes someone else's key. Unscoped, Brave showed "(set)" and a
+          // Clear button that deleted the Google CSE key.
+          isSet={persistedRelevant && cur.has_search_api_key}
           value={apiKey}
           onChange={setApiKey}
           unsetPlaceholder={

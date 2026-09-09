@@ -1,7 +1,12 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
-import { SecretField, type SecretValue, UNCHANGED, REVOKED } from "./secret-field";
+import {
+  SecretField,
+  secretToPayload,
+  type SecretValue,
+  UNCHANGED,
+} from "./secret-field";
 
 /** Mirrors how a settings tab drives the field: it owns the value and reads
  *  it back at submit time. */
@@ -17,8 +22,15 @@ function Harness({ isSet }: { isSet: boolean }) {
         onChange={setValue}
         unsetPlaceholder="ghp_…"
       />
+      {/* Mirrors what a settings tab puts in the request body, so these tests
+          describe the payload rather than the component's internal state. */}
       <output data-testid="submitted">
-        {value === UNCHANGED ? "<omitted>" : value === REVOKED ? "<empty-string>" : value}
+        {(() => {
+          const payload = secretToPayload(value);
+          if (payload === undefined) return "<omitted>";
+          if (payload === "") return "<empty-string>";
+          return payload;
+        })()}
       </output>
     </>
   );
@@ -59,6 +71,16 @@ describe("SecretField", () => {
     render(<Harness isSet />);
     fireEvent.click(screen.getByRole("button", { name: /clear/i }));
     fireEvent.click(screen.getByRole("button", { name: /undo/i }));
+    expect(screen.getByTestId("submitted")).toHaveTextContent("<omitted>");
+  });
+
+  it("treats a whitespace-only entry as untouched, not as a revoke", () => {
+    // A stray space must not delete a credential. Revoking is what the Clear
+    // button is for, and it is deliberately two-step.
+    render(<Harness isSet />);
+    fireEvent.change(screen.getByLabelText(/^github token$/i), {
+      target: { value: "   " },
+    });
     expect(screen.getByTestId("submitted")).toHaveTextContent("<omitted>");
   });
 

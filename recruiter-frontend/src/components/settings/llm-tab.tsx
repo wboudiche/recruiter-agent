@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,16 @@ export function LlmTab() {
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [localKey, setLocalKey] = useState<SecretValue>(UNCHANGED);
   const [localModel, setLocalModel] = useState<string | undefined>();
+
+  // Switching provider unmounts the other provider's secret field, taking its
+  // "will be removed on save" warning with it — but the pending state lived on
+  // and Save still sent the revoke, deleting a credential with nothing on
+  // screen to say so. sourcing-tab.tsx guards the same way for typed values;
+  // once a blank field can mean "delete", the leak stops being harmless.
+  useEffect(() => {
+    setAnthropicKey(UNCHANGED);
+    setLocalKey(UNCHANGED);
+  }, [provider]);
 
   if (settings.isLoading) return <p>Loading…</p>;
   if (!settings.data) return <p>No settings.</p>;
@@ -87,9 +97,9 @@ export function LlmTab() {
   return (
     <div className="space-y-4 max-w-md">
       <div className="space-y-2">
-        <Label>Provider</Label>
+        <Label htmlFor="llm-provider">Provider</Label>
         <Select value={effProvider} onValueChange={setProvider}>
-          <SelectTrigger>
+          <SelectTrigger id="llm-provider" aria-label="Provider">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
