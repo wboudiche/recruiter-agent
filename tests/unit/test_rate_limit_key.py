@@ -73,3 +73,43 @@ def test_a_missing_client_does_not_crash() -> None:
     request.scope = {"type": "http", "client": None, "headers": []}
 
     assert isinstance(client_key(request), str)
+
+
+# --- login rate limit is configurable ------------------------------------
+# It was hardcoded at "5/minute" on both password endpoints while
+# chat_rate_limit was
+# already a config value. That asymmetry is arbitrary, and it made the e2e
+# suite's login burst untunable for CI.
+
+
+def test_auth_rate_limit_defaults_to_five_per_minute(monkeypatch) -> None:
+    """The default must not change: it is a brute-force control."""
+    from recruiter.api.rate_limit import auth_rate_limit
+
+    assert auth_rate_limit() == "5/minute"
+
+
+def test_auth_rate_limit_reads_config(monkeypatch) -> None:
+    from recruiter.api import rate_limit
+    from recruiter.config import get_config
+
+    monkeypatch.setenv("RECRUITER_AUTH_RATE_LIMIT", "50/minute")
+    get_config.cache_clear()
+    try:
+        assert rate_limit.auth_rate_limit() == "50/minute"
+    finally:
+        get_config.cache_clear()
+
+
+def test_auth_rate_limit_empty_value_does_not_disable_protection(monkeypatch) -> None:
+    """An empty value must fall back to the default, never to unlimited —
+    a blank env var should not silently remove brute-force protection."""
+    from recruiter.api import rate_limit
+    from recruiter.config import get_config
+
+    monkeypatch.setenv("RECRUITER_AUTH_RATE_LIMIT", "")
+    get_config.cache_clear()
+    try:
+        assert rate_limit.auth_rate_limit() == "5/minute"
+    finally:
+        get_config.cache_clear()

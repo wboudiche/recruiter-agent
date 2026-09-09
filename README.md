@@ -130,6 +130,7 @@ env wins so dev overrides work.
 | `RECRUITER_DEV_AUTH_BYPASS` | Email that auto-logs-in without password. **Never set in production.** |
 | `RECRUITER_OIDC_*` | Google OIDC sign-in (`ISSUER`, `CLIENT_ID`, `CLIENT_SECRET`, `REDIRECT_URI`). Empty issuer disables. |
 | `RECRUITER_LOG_LEVEL` | Default `INFO`. |
+| `RECRUITER_AUTH_RATE_LIMIT` | Throttle on the password endpoints (login, change password). Default `5/minute`; an empty value keeps that default rather than disabling it. Raise it for CI, where the e2e suite logs in repeatedly. |
 | `SEARXNG_SECRET` | Secret key for the bundled SearXNG container. Generate via `openssl rand -hex 32`. Unset falls back to a placeholder — fine locally, do not ship to production. |
 
 ### Settings (UI tabs)
