@@ -117,3 +117,39 @@ async def test_omitting_a_secret_leaves_it_untouched(
     resp = await api_client.put("/api/settings", json={"recruiter_name": "Walid"})
     assert resp.status_code == 200
     assert resp.json()[has_flag] is True, f"{field} was clobbered by an unrelated save"
+
+
+@pytest.mark.asyncio
+async def test_padded_secret_is_stored_stripped(api_client: AsyncClient) -> None:
+    """A token pasted from a terminal carries a trailing newline. Stored raw it
+    goes out as `Authorization: Bearer ghp_x\n` and the provider answers 401 —
+    while the UI insists a key is set."""
+    resp = await api_client.put("/api/settings", json={"github_token": "  ghp_padded\n"})
+    assert resp.status_code == 200
+    assert resp.json()["has_github_token"] is True
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from recruiter.api.candidates import get_engine_dep
+    from recruiter.api.settings import _cipher
+    from recruiter.main import app
+    from recruiter.models import SettingsRow
+
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        row = (await session.execute(select(SettingsRow).where(SettingsRow.id == 1))).scalar_one()
+        assert _cipher().decrypt(row.github_token_enc) == "ghp_padded"
+
+
+@pytest.mark.asyncio
+async def test_whitespace_only_secret_revokes_rather_than_storing_blanks(
+    api_client: AsyncClient,
+) -> None:
+    """Whitespace is not a credential. Stored as one it produces the same 401
+    the empty-string revoke exists to avoid."""
+    await api_client.put("/api/settings", json={"github_token": "ghp_real"})
+    resp = await api_client.put("/api/settings", json={"github_token": "   "})
+    assert resp.status_code == 200
+    assert resp.json()["has_github_token"] is False

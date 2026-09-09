@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_role, require_user
-from recruiter.crypto import settings_cipher
+from recruiter.crypto import SecretCipher, settings_cipher
 from recruiter.models import Role, SettingsRow, User
 from recruiter.schemas.settings import SettingsRead, SettingsUpdate, SmtpConfigInput
 
@@ -67,7 +67,9 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
     return _to_read(row)
 
 
-def _apply_secret(row: SettingsRow, attr: str, value: str | None, cipher) -> None:
+def _apply_secret(
+    row: SettingsRow, attr: str, value: str | None, cipher: SecretCipher,
+) -> None:
     """Write one encrypted credential, honouring three distinct states.
 
     None  -> the client omitted the field: leave whatever is stored alone, so
@@ -79,10 +81,18 @@ def _apply_secret(row: SettingsRow, attr: str, value: str | None, cipher) -> Non
     Without the "" case a stored secret could only ever be overwritten, never
     removed — the UI omits blank fields — so a key you had decided to stop
     trusting was stuck in the database with no way out.
+
+    The value is stripped first. Tokens are pasted, and a paste routinely
+    carries a trailing newline or leading spaces; stored raw they go out as
+    `Authorization: Bearer ghp_x\n` and the provider answers 401 while the UI
+    insists a key is set — the precise failure the revoke path exists to
+    escape. Stripping also collapses a whitespace-only value onto "", so it
+    revokes instead of storing blanks that could never authenticate.
     """
     if value is None:
         return
-    setattr(row, attr, cipher.encrypt(value) if value else None)
+    cleaned = value.strip()
+    setattr(row, attr, cipher.encrypt(cleaned) if cleaned else None)
 
 
 @router.put("", response_model=SettingsRead)
