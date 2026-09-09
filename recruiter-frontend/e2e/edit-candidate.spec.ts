@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers/login";
 
 // Picks any existing application via the API; skips if the local DB is empty.
 async function findAnyApplicationId(page: import("@playwright/test").Page): Promise<number | null> {
@@ -39,7 +38,6 @@ test.describe("candidate edit", () => {
   });
 
   test("pencil button opens the edit form with all six text fields", async ({ page }) => {
-    await login(page);
     const appId = await findAnyApplicationId(page);
     test.skip(appId === null, "no application in local DB; create one first");
     await page.goto(`/applications/${appId}`);
@@ -56,7 +54,6 @@ test.describe("candidate edit", () => {
   });
 
   test("editing name + email persists and re-renders", async ({ page }) => {
-    await login(page);
     const appId = await findAnyApplicationId(page);
     test.skip(appId === null, "no application in local DB");
     await page.goto(`/applications/${appId}`);
