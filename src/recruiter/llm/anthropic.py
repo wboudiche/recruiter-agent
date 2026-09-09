@@ -5,7 +5,7 @@ from anthropic import AsyncAnthropic
 from pydantic import BaseModel
 
 from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall, ToolDef
-from recruiter.llm.client import LLMMessage
+from recruiter.llm.client import EmptyLLMResponse, LLMMessage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -35,7 +35,16 @@ class AnthropicLLMClient:
             kwargs["system"] = system
         response = await self._client.messages.create(**kwargs)
         parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-        return "".join(parts)
+        text = "".join(parts)
+        if not text.strip():
+            # Same cause as the OpenAI-compatible path, different symptom: an
+            # empty string here fails later as an opaque JSON validation error.
+            stop = getattr(response, "stop_reason", None) or "unknown"
+            raise EmptyLLMResponse(
+                f"{self._model} returned no content (stop_reason={stop}). "
+                f"Retry, or raise max_tokens (currently {max_tokens})."
+            )
+        return text
 
     async def chat_structured(
         self,

@@ -7,7 +7,7 @@ import httpx
 from pydantic import BaseModel
 
 from recruiter.agent.types import AssistantTurn, ChatTurn, ToolCall, ToolDef
-from recruiter.llm.client import LLMMessage
+from recruiter.llm.client import EmptyLLMResponse, LLMMessage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -82,7 +82,10 @@ class OpenAICompatLLMClient:
         if response.status_code >= 400:
             _raise_with_body(response)
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        choice = (data.get("choices") or [{}])[0]
+        return _require_text(
+            choice, model=self._model, max_tokens=max_tokens, usage=data.get("usage"),
+        )
 
     async def chat_structured(
         self,
@@ -175,6 +178,34 @@ class OpenAICompatLLMClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+
+def _require_text(choice: dict, *, model: str, max_tokens: int, usage: dict | None) -> str:
+    """Return the message text, or explain why there isn't any.
+
+    `content` is typed as a string by the API but arrives as null when the
+    model produced no output — most often because a reasoning model spent the
+    whole `max_tokens` budget thinking. Returning that None unchecked pushed
+    the failure into whatever touched the value next.
+    """
+    text = (choice.get("message") or {}).get("content")
+    if isinstance(text, str) and text.strip():
+        return text
+
+    finish = choice.get("finish_reason") or "unknown"
+    reasoning = ((usage or {}).get("completion_tokens_details") or {}).get("reasoning_tokens")
+    detail = f"finish_reason={finish}"
+    if reasoning is not None:
+        detail += f", reasoning tokens={reasoning}"
+    hint = (
+        " The model spent the token budget reasoning before writing any answer"
+        f" — raise max_tokens (currently {max_tokens})."
+        if finish == "length" or reasoning
+        else " Retry, or raise max_tokens."
+    )
+    raise EmptyLLMResponse(
+        f"{model} returned no content ({detail})." + hint
+    )
 
 
 def _raise_with_body(response: httpx.Response) -> None:
