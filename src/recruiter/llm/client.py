@@ -45,6 +45,19 @@ class LLMClient(Protocol):
     ) -> AssistantTurn: ...
 
 
+class EmptyLLMResponse(RuntimeError):
+    """The provider answered successfully but carried no usable text.
+
+    Distinct from an HTTP failure: the call was accepted and billed, the model
+    simply produced nothing to parse. The usual cause is a reasoning model
+    whose reasoning tokens count against `max_tokens` — when they exhaust the
+    budget the message comes back with null content and finish_reason
+    "length". Raised rather than returned so the None cannot travel: it used
+    to surface far away as `AttributeError: 'NoneType' object has no attribute
+    'strip'`, which told the user nothing.
+    """
+
+
 class FakeLLMClient:
     def __init__(
         self,

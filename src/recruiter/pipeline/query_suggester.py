@@ -50,7 +50,13 @@ async def suggest_search_query(
         messages=[LLMMessage(role="user", content=user)],
         schema=SuggestedSearchQuery,
         system=_SYSTEM,
-        max_tokens=512,
+        # 2048, not 512: a reasoning model's reasoning tokens count against this
+        # budget, and sampling this very prompt showed reasoning alone ranging
+        # 155-361 tokens with completions reaching 430 — close enough to 512
+        # that a longer-than-usual trace left no room for the answer, and the
+        # provider returned null content. Every other caller already sits at
+        # 1024-4096; this was the outlier.
+        max_tokens=2048,
         temperature=0.2,
     )
     return raw.query.strip()
