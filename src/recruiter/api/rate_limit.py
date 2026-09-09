@@ -60,3 +60,18 @@ def chat_rate_limit() -> str:
     default that won't trip during tests.
     """
     return get_config().chat_rate_limit or "1000/minute"
+
+
+def auth_rate_limit() -> str:
+    """Effective rate limit string for the password endpoints.
+
+    Covers POST /auth/login/password and the change-password endpoint: both
+    take a password and are brute-forceable, and both carried the same
+    hardcoded value before this.
+
+    Read at request time via @limiter.limit's callable support, the same way
+    chat_rate_limit works. Unlike chat, an empty value falls back to the
+    default rather than to something generous: this endpoint guards password
+    guessing, so a blank env var must not quietly remove that protection.
+    """
+    return get_config().auth_rate_limit or "5/minute"

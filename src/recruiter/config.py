@@ -12,6 +12,10 @@ class Config(BaseSettings):
     log_level: str = "INFO"
     local_llm_api_key: str | None = None
     chat_rate_limit: str = "30/minute"
+    # Brute-force control on the password endpoints (login and change
+    # password). Raise it for CI or a high-traffic deployment; an empty
+    # value keeps the default rather than disabling protection.
+    auth_rate_limit: str = "5/minute"
     redis_url: str | None = None
 
     # OIDC SSO config — see docs/superpowers/specs/2026-05-02-oidc-auth-design.md

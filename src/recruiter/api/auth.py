@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.deps import get_session, require_user
-from recruiter.api.rate_limit import limiter
+from recruiter.api.rate_limit import auth_rate_limit, limiter
 from recruiter.auth.allowlist import is_email_allowed, parse_allowed_domains
 from recruiter.auth.oidc import (
     OIDCClient,
@@ -342,7 +342,7 @@ async def _resolve_break_glass_admin(session: AsyncSession, cfg: Config) -> User
 
 
 @router.post("/login/password")
-@limiter.limit("5/minute")
+@limiter.limit(auth_rate_limit)
 async def login_password(
     request: Request,
     payload: PasswordLoginRequest,
@@ -407,7 +407,7 @@ async def login_password(
 # verifies `current_password`, so without a cap someone holding a stolen
 # session cookie can brute-force it at full speed — and knowing it lets
 # them change the password and lock the real owner out.
-@limiter.limit("5/minute")
+@limiter.limit(auth_rate_limit)
 async def change_own_password(
     request: Request,
     payload: PasswordChange,

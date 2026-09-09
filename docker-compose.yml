@@ -34,6 +34,12 @@ services:
       RECRUITER_SETTINGS_KEY: ${RECRUITER_SETTINGS_KEY:?RECRUITER_SETTINGS_KEY is required — see .env.example}
       RECRUITER_RESUME_STORAGE_PATH: /app/var/resumes
       RECRUITER_LOG_LEVEL: INFO
+      # Throttle on the password endpoints. Default lives in config.py; this
+      # only makes it overridable from `.env`. Empty is safe here — auth_rate_limit()
+      # falls back to the 5/minute default rather than to something generous,
+      # which is why the chat limit is deliberately NOT plumbed the same way:
+      # chat_rate_limit() treats empty as 1000/minute.
+      RECRUITER_AUTH_RATE_LIMIT: ${RECRUITER_AUTH_RATE_LIMIT:-}
       # Which peers uvicorn will believe about X-Forwarded-For. Uvicorn
       # already enables --proxy-headers by default but trusts only
       # 127.0.0.1, so without this it ignored nginx entirely and saw the
