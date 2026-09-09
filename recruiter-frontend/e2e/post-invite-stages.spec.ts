@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers/login";
 
 type PageT = import("@playwright/test").Page;
 
@@ -29,7 +28,6 @@ test.describe("post-invite pipeline stages", () => {
     // 30s test budget.
     test.setTimeout(120_000);
 
-    await login(page);
 
     const settingsResp = await page.request.get("/api/settings");
     expect(settingsResp.ok()).toBeTruthy();

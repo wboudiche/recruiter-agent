@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers/login";
 
 interface CriteriaItem {
   name: string;
@@ -67,7 +66,6 @@ test.describe("editing criteria rescores existing applicants", () => {
     // default 30s test budget.
     test.setTimeout(60_000);
 
-    await login(page);
     const found = await findScoredApplicationWithCriteria(page);
     test.skip(
       found === null,

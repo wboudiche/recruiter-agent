@@ -1,5 +1,4 @@
 import { expect, test } from "@playwright/test";
-import { login } from "./helpers/login";
 
 async function findAnyJobId(page: import("@playwright/test").Page): Promise<number | null> {
   const resp = await page.request.get("/api/jobs");
@@ -12,7 +11,6 @@ test.describe("Add candidate → Search → Suggest from JD", () => {
   test("Suggest button is disabled until a source is picked, then fills the input", async ({
     page,
   }) => {
-    await login(page);
     const jobId = await findAnyJobId(page);
     test.skip(jobId === null, "no job in local DB");
     await page.goto(`/jobs/${jobId}`);
