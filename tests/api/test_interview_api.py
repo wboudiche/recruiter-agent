@@ -1,9 +1,12 @@
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.candidates import get_llm
+from recruiter.auth.passwords import hash_password
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
+from recruiter.models import Application, Candidate, Job, Role, Stage, User
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 
@@ -63,3 +66,60 @@ async def test_generate_404s_for_an_unknown_application(api_client: AsyncClient)
         assert resp.status_code == 404
     finally:
         app.dependency_overrides.pop(get_llm, None)
+
+
+# --- Viewer policy: the app-wide default-deny guard (see
+# tests/api/test_viewer_matrix.py), not a route-local `require_role`, is
+# what keeps a viewer out of `/interview-kit/generate`. This mirrors that
+# file's `_add`/`_login` pattern rather than importing it (`tests` isn't
+# an importable package in this repo — see the conftest fixture change
+# in this same task for the same constraint).
+
+async def _add(session: AsyncSession, email: str, role: Role) -> User:
+    user = User(email=email, role=role, is_active=True,
+                password_hash=hash_password("pw-12345678"))
+    session.add(user)
+    await session.commit()
+    return user
+
+
+async def _login(client: AsyncClient, email: str) -> None:
+    r = await client.post("/api/auth/login/password",
+                           json={"email": email, "password": "pw-12345678"})
+    assert r.status_code == 204
+
+
+async def _seed_application(session: AsyncSession) -> int:
+    job = Job(title="Backend", description="x", criteria=[])
+    session.add(job)
+    await session.flush()
+    candidate = Candidate(source_type="paste", full_name="Marie", email="m@example.com")
+    session.add(candidate)
+    await session.flush()
+    app_row = Application(job_id=job.id, candidate_id=candidate.id, stage=Stage.SCORED, score=80)
+    session.add(app_row)
+    await session.commit()
+    return app_row.id
+
+
+@pytest.mark.asyncio
+async def test_viewer_is_refused_generate_but_allowed_get(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """The endpoints carry no `require_role` of their own — the app-wide
+    `viewer_readonly_guard` (deps.py) already default-denies every
+    mutating method to viewers, and neither interview-kit route is on
+    `VIEWER_ALLOWED_ROUTES`. This asserts that policy actually holds for
+    this router: generate is refused, read is not."""
+    app_id = await _seed_application(db_session_with_schema)
+    await _add(db_session_with_schema, "viewer@acme.com", Role.VIEWER)
+    await _login(api_client_unauth, "viewer@acme.com")
+
+    generate = await api_client_unauth.post(
+        f"/api/applications/{app_id}/interview-kit/generate"
+    )
+    assert generate.status_code == 403
+
+    read = await api_client_unauth.get(f"/api/applications/{app_id}/interview-kit")
+    assert read.status_code == 200
+    assert read.json()["kit"] is None

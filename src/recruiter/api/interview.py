@@ -12,10 +12,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
-from recruiter.api.deps import get_session, require_role, require_user
+from recruiter.api.deps import get_session, require_user
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, Job, Role, User
+from recruiter.models import Application, Candidate, Job
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import generate_probes
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit
@@ -36,7 +36,7 @@ def _now() -> str:
 @router.get("/applications/{application_id}/interview-kit", response_model=InterviewKitRead)
 async def get_kit(
     application_id: int,
-    session: AsyncSession = Depends(get_session),  # noqa: B008
+    session: AsyncSession = Depends(get_session),
 ) -> InterviewKitRead:
     app_row = await session.get(Application, application_id)
     if app_row is None:
@@ -92,11 +92,10 @@ async def run_generate_kit(
 async def generate_kit(
     application_id: int,
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),  # noqa: B008
-    engine: AsyncEngine = Depends(get_engine_dep),  # noqa: B008
-    llm: LLMClient = Depends(get_llm),  # noqa: B008
-    bus: EventBus = Depends(get_event_bus),  # noqa: B008
-    _: User = Depends(require_role(Role.RECRUITER, Role.ADMIN)),  # noqa: B008
+    session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    llm: LLMClient = Depends(get_llm),
+    bus: EventBus = Depends(get_event_bus),
 ) -> dict:
     app_row = await session.get(Application, application_id)
     if app_row is None:
