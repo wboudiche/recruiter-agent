@@ -15,7 +15,7 @@ from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, Job
+from recruiter.models import Application, Candidate, Job, Stage
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import generate_probes
 from recruiter.schemas.interview import (
@@ -142,5 +142,33 @@ async def patch_kit(
     kit = InterviewKit.model_validate(app_row.interview_kit)
     kit.questions = payload.questions
     app_row.interview_kit = kit.model_dump()
+    await session.commit()
+    return InterviewKitRead(kit=kit)
+
+
+@router.post("/applications/{application_id}/interview-kit/submit",
+             response_model=InterviewKitRead)
+async def submit_kit(
+    application_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> InterviewKitRead:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if not app_row.interview_kit:
+        raise HTTPException(status_code=404, detail="no interview kit; "
+                            "generate one first")
+
+    kit = InterviewKit.model_validate(app_row.interview_kit)
+    kit.submitted_at = _now()
+    app_row.interview_kit = kit.model_dump()
+
+    # Advance only from SCHEDULED. Already interviewed or beyond means this
+    # is an edit to a past interview, not a new one — re-submitting must not
+    # push the candidate further down the pipeline.
+    if app_row.stage == Stage.SCHEDULED:
+        app_row.stage = Stage.INTERVIEWED
+        app_row.interviewed_at = datetime.now(UTC)
+
     await session.commit()
     return InterviewKitRead(kit=kit)
