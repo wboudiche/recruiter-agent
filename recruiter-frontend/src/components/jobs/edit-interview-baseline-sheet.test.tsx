@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
@@ -99,7 +99,42 @@ describe("EditInterviewBaselineSheet", () => {
   });
 
   it("keeps a typed edit through a background refetch of the job (e.g. SSE)", async () => {
-    const { qc } = mount({});
+    // First GET (initial load) returns "Why this role?"; every GET after
+    // that returns different question text with the SAME `updated_at`,
+    // mirroring an unrelated candidate's stage change: the underlying job
+    // record itself did not change, but a refetch still returns a fresh
+    // object identity. A buggy implementation keyed on `job.data` identity
+    // would visibly overwrite the recruiter's typed text with the server's
+    // new text; the fix, keyed on `updated_at`, must not.
+    let getCount = 0;
+    server.use(
+      http.get("http://localhost:8000/api/jobs/1", () => {
+        getCount += 1;
+        return HttpResponse.json({
+          id: 1,
+          title: "SRE",
+          criteria: [],
+          interview_baseline: [
+            {
+              id: "b1",
+              text: getCount === 1 ? "Why this role?" : "Server changed this",
+            },
+          ],
+          updated_at: "2026-01-01T00:00:00Z",
+        });
+      }),
+    );
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(
+      <Wrapper>
+        <EditInterviewBaselineSheet jobId={1} open onOpenChange={() => {}} canWrite />
+      </Wrapper>,
+    );
     await waitFor(() =>
       expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument(),
     );
@@ -109,13 +144,25 @@ describe("EditInterviewBaselineSheet", () => {
     await userEvent.type(input, "Edited but not yet saved");
 
     // Simulate handleServerEvent's `["jobs"]`, exact: false invalidation —
-    // fired by any stage/error SSE event anywhere, not just this job — and
-    // wait for the resulting background refetch to actually land. The
-    // mocked GET returns the same `updated_at` every time, so a correct
-    // implementation must not reset `rows` from it.
-    await qc.refetchQueries({ queryKey: ["jobs", 1] });
+    // fired by any stage/error SSE event anywhere, not just this job.
+    // react-query's notifyManager always defers subscriber notification to
+    // a real macrotask (`setTimeout(fn, 0)`, not a microtask), and React
+    // flushes the resulting passive effect on a further tick of its own.
+    // Awaiting the refetch promise alone only flushes microtasks, so the
+    // component has not necessarily re-rendered yet when it resolves.
+    // Flush a handful of real macrotasks (inside `act`, so React accepts
+    // the state updates they trigger) to let both of those settle before
+    // asserting, for either implementation under test.
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: ["jobs", 1] });
+      for (let i = 0; i < 5; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    });
+    expect(getCount).toBeGreaterThan(1);
 
     expect(screen.getByDisplayValue("Edited but not yet saved")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Server changed this")).not.toBeInTheDocument();
   });
 
   it("shows the questions but hides every write control for a viewer", async () => {
