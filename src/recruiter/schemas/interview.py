@@ -36,3 +36,12 @@ class InterviewKit(BaseModel):
     generated_at: str | None = None
     submitted_at: str | None = None
     questions: list[KitQuestion] = Field(default_factory=list)
+
+
+class GeneratedQuestion(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    criterion: str | None = Field(default=None, max_length=200)
+
+
+class GeneratedQuestions(BaseModel):
+    questions: list[GeneratedQuestion] = Field(default_factory=list)
