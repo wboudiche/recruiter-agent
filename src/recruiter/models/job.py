@@ -19,6 +19,7 @@ class Job(Base):
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(String)
     criteria: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    interview_baseline: Mapped[list[dict] | None] = mapped_column(JSON)
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.OPEN,
