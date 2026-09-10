@@ -24,26 +24,6 @@ def with_fake_llm(fake_llm):
         app.dependency_overrides.pop(get_llm, None)
 
 
-async def _create_scored_app(api_client: AsyncClient) -> int:
-    """Mirror the helper in test_chat_api.py — create a candidate +
-    SCORED application directly via the engine."""
-    job = await api_client.post("/api/jobs", json={
-        "title": "Backend", "description": "x", "criteria": []
-    })
-    job_id = job.json()["id"]
-    from recruiter.api.candidates import get_engine_dep
-    engine = app.dependency_overrides[get_engine_dep]()
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    from recruiter.models import Application, Candidate, Stage
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
-    async with SessionLocal() as session:
-        c = Candidate(source_type="paste", full_name="Marie", email="m@example.com")
-        session.add(c); await session.flush()
-        a = Application(job_id=job_id, candidate_id=c.id, stage=Stage.SCORED, score=80)
-        session.add(a); await session.commit()
-        return a.id
-
-
 class _StubProvider:
     async def search(self, query: str, limit: int) -> list[SearchResult]:
         return [
@@ -56,7 +36,7 @@ class _StubProvider:
 
 @pytest.mark.asyncio
 async def test_chat_search_linkedin_emits_tool_search_results_event(
-    api_client: AsyncClient, with_fake_llm, monkeypatch,
+    api_client: AsyncClient, with_fake_llm, monkeypatch, create_scored_app,
 ) -> None:
     """End-to-end: user chats → LLM emits tool_use(search_linkedin) → tool
     handler runs against a stubbed provider → NDJSON stream carries the
@@ -65,7 +45,7 @@ async def test_chat_search_linkedin_emits_tool_search_results_event(
     import recruiter.sourcing.provider as provider_mod
     monkeypatch.setattr(provider_mod, "resolve", lambda _settings: _StubProvider())
 
-    app_id = await _create_scored_app(api_client)
+    app_id = await create_scored_app()
 
     # Seed a SettingsRow so _load_settings_for_tool returns non-None — the
     # tool short-circuits to "not configured" otherwise. The actual fields

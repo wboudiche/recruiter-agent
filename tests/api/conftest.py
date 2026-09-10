@@ -8,7 +8,7 @@ from recruiter.api.candidates import get_engine_dep
 from recruiter.api.deps import get_session
 from recruiter.config import get_config
 from recruiter.main import app
-from recruiter.models import Base
+from recruiter.models import Application, Base, Candidate, Stage
 
 
 @pytest.fixture
@@ -74,3 +74,32 @@ async def api_client(pg_dsn: str, monkeypatch) -> AsyncIterator[AsyncClient]:
         app.dependency_overrides.clear()
         await engine.dispose()
         get_config.cache_clear()
+
+
+@pytest.fixture
+def create_scored_app(api_client: AsyncClient):
+    """Create a candidate + SCORED application directly via the engine.
+
+    Shared fixture-helper: several API test modules need a bare SCORED
+    application to exercise endpoints that only make sense once scoring
+    has happened. Returns an async factory so each test can create as many
+    as it needs.
+    """
+
+    async def _make() -> int:
+        job = await api_client.post("/api/jobs", json={
+            "title": "Backend", "description": "x", "criteria": []
+        })
+        job_id = job.json()["id"]
+        engine = app.dependency_overrides[get_engine_dep]()
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+        async with SessionLocal() as session:
+            c = Candidate(source_type="paste", full_name="Marie", email="m@example.com")
+            session.add(c)
+            await session.flush()
+            a = Application(job_id=job_id, candidate_id=c.id, stage=Stage.SCORED, score=80)
+            session.add(a)
+            await session.commit()
+            return a.id
+
+    return _make
