@@ -2,6 +2,7 @@ import inspect
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -12,6 +13,7 @@ from recruiter.llm.client import LLMClient
 from recruiter.models import Job, JobStatus
 from recruiter.pipeline.criteria_suggester import suggest_criteria
 from recruiter.pipeline.orchestrator import rescore_applications_for_job
+from recruiter.schemas.interview import BaselineQuestion
 from recruiter.schemas.job import CriteriaItem, JobCreate, JobRead, JobUpdate
 from recruiter.schemas.job_suggest import SuggestCriteriaRequest, SuggestCriteriaResponse
 
@@ -138,6 +140,31 @@ def _to_read(job: Job) -> JobRead:
         criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
         status=job.status.value,
         enrichment_consent=job.enrichment_consent,
+        interview_baseline=job.interview_baseline,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
+
+
+class InterviewBaselineUpdate(BaseModel):
+    questions: list[BaselineQuestion]
+
+
+@router.put("/{job_id}/interview-baseline", response_model=JobRead)
+async def put_interview_baseline(
+    job_id: int,
+    payload: InterviewBaselineUpdate,
+    session: AsyncSession = Depends(get_session),
+) -> JobRead:
+    job = await session.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    ids = [q.id for q in payload.questions]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail="duplicate question ids")
+
+    job.interview_baseline = [q.model_dump() for q in payload.questions]
+    await session.commit()
+    await session.refresh(job)
+    return _to_read(job)

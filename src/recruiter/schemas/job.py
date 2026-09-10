@@ -33,5 +33,6 @@ class JobRead(BaseModel):
     criteria: list[CriteriaItem]
     status: str
     enrichment_consent: bool = False
+    interview_baseline: list[dict] | None = None
     created_at: datetime
     updated_at: datetime

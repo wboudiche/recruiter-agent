@@ -8,6 +8,7 @@ import {
   EnrichmentSection,
   type Bundle as EnrichmentBundle,
 } from "@/components/candidate/enrichment-section";
+import { InterviewKitSection } from "@/components/candidate/interview-kit-section";
 import { RejectionBanner } from "@/components/candidate/rejection-banner";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
@@ -102,6 +103,7 @@ export default function ApplicationDetail() {
             (application.data.enrichment as EnrichmentBundle | null) ?? null
           }
         />
+        <InterviewKitSection applicationId={id} canWrite={canWrite} />
       </div>
       <aside className="rounded border overflow-hidden">
         {application.data.awaiting_paste ? (

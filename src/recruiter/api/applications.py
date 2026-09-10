@@ -15,6 +15,8 @@ from recruiter.api.candidates import (
     resume_display_name,
 )
 from recruiter.api.deps import get_session, require_user
+from recruiter.api.interview import run_generate_kit
+from recruiter.api.jobs import get_llm_or_none
 from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
@@ -309,7 +311,16 @@ def _validate_transition(current: Stage, target: Stage) -> None:
 async def patch_application(
     application_id: int,
     payload: ApplicationUpdate,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
+    engine: AsyncEngine = Depends(get_engine_dep),
+    # get_llm_or_none, not get_llm: most stage moves have nothing to do
+    # with the LLM, and Depends(...) is resolved eagerly for every request
+    # regardless of which branch below actually runs — a bare
+    # Depends(get_llm) would 503 every PATCH (even 404s) whenever the LLM
+    # provider isn't configured. See its docstring in jobs.py.
+    llm: LLMClient | None = Depends(get_llm_or_none),
+    bus: EventBus = Depends(get_event_bus),
 ) -> ApplicationRead:
     app_row = await _load_application(session, application_id)
     if app_row is None:
@@ -318,6 +329,7 @@ async def patch_application(
     if payload.notes is not None:
         app_row.notes = payload.notes
 
+    schedule_kit_generation = False
     if payload.stage is not None:
         new_stage = Stage(payload.stage)
         _validate_transition(app_row.stage, new_stage)
@@ -327,6 +339,18 @@ async def patch_application(
             app_row.validated_at = now
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
+            # Mark the kit pending here, but enqueue the model call for AFTER
+            # the commit below. The transition must be durable before
+            # anything that can fail runs — a stuck stage is far worse than
+            # a missing kit. Preserve any existing questions (e.g. a
+            # candidate moved back to SCHEDULED after an interview must not
+            # lose recorded answers/ratings) — mirrors generate_kit's logic.
+            existing = app_row.interview_kit or {}
+            app_row.interview_kit = {
+                **existing, "status": "generating", "error": None,
+                "questions": existing.get("questions") or [],
+            }
+            schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
             app_row.interviewed_at = now
         elif new_stage == Stage.OFFER:
@@ -352,6 +376,25 @@ async def patch_application(
     await session.refresh(app_row)
     # Ensure candidate is loaded for awaiting_paste computation.
     await session.refresh(app_row, attribute_names=["candidate"])
+
+    if schedule_kit_generation:
+        if llm is not None:
+            background_tasks.add_task(
+                run_generate_kit,
+                application_id=application_id, engine=engine, llm=llm, bus=bus,
+            )
+        else:
+            # No LLM configured: nothing to enqueue. The stage transition
+            # above is already committed and safe either way; leave the
+            # kit in an error state rather than stuck at "generating"
+            # forever with no task ever running to resolve it.
+            app_row.interview_kit = {
+                **(app_row.interview_kit or {}),
+                "status": "error",
+                "error": "No LLM provider configured. Set one up in Settings.",
+            }
+            await session.commit()
+            await session.refresh(app_row)
     return _to_read(app_row)
 
 
