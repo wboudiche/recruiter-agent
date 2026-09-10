@@ -18,7 +18,11 @@ from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, Job
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import generate_probes
-from recruiter.schemas.interview import BaselineQuestion, InterviewKit
+from recruiter.schemas.interview import (
+    BaselineQuestion,
+    InterviewKit,
+    KitQuestion,
+)
 from recruiter.schemas.job import CriteriaItem
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
@@ -110,3 +114,33 @@ async def generate_kit(
         run_generate_kit, application_id=application_id, engine=engine, llm=llm, bus=bus,
     )
     return {"application_id": application_id}
+
+
+class InterviewKitPatch(BaseModel):
+    questions: list[KitQuestion]
+
+
+@router.patch("/applications/{application_id}/interview-kit",
+              response_model=InterviewKitRead)
+async def patch_kit(
+    application_id: int,
+    payload: InterviewKitPatch,
+    session: AsyncSession = Depends(get_session),
+) -> InterviewKitRead:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    if not app_row.interview_kit:
+        raise HTTPException(
+            status_code=404, detail="no interview kit; generate one first"
+        )
+
+    ids = [q.id for q in payload.questions]
+    if len(ids) != len(set(ids)):
+        raise HTTPException(status_code=422, detail="duplicate question ids")
+
+    kit = InterviewKit.model_validate(app_row.interview_kit)
+    kit.questions = payload.questions
+    app_row.interview_kit = kit.model_dump()
+    await session.commit()
+    return InterviewKitRead(kit=kit)

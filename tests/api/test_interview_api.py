@@ -123,3 +123,69 @@ async def test_viewer_is_refused_generate_but_allowed_get(
     read = await api_client_unauth.get(f"/api/applications/{app_id}/interview-kit")
     assert read.status_code == 200
     assert read.json()["kit"] is None
+
+
+@pytest.mark.asyncio
+async def test_patch_stores_answers_and_ratings(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
+        structured_responses=[GeneratedQuestions(questions=[
+            GeneratedQuestion(text="Tell me about a production incident.",
+                               criterion="reliability"),
+        ])],
+    )
+    try:
+        app_id = await create_scored_app()
+        await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+
+        body = {"questions": [
+            {"id": "q1", "text": "Describe an incident.", "source": "probe",
+             "answer": "Handled an etcd outage", "rating": "strong"},
+        ]}
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}/interview-kit", json=body
+        )
+        assert resp.status_code == 200
+        q = resp.json()["kit"]["questions"][0]
+        assert q["answer"] == "Handled an etcd outage"
+        assert q["rating"] == "strong"
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_rejects_duplicate_question_ids(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Ids address questions; duplicates make an edit ambiguous."""
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
+        structured_responses=[GeneratedQuestions(questions=[
+            GeneratedQuestion(text="Tell me about a production incident.",
+                               criterion="reliability"),
+        ])],
+    )
+    try:
+        app_id = await create_scored_app()
+        await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        body = {"questions": [
+            {"id": "same", "text": "One", "source": "probe"},
+            {"id": "same", "text": "Two", "source": "probe"},
+        ]}
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}/interview-kit", json=body
+        )
+        assert resp.status_code == 422
+        assert "duplicate" in resp.text.lower()
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_patch_404s_when_no_kit_exists(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    app_id = await create_scored_app()
+    resp = await api_client.patch(f"/api/applications/{app_id}/interview-kit",
+                                  json={"questions": []})
+    assert resp.status_code == 404
