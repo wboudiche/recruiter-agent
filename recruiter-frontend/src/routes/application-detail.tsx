@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { ActionBar } from "@/components/candidate/action-bar";
 import { CandidateProfile } from "@/components/candidate/candidate-profile";
 import { ChatPanel } from "@/components/applications/chat-panel";
@@ -12,6 +12,7 @@ import { InterviewKitSection } from "@/components/candidate/interview-kit-sectio
 import { RejectionBanner } from "@/components/candidate/rejection-banner";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Spinner } from "@/components/ui/spinner";
 import { pushRecentApp } from "@/components/command-palette/command-palette-context";
 import { useApplication } from "@/hooks/use-application";
@@ -24,6 +25,11 @@ export default function ApplicationDetail() {
   const { appId } = useParams<{ appId: string }>();
   const id = Number(appId);
   const canWrite = useCanWrite();
+  // Tab lives in the URL so a refresh mid-interview does not dump the
+  // recruiter back on Profile, and so the kit can be bookmarked or opened
+  // in a second window beside the call.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = searchParams.get("tab") === "interview" ? "interview" : "profile";
   const application = useApplication(id);
   const candidate = useCandidate(application.data?.candidate_id);
   // Job is only needed for the breadcrumb. We pass `enabled` via the
@@ -60,9 +66,6 @@ export default function ApplicationDetail() {
       />
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 flex-1 min-h-0">
       <div className="space-y-6 overflow-y-auto pr-2">
-        {candidate.data && (
-          <CandidateProfile candidate={candidate.data} canWrite={canWrite} />
-        )}
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
             stage:
@@ -95,15 +98,39 @@ export default function ApplicationDetail() {
           </div>
         )}
         <RejectionBanner application={application.data} canWrite={canWrite} />
-        <ScoreBreakdown application={application.data} />
-        <EnrichmentSection
-          applicationId={id}
-          canWrite={canWrite}
-          enrichment={
-            (application.data.enrichment as EnrichmentBundle | null) ?? null
+        {/* Stage, actions and banners sit ABOVE the tabs deliberately: marking
+            someone interviewed must not require navigating away from the
+            questions you just filled in. */}
+        <Tabs
+          value={tab}
+          onValueChange={(next) =>
+            setSearchParams(
+              next === "interview" ? { tab: "interview" } : {},
+              { replace: true },
+            )
           }
-        />
-        <InterviewKitSection applicationId={id} canWrite={canWrite} />
+        >
+          <TabsList>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="interview">Interview kit</TabsTrigger>
+          </TabsList>
+          <TabsContent value="profile" className="space-y-6">
+            {candidate.data && (
+              <CandidateProfile candidate={candidate.data} canWrite={canWrite} />
+            )}
+            <ScoreBreakdown application={application.data} />
+            <EnrichmentSection
+              applicationId={id}
+              canWrite={canWrite}
+              enrichment={
+                (application.data.enrichment as EnrichmentBundle | null) ?? null
+              }
+            />
+          </TabsContent>
+          <TabsContent value="interview">
+            <InterviewKitSection applicationId={id} canWrite={canWrite} />
+          </TabsContent>
+        </Tabs>
       </div>
       <aside className="rounded border overflow-hidden">
         {application.data.awaiting_paste ? (
