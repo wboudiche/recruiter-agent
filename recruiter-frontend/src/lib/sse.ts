@@ -16,9 +16,38 @@ interface ServerErrorEvent {
   error: string;
 }
 
-type ServerEvent = StageEvent | ServerErrorEvent;
+interface InterviewKitEvent {
+  type: "interview_kit";
+  application_id: number;
+  status: "generating" | "ready" | "error";
+}
+
+type ServerEvent = StageEvent | ServerErrorEvent | InterviewKitEvent;
 
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+
+export function handleServerEvent(
+  payload: ServerEvent,
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  if (payload.type === "interview_kit") {
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.interviewKit(payload.application_id),
+    });
+  } else {
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.application(payload.application_id),
+    });
+    // Best-effort: refetch any per-job applications list currently mounted.
+    queryClient.invalidateQueries({ queryKey: ["jobs"], exact: false });
+    // A stage change after extraction means candidate fields (full_name,
+    // skills, experience, education, summary) just got populated by the
+    // background pipeline. The event doesn't carry the candidate_id, so
+    // we invalidate the whole candidate cache — it's small (one row per
+    // visible card) and avoids a stale application-detail page.
+    queryClient.invalidateQueries({ queryKey: ["candidates"], exact: false });
+  }
+}
 
 export function useSSE(path: string = "/api/events") {
   const queryClient = useQueryClient();
@@ -34,17 +63,7 @@ export function useSSE(path: string = "/api/events") {
       } catch {
         return;
       }
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.application(payload.application_id),
-      });
-      // Best-effort: refetch any per-job applications list currently mounted.
-      queryClient.invalidateQueries({ queryKey: ["jobs"], exact: false });
-      // A stage change after extraction means candidate fields (full_name,
-      // skills, experience, education, summary) just got populated by the
-      // background pipeline. The event doesn't carry the candidate_id, so
-      // we invalidate the whole candidate cache — it's small (one row per
-      // visible card) and avoids a stale application-detail page.
-      queryClient.invalidateQueries({ queryKey: ["candidates"], exact: false });
+      handleServerEvent(payload, queryClient);
     }
 
     source.addEventListener("stage", handle);
