@@ -52,6 +52,42 @@ def test_regeneration_keeps_answered_questions_untouched() -> None:
     assert len(merged.questions) == 3
 
 
+def test_regeneration_keeps_rating_only_baseline_question() -> None:
+    """A rating recorded without a typed answer is normal mid-interview and
+    must not be treated as unanswered — it would otherwise be re-snapshotted
+    from the baseline and lose the rating."""
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="b1", text="Why this role?", source="baseline",
+                    answer=None, rating="weak"),
+        KitQuestion(id="b2", text="Notice period?", source="baseline", answer=None),
+    ])
+    merged = merge_regenerated(existing, _baseline(), [], criteria_by_probe=[], now=NOW)
+
+    kept = next(q for q in merged.questions if q.id == "b1")
+    assert kept.rating == "weak"
+    assert kept.text == "Why this role?"
+    assert kept.answer is None
+    # b2 had no answer and no rating, so it's re-snapshotted (not lost).
+    assert any(q.id == "b2" for q in merged.questions)
+
+
+def test_regeneration_keeps_rating_only_probe_question() -> None:
+    """Same guarantee for probes: a rating alone must survive, not just an
+    answer, and the question must not be silently deleted."""
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="p-old1", text="Old probe", source="probe",
+                    answer=None, rating="adequate"),
+    ])
+    merged = merge_regenerated(existing, _baseline(), ["Fresh probe"],
+                               criteria_by_probe=[None], now=NOW)
+
+    kept = next(q for q in merged.questions if q.id == "p-old1")
+    assert kept.rating == "adequate"
+    assert kept.text == "Old probe"
+    assert kept.answer is None
+    assert "Fresh probe" in [q.text for q in merged.questions]
+
+
 def test_regeneration_re_snapshots_unanswered_baseline_questions() -> None:
     """Explicit regeneration should pick up the role's current questions."""
     existing = InterviewKit(status="ready", questions=[

@@ -50,24 +50,28 @@ def merge_regenerated(
     criteria_by_probe: list[str | None],
     now: str,
 ) -> InterviewKit:
-    """Regenerate, keeping every question that already has an answer.
+    """Regenerate, keeping every question that already has an answer or a
+    rating.
 
-    Answered questions are evidence of what was actually asked and said, so
-    they survive regeneration verbatim — including their rating and their
-    original wording. Only unanswered questions are replaced: baseline ones
-    re-snapshot from the job's current baseline, probes are regenerated.
+    Answered or rated questions are evidence of what was actually asked and
+    said (or judged) during an interview — a recruiter routinely rates a
+    question they didn't transcribe an answer for — so both survive
+    regeneration verbatim, including their rating and their original
+    wording. Only questions with neither an answer nor a rating are
+    replaced: baseline ones re-snapshot from the job's current baseline,
+    probes are regenerated.
 
     Questions maintain baseline-then-probe ordering within each group:
     answered baselines, unanswered baselines, answered probes, fresh probes.
     """
-    # Separate answered from unanswered questions
+    # Separate answered/rated from untouched questions
     answered_baseline = [
         q for q in existing.questions
-        if q.answer is not None and q.source == "baseline"
+        if (q.answer is not None or q.rating is not None) and q.source == "baseline"
     ]
     answered_probe = [
         q for q in existing.questions
-        if q.answer is not None and q.source == "probe"
+        if (q.answer is not None or q.rating is not None) and q.source == "probe"
     ]
     answered_baseline_ids = {q.id for q in answered_baseline}
 

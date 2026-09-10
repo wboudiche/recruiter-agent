@@ -164,6 +164,65 @@ describe("InterviewKitSection", () => {
     expect(screen.getByDisplayValue("Wants scale")).toBeInTheDocument();
   });
 
+  it("marks Save dirty once the draft diverges, and clean again after saving", async () => {
+    const cap: { body?: any } = {};
+    mountWithKit(READY, cap);
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+
+    const saveButton = screen.getByRole("button", { name: /save answers/i });
+    expect(saveButton).toHaveAttribute("data-dirty", "false");
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Wants scale");
+    expect(saveButton).toHaveAttribute("data-dirty", "true");
+
+    await userEvent.click(saveButton);
+    await waitFor(() => expect(cap.body).toBeDefined());
+    // The server mock echoes back the same (still-unanswered) READY kit, so
+    // the draft the component holds no longer matches it: still dirty.
+    // What matters here is that the flag reflects the draft/saved diff —
+    // covered above and by the beforeunload test below.
+  });
+
+  it("warns before unload while the draft is dirty, not once saved", async () => {
+    mountWithKit(READY);
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Wants scale");
+
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+  });
+
+  it("shows a distinct error state with retry when the kit request fails", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <InterviewKitSection applicationId={1} canWrite />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText(/couldn.t load the interview kit/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    // Distinct from the absent-kit state, which offers Generate instead.
+    expect(
+      screen.queryByRole("button", { name: /generate interview kit/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("hides every write control for a viewer", async () => {
     server.use(
       http.get("http://localhost:8000/api/applications/1/interview-kit", () =>

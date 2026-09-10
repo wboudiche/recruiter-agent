@@ -58,11 +58,11 @@ async def run_generate_kit(
         app_row = await session.get(Application, application_id)
         if app_row is None:
             return
-        job = await session.get(Job, app_row.job_id)
-        candidate = await session.get(Candidate, app_row.candidate_id)
-        baseline = [BaselineQuestion.model_validate(b)
-                    for b in (job.interview_baseline or [])]
         try:
+            job = await session.get(Job, app_row.job_id)
+            candidate = await session.get(Candidate, app_row.candidate_id)
+            baseline = [BaselineQuestion.model_validate(b)
+                        for b in (job.interview_baseline or [])]
             generated = await generate_probes(
                 profile=candidate.summary or candidate.full_name or "",
                 criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],

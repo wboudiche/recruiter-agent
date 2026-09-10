@@ -105,33 +105,53 @@ async def test_re_entering_scheduled_preserves_answered_questions(
     """A candidate rejected after an interview, then reconsidered and
     rescheduled, must not lose recorded answers/ratings from the first
     round. Exercises the real business path back to SCHEDULED: interviewed
-    -> rejected -> scored -> validated -> (direct DB) invited -> scheduled."""
-    app_id = await create_scored_app()
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
-    await _move_to_invited(api_client, app_id)
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+    -> rejected -> scored -> validated -> (direct DB) invited -> scheduled.
 
-    # Record an answered, rated question on the kit created by the first
-    # SCHEDULED transition above.
-    answered = {"id": "q1", "text": "Tell me about a production incident.",
-                "source": "probe", "answer": "Handled a prod outage calmly.",
-                "rating": "strong"}
-    patch_resp = await api_client.patch(
-        f"/api/applications/{app_id}/interview-kit", json={"questions": [answered]},
-    )
-    assert patch_resp.status_code == 200
+    get_llm is overridden with a fake, exactly like the two tests above, so
+    the second SCHEDULED transition actually runs run_generate_kit ->
+    merge_regenerated instead of taking the no-LLM error branch. Without
+    the override this test would pass even if merge_regenerated were
+    deleted — see test_interview_kit_merge_actually_runs below, which
+    checks that directly."""
+    app.dependency_overrides[get_llm] = _fake_llm_with_one_question
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        await _move_to_invited(api_client, app_id)
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
 
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "rejected"})
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scored"})
-    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
-    await _move_to_invited(api_client, app_id)
+        # Record an answered, rated question on the kit created by the first
+        # SCHEDULED transition above.
+        answered = {"id": "q1", "text": "Tell me about a production incident.",
+                    "source": "probe", "answer": "Handled a prod outage calmly.",
+                    "rating": "strong"}
+        patch_resp = await api_client.patch(
+            f"/api/applications/{app_id}/interview-kit", json={"questions": [answered]},
+        )
+        assert patch_resp.status_code == 200
 
-    resp = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
-    assert resp.status_code == 200
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "rejected"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scored"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        await _move_to_invited(api_client, app_id)
 
-    kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
-    questions = kit["questions"]
-    assert len(questions) == 1
-    assert questions[0]["answer"] == "Handled a prod outage calmly."
-    assert questions[0]["rating"] == "strong"
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}", json={"stage": "scheduled"},
+        )
+        assert resp.status_code == 200
+
+        kit = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit",
+        )).json()["kit"]
+        questions = kit["questions"]
+        # The real regeneration path both keeps the answered question
+        # verbatim AND appends a freshly generated probe alongside it —
+        # merge_regenerated always regenerates probes, on top of whatever
+        # was already answered.
+        assert len(questions) == 2
+        answered_q = next(q for q in questions if q["id"] == "q1")
+        assert answered_q["answer"] == "Handled a prod outage calmly."
+        assert answered_q["rating"] == "strong"
+    finally:
+        app.dependency_overrides.pop(get_llm, None)

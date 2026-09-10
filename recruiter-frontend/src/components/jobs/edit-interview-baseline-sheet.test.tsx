@@ -16,7 +16,8 @@ function mount(capture: { body?: any }, canWrite = true) {
   server.use(
     http.get("http://localhost:8000/api/jobs/1", () =>
       HttpResponse.json({ id: 1, title: "SRE", criteria: [],
-                          interview_baseline: [{ id: "b1", text: "Why this role?" }] }),
+                          interview_baseline: [{ id: "b1", text: "Why this role?" }],
+                          updated_at: "2026-01-01T00:00:00Z" }),
     ),
     http.put("http://localhost:8000/api/jobs/1/interview-baseline", async ({ request }) => {
       capture.body = await request.json();
@@ -29,7 +30,7 @@ function mount(capture: { body?: any }, canWrite = true) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
-  return render(
+  const result = render(
     <Wrapper>
       <EditInterviewBaselineSheet
         jobId={1}
@@ -39,6 +40,7 @@ function mount(capture: { body?: any }, canWrite = true) {
       />
     </Wrapper>,
   );
+  return { ...result, qc };
 }
 
 describe("EditInterviewBaselineSheet", () => {
@@ -94,6 +96,26 @@ describe("EditInterviewBaselineSheet", () => {
     expect(
       screen.getByRole("button", { name: "Remove question 2" }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps a typed edit through a background refetch of the job (e.g. SSE)", async () => {
+    const { qc } = mount({});
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument(),
+    );
+
+    const input = screen.getByLabelText("Baseline question 1");
+    await userEvent.clear(input);
+    await userEvent.type(input, "Edited but not yet saved");
+
+    // Simulate handleServerEvent's `["jobs"]`, exact: false invalidation —
+    // fired by any stage/error SSE event anywhere, not just this job — and
+    // wait for the resulting background refetch to actually land. The
+    // mocked GET returns the same `updated_at` every time, so a correct
+    // implementation must not reset `rows` from it.
+    await qc.refetchQueries({ queryKey: ["jobs", 1] });
+
+    expect(screen.getByDisplayValue("Edited but not yet saved")).toBeInTheDocument();
   });
 
   it("shows the questions but hides every write control for a viewer", async () => {

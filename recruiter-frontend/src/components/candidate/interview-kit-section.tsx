@@ -34,7 +34,8 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function InterviewKitSection({ applicationId, canWrite }: Props) {
-  const { kit, isLoading, generate, patch, submit } = useInterviewKit(applicationId);
+  const { kit, isLoading, isError, refetch, generate, patch, submit } =
+    useInterviewKit(applicationId);
   const [draft, setDraft] = useState<KitQuestion[]>([]);
 
   // The server is the source of truth; local edits are a draft until saved.
@@ -44,7 +45,34 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     if (kit?.questions) setDraft(kit.questions);
   }, [kit?.generated_at, kit?.status]);
 
+  // Dirty = the draft has diverged from the last-saved questions. Used both
+  // for a visible affordance on Save and to warn before an unsaved
+  // navigation/refresh wipes typed answers and ratings.
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(kit?.questions ?? []);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    function handler(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
   if (isLoading) return null;
+
+  if (isError) {
+    return (
+      <section className="space-y-2">
+        <h3 className="text-lg font-semibold">Interview kit</h3>
+        <p className="text-xs border border-red-400 bg-red-50 text-red-900 rounded p-2">
+          Couldn't load the interview kit.
+        </p>
+        <Button variant="outline" onClick={() => refetch()}>Retry</Button>
+      </section>
+    );
+  }
 
   if (!kit) {
     return (
@@ -197,7 +225,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
           >
             Add question
           </Button>
-          <Button variant="outline" onClick={saveAnswers}>Save answers</Button>
+          <Button
+            variant="outline"
+            onClick={saveAnswers}
+            data-dirty={isDirty}
+            className={isDirty ? "border-amber-400 text-amber-400" : undefined}
+          >
+            Save answers{isDirty && <span aria-hidden="true">*</span>}
+          </Button>
           <Button onClick={onSubmit}>Submit interview</Button>
         </div>
       )}

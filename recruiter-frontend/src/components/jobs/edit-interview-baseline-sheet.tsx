@@ -52,15 +52,26 @@ export function EditInterviewBaselineSheet({
   const qc = useQueryClient();
   const job = useQuery({
     queryKey: queryKeys.job(jobId),
-    queryFn: () => api<{ interview_baseline: BaselineQuestion[] | null }>(`/api/jobs/${jobId}`),
+    queryFn: () =>
+      api<{ interview_baseline: BaselineQuestion[] | null; updated_at?: string }>(
+        `/api/jobs/${jobId}`,
+      ),
   });
   // Editable working copy of the baseline. Reset from the job whenever the
   // sheet opens, so a cancelled edit never leaks into the next open.
+  //
+  // Deliberately keyed on `job.data?.updated_at`, not `job.data` itself:
+  // handleServerEvent invalidates the whole `["jobs"]` query family on
+  // every stage/error SSE event (any candidate, any job), which refetches
+  // this job too. A refetch returns a new object identity even when
+  // nothing about this job changed, so keying on `job.data` would wipe
+  // unsaved rows on unrelated background traffic. `updated_at` only
+  // changes when this job actually changed.
   const [rows, setRows] = useState<BaselineQuestion[]>([]);
 
   useEffect(() => {
     if (open && job.data) setRows(job.data.interview_baseline ?? []);
-  }, [open, job.data]);
+  }, [open, job.data?.updated_at]);
 
   const save = useMutation({
     mutationFn: (questions: BaselineQuestion[]) =>

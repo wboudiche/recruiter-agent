@@ -46,6 +46,17 @@ describe("useInterviewKit", () => {
     expect(result.current.kit).toBeNull();
   });
 
+  it("exposes isError distinctly from an absent kit when the request fails", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 }),
+      ),
+    );
+    const { result } = renderHook(() => useInterviewKit(1), { wrapper: wrap() });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.kit).toBeNull();
+  });
+
   it("invalidates both interview-kit and application queries on submit", async () => {
     server.use(
       http.post("http://localhost:8000/api/applications/1/interview-kit/submit", () =>

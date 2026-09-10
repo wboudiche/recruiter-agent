@@ -69,6 +69,11 @@ export function useSSE(path: string = "/api/events") {
     source.addEventListener("stage", handle);
     source.addEventListener("error", handle);
     source.addEventListener("message", handle);
+    // The backend names the SSE event after its type (see events.py), so
+    // interview_kit progress arrives as `event: interview_kit` — a browser
+    // EventSource never routes a named event to a "message" listener, so
+    // this needs its own registration or the kit panel spins forever.
+    source.addEventListener("interview_kit", handle);
 
     return () => source.close();
   }, [path, queryClient]);

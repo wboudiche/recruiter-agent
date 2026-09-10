@@ -57,6 +57,12 @@ export function useInterviewKit(applicationId: number) {
   return {
     kit: query.data?.kit ?? null,
     isLoading: query.isLoading,
+    // A fetch failure (e.g. a 500) must be distinguishable from "no kit
+    // exists yet" — collapsing both to `kit: null` makes a real error
+    // render as the absent state, offering "Generate" as if nothing were
+    // wrong.
+    isError: query.isError,
+    refetch: query.refetch,
     generate,
     patch,
     submit,
