@@ -54,7 +54,19 @@ export function useInterviewKit(applicationId: number) {
     },
   });
 
+  // Deliberately no invalidation on success: a draft is handed back for the
+  // recruiter to read and reword, and nothing is stored server-side, so there
+  // is nothing to refetch.
+  const draftQuestion = useMutation({
+    mutationFn: (hint: string | null) =>
+      api<{ question: { text: string; criterion: string | null } }>(
+        `${path}/draft-question`,
+        { method: "POST", json: { hint } },
+      ),
+  });
+
   return {
+    draftQuestion,
     kit: query.data?.kit ?? null,
     isLoading: query.isLoading,
     // A fetch failure (e.g. a 500) must be distinguishable from "no kit

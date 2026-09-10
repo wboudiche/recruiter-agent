@@ -81,4 +81,32 @@ describe("useInterviewKit", () => {
       queryKey: queryKeys.application(1),
     });
   });
+
+  it("drafts a question with AI without persisting or refetching the kit", async () => {
+    // The draft is handed back for review — it must not touch the stored kit,
+    // so no invalidation either.
+    let hintSent: unknown;
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: { status: "ready", questions: [] } }),
+      ),
+      http.post(
+        "http://localhost:8000/api/applications/1/interview-kit/draft-question",
+        async ({ request }) => {
+          hintSent = ((await request.json()) as { hint?: string }).hint;
+          return HttpResponse.json({
+            question: { text: "How do you handle Terraform state locking?", criterion: "IaC" },
+          });
+        },
+      ),
+    );
+    const { result } = renderHook(() => useInterviewKit(1), { wrapper: wrap() });
+    await waitFor(() => expect(result.current.kit).not.toBeNull());
+
+    const drafted = await result.current.draftQuestion.mutateAsync("Terraform state locking");
+
+    expect(hintSent).toBe("Terraform state locking");
+    expect(drafted.question.text).toBe("How do you handle Terraform state locking?");
+    expect(result.current.kit?.questions).toHaveLength(0);
+  });
 });

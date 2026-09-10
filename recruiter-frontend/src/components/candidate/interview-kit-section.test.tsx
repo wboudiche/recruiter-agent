@@ -247,4 +247,86 @@ describe("InterviewKitSection", () => {
     expect(screen.queryByLabelText(/^Question \d+$/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /^Question \d+$/i })).not.toBeInTheDocument();
   });
+
+  it("drafts a question with AI and appends it as an editable row", async () => {
+    let hintSent: unknown;
+    server.use(
+      http.post(
+        "http://localhost:8000/api/applications/1/interview-kit/draft-question",
+        async ({ request }) => {
+          hintSent = ((await request.json()) as { hint?: string }).hint;
+          return HttpResponse.json({
+            question: { text: "How do you handle Terraform state locking?", criterion: "IaC" },
+          });
+        },
+      ),
+    );
+    mountWithKit(READY);
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+
+    await userEvent.type(screen.getByPlaceholderText(/about/i), "Terraform state locking");
+    await userEvent.click(screen.getByRole("button", { name: /draft with ai/i }));
+
+    // Lands as an ordinary editable row, so it is read and can be reworded
+    // before Save ever writes it to the record.
+    await waitFor(() =>
+      expect(
+        screen.getByDisplayValue("How do you handle Terraform state locking?"),
+      ).toBeInTheDocument(),
+    );
+    expect(hintSent).toBe("Terraform state locking");
+  });
+
+  it("sends a null hint when the box is empty", async () => {
+    let hintSent: unknown = "unset";
+    server.use(
+      http.post(
+        "http://localhost:8000/api/applications/1/interview-kit/draft-question",
+        async ({ request }) => {
+          hintSent = ((await request.json()) as { hint?: string | null }).hint;
+          return HttpResponse.json({ question: { text: "Anything?", criterion: null } });
+        },
+      ),
+    );
+    mountWithKit(READY);
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /draft with ai/i }));
+
+    await waitFor(() => expect(hintSent).toBeNull());
+  });
+
+  it("surfaces a failed draft instead of silently doing nothing", async () => {
+    server.use(
+      http.post(
+        "http://localhost:8000/api/applications/1/interview-kit/draft-question",
+        () => HttpResponse.json({ detail: "Could not draft a question" }, { status: 502 }),
+      ),
+    );
+    mountWithKit(READY);
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole("button", { name: /draft with ai/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not draft/i)).toBeInTheDocument(),
+    );
+  });
+
+  it("offers no AI drafting to a viewer", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: READY }),
+      ),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <InterviewKitSection applicationId={1} canWrite={false} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByText("Why this role?")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /draft with ai/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/about/i)).not.toBeInTheDocument();
+  });
 });
