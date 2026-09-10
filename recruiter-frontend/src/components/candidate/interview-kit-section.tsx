@@ -39,11 +39,33 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   const [draft, setDraft] = useState<KitQuestion[]>([]);
 
   // The server is the source of truth; local edits are a draft until saved.
-  // Deliberately NOT keyed on `kit.questions` itself: a background refetch
-  // must not clobber answers the recruiter has typed but not yet saved.
-  useEffect(() => {
-    if (kit?.questions) setDraft(kit.questions);
-  }, [kit?.generated_at, kit?.status]);
+  // Deliberately keyed on `generated_at`/`status`, not on `kit.questions`
+  // itself: a background refetch must not clobber answers the recruiter has
+  // typed but not yet saved.
+  //
+  // This seeding used to live in a `useEffect`. Effects run after the
+  // commit that first shows a loaded `kit`, so there was a render — the one
+  // that made `kit.questions` visible — where `draft` was still `[]` from
+  // the previous render and hadn't yet been reset. `isDirty` (below) reads
+  // `true` in that window purely because hydration hasn't happened, not
+  // because of any edit, and a `beforeunload` handler keyed on `isDirty`
+  // would attach for it. Normally a cascading re-render clears it again
+  // before anything observes it, but that cleanup itself happens in a
+  // *later* effect flush, so nothing guarantees it wins a race against
+  // whatever runs immediately after the commit (in tests, an assertion
+  // right after `waitFor` resolves — see interview-kit-section.test.tsx).
+  //
+  // Seeding during render instead — React's documented pattern for
+  // resetting state when a prop changes — removes the window rather than
+  // racing to close it: the mismatched render is discarded and redone with
+  // the fresh draft before anything commits, so `isDirty` below can never
+  // observe an unseeded draft as dirty.
+  const seedKey = kit ? `${kit.generated_at}:${kit.status}` : null;
+  const [seededKey, setSeededKey] = useState<string | null>(null);
+  if (kit?.questions && seedKey !== seededKey) {
+    setSeededKey(seedKey);
+    setDraft(kit.questions);
+  }
 
   // Dirty = the draft has diverged from the last-saved questions. Used both
   // for a visible affordance on Save and to warn before an unsaved
