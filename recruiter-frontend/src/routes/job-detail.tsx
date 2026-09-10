@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router-dom";
-import { Plus, SlidersHorizontal } from "lucide-react";
+import { MessageSquareText, Plus, SlidersHorizontal } from "lucide-react";
 import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { AddCandidatePanel } from "@/components/kanban/add-candidate-panel";
@@ -10,6 +10,7 @@ import {
   type Density,
 } from "@/components/kanban/kanban-density-toggle";
 import { EditCriteriaSheet } from "@/components/jobs/edit-criteria-sheet";
+import { EditInterviewBaselineSheet } from "@/components/jobs/edit-interview-baseline-sheet";
 import { JobActionsMenu } from "@/components/jobs/job-actions-menu";
 import { useJob } from "@/hooks/use-job";
 import { useJobApplications } from "@/hooks/use-job-applications";
@@ -36,6 +37,7 @@ export default function JobDetail() {
   const [showRejected, setShowRejected] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
+  const [baselineOpen, setBaselineOpen] = useState(false);
   const [density, setDensity] = useState<Density>(readDensity);
 
   function changeDensity(d: Density) {
@@ -79,6 +81,15 @@ export default function JobDetail() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setBaselineOpen(true)}
+            title="Baseline interview questions"
+          >
+            <MessageSquareText className="h-4 w-4 mr-1" />
+            Baseline
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setShowRejected((s) => !s)}
           >
             {showRejected ? "Hide rejected" : "Show rejected"}
@@ -115,6 +126,11 @@ export default function JobDetail() {
         open={criteriaOpen}
         onOpenChange={setCriteriaOpen}
         canWrite={canWrite}
+      />
+      <EditInterviewBaselineSheet
+        jobId={id}
+        open={baselineOpen}
+        onOpenChange={setBaselineOpen}
       />
     </div>
   );
