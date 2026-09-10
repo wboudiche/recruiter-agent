@@ -12,7 +12,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function mount(capture: { body?: any }) {
+function mount(capture: { body?: any }, canWrite = true) {
   server.use(
     http.get("http://localhost:8000/api/jobs/1", () =>
       HttpResponse.json({ id: 1, title: "SRE", criteria: [],
@@ -30,7 +30,14 @@ function mount(capture: { body?: any }) {
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
   return render(
-    <Wrapper><EditInterviewBaselineSheet jobId={1} open onOpenChange={() => {}} /></Wrapper>,
+    <Wrapper>
+      <EditInterviewBaselineSheet
+        jobId={1}
+        open
+        onOpenChange={() => {}}
+        canWrite={canWrite}
+      />
+    </Wrapper>,
   );
 }
 
@@ -87,5 +94,23 @@ describe("EditInterviewBaselineSheet", () => {
     expect(
       screen.getByRole("button", { name: "Remove question 2" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows the questions but hides every write control for a viewer", async () => {
+    mount({}, false);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument(),
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /add question/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /remove question/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^save$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Why this role?")).toHaveAttribute("readonly");
   });
 });

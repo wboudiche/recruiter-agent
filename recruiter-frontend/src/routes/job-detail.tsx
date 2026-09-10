@@ -131,6 +131,7 @@ export default function JobDetail() {
         jobId={id}
         open={baselineOpen}
         onOpenChange={setBaselineOpen}
+        canWrite={canWrite}
       />
     </div>
   );

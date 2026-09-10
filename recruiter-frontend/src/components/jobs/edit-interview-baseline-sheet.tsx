@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { readOnlyNotice } from "@/lib/read-only-notice";
 
 export interface BaselineQuestion {
   id: string;
@@ -25,6 +26,7 @@ interface Props {
   jobId: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  canWrite?: boolean;
 }
 
 // A bare `Date.now()` collides when two rows are added within the same
@@ -41,7 +43,12 @@ function newBaselineId(): string {
   return `b-${Date.now()}-${baselineIdCounter}`;
 }
 
-export function EditInterviewBaselineSheet({ jobId, open, onOpenChange }: Props) {
+export function EditInterviewBaselineSheet({
+  jobId,
+  open,
+  onOpenChange,
+  canWrite = false,
+}: Props) {
   const qc = useQueryClient();
   const job = useQuery({
     queryKey: queryKeys.job(jobId),
@@ -85,24 +92,33 @@ export function EditInterviewBaselineSheet({ jobId, open, onOpenChange }: Props)
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl flex flex-col">
         <SheetHeader>
-          <SheetTitle>Baseline interview questions</SheetTitle>
+          <SheetTitle>
+            {canWrite ? "Edit baseline questions" : "Baseline questions"}
+          </SheetTitle>
           <SheetDescription>
-            Asked of every candidate for this role. Editing these does not
-            change interviews already generated.
+            {canWrite
+              ? "Asked of every candidate for this role. Editing these does not change interviews already generated."
+              : `${readOnlyNotice("edit baseline questions")} Asked of every candidate for this role.`}
           </SheetDescription>
         </SheetHeader>
 
-        <div className="flex items-center gap-2 py-3 border-b">
-          <Button type="button" variant="outline" size="sm" onClick={add}>
-            <Plus className="h-4 w-4 mr-1" />
-            Add question
-          </Button>
-        </div>
+        {canWrite && (
+          <div className="flex items-center gap-2 py-3 border-b">
+            <Button type="button" variant="outline" size="sm" onClick={add}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add question
+            </Button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto space-y-4 py-4">
           {rows.length === 0 && (
             <p className="text-sm text-muted-foreground italic">
-              No baseline questions yet. Use <em>Add question</em> to start.
+              {canWrite ? (
+                <>No baseline questions yet. Use <em>Add question</em> to start.</>
+              ) : (
+                "No baseline questions set for this job yet."
+              )}
             </p>
           )}
           {rows.map((row, i) => (
@@ -113,22 +129,25 @@ export function EditInterviewBaselineSheet({ jobId, open, onOpenChange }: Props)
                   id={`baseline-${row.id}`}
                   value={row.text}
                   onChange={(e) => update(i, e.target.value)}
+                  readOnly={!canWrite}
                 />
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                // Deliberately doesn't repeat "Baseline question N" — that
-                // substring is also how the input's own label reads, and
-                // any lookup that matches on it (e.g. a case-insensitive
-                // "baseline question" query) would otherwise resolve both
-                // the input and this button and pick whichever sorts last.
-                aria-label={`Remove question ${i + 1}`}
-                onClick={() => remove(i)}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {canWrite && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  // Deliberately doesn't repeat "Baseline question N" — that
+                  // substring is also how the input's own label reads, and
+                  // any lookup that matches on it (e.g. a case-insensitive
+                  // "baseline question" query) would otherwise resolve both
+                  // the input and this button and pick whichever sorts last.
+                  aria-label={`Remove question ${i + 1}`}
+                  onClick={() => remove(i)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           ))}
         </div>
@@ -140,17 +159,19 @@ export function EditInterviewBaselineSheet({ jobId, open, onOpenChange }: Props)
             onClick={() => onOpenChange(false)}
             disabled={save.isPending}
           >
-            Cancel
+            {canWrite ? "Cancel" : "Close"}
           </Button>
-          <Button
-            type="button"
-            // Blank rows are dropped rather than rejected: an empty row is
-            // an abandoned edit, not an error worth blocking a save for.
-            onClick={() => save.mutate(rows.filter((r) => r.text.trim()))}
-            disabled={save.isPending}
-          >
-            {save.isPending ? "Saving…" : "Save"}
-          </Button>
+          {canWrite && (
+            <Button
+              type="button"
+              // Blank rows are dropped rather than rejected: an empty row is
+              // an abandoned edit, not an error worth blocking a save for.
+              onClick={() => save.mutate(rows.filter((r) => r.text.trim()))}
+              disabled={save.isPending}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          )}
         </div>
       </SheetContent>
     </Sheet>
