@@ -189,3 +189,73 @@ async def test_patch_404s_when_no_kit_exists(
     resp = await api_client.patch(f"/api/applications/{app_id}/interview-kit",
                                   json={"questions": []})
     assert resp.status_code == 404
+
+
+# --- drafting one extra question with AI ----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_draft_question_returns_one_question(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    from recruiter.api.candidates import get_llm
+    from recruiter.llm.client import FakeLLMClient
+    from recruiter.main import app
+    from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
+
+    app_id = await create_scored_app()
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient(structured_responses=[
+        GeneratedQuestions(questions=[
+            GeneratedQuestion(text="How do you handle Terraform state locking?",
+                              criterion="Infrastructure as code"),
+        ]),
+    ])
+    try:
+        resp = await api_client.post(
+            f"/api/applications/{app_id}/interview-kit/draft-question",
+            json={"hint": "Terraform state locking"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["question"]["text"] == "How do you handle Terraform state locking?"
+    assert body["question"]["criterion"] == "Infrastructure as code"
+
+
+@pytest.mark.asyncio
+async def test_draft_question_does_not_persist_anything(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The draft must reach the recruiter for review, not the record."""
+    from recruiter.api.candidates import get_llm
+    from recruiter.llm.client import FakeLLMClient
+    from recruiter.main import app
+    from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
+
+    app_id = await create_scored_app()
+    before = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient(structured_responses=[
+        GeneratedQuestions(questions=[GeneratedQuestion(text="Q?", criterion=None)]),
+    ])
+    try:
+        await api_client.post(
+            f"/api/applications/{app_id}/interview-kit/draft-question", json={"hint": None},
+        )
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    after = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+    assert after == before
+
+
+@pytest.mark.asyncio
+async def test_draft_question_404s_for_an_unknown_application(
+    api_client: AsyncClient,
+) -> None:
+    resp = await api_client.post(
+        "/api/applications/999999/interview-kit/draft-question", json={"hint": None},
+    )
+    assert resp.status_code == 404

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import {
@@ -34,9 +35,10 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function InterviewKitSection({ applicationId, canWrite }: Props) {
-  const { kit, isLoading, isError, refetch, generate, patch, submit } =
+  const { kit, isLoading, isError, refetch, generate, patch, submit, draftQuestion } =
     useInterviewKit(applicationId);
   const [draft, setDraft] = useState<KitQuestion[]>([]);
+  const [hint, setHint] = useState("");
 
   // The server is the source of truth; local edits are a draft until saved.
   // Deliberately keyed on `generated_at`/`status`, not on `kit.questions`
@@ -247,6 +249,40 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
           >
             Add question
           </Button>
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="about… (optional)"
+              aria-label="What the AI-drafted question should be about"
+              className="h-9 w-56"
+              value={hint}
+              onChange={(e) => setHint(e.target.value)}
+            />
+            <Button
+              variant="outline"
+              disabled={draftQuestion.isPending}
+              onClick={() => {
+                // An empty box means "suggest anything missing", which the
+                // backend reads as a null hint — not an empty string.
+                draftQuestion.mutate(hint.trim() || null, {
+                  onSuccess: (res) => {
+                    setDraft((qs) => [...qs, {
+                      id: newQuestionId(),
+                      text: res.question.text,
+                      source: "probe",
+                      criterion: res.question.criterion,
+                      answer: null,
+                      rating: null,
+                    }]);
+                    setHint("");
+                  },
+                  onError: (err) =>
+                    toast.error(errorMessage(err, "Could not draft a question")),
+                });
+              }}
+            >
+              {draftQuestion.isPending ? "Drafting…" : "Draft with AI"}
+            </Button>
+          </div>
           <Button
             variant="outline"
             onClick={saveAnswers}

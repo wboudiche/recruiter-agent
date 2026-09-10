@@ -8,18 +8,20 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
+from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, Job, Stage
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
-from recruiter.pipeline.interview_kit_generator import generate_probes
+from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
 from recruiter.schemas.interview import (
     BaselineQuestion,
+    GeneratedQuestion,
     InterviewKit,
     KitQuestion,
 )
@@ -172,3 +174,68 @@ async def submit_kit(
 
     await session.commit()
     return InterviewKitRead(kit=kit)
+
+
+class DraftQuestionRequest(BaseModel):
+    """`hint` is what the recruiter wants probed; empty means "anything missing"."""
+
+    hint: str | None = Field(default=None, max_length=2000)
+
+
+class DraftQuestionResponse(BaseModel):
+    question: GeneratedQuestion
+
+
+@router.post(
+    "/applications/{application_id}/interview-kit/draft-question",
+    response_model=DraftQuestionResponse,
+)
+async def draft_kit_question(
+    application_id: int,
+    payload: DraftQuestionRequest,
+    session: AsyncSession = Depends(get_session),
+    # get_llm_or_none, not get_llm: FastAPI resolves dependencies eagerly, so
+    # Depends(get_llm) would 503 before this handler could 404 an unknown
+    # application. Validate the request first, then require the model.
+    llm: LLMClient | None = Depends(get_llm_or_none),
+) -> DraftQuestionResponse:
+    """Draft ONE extra question and hand it back unsaved.
+
+    Synchronous, unlike whole-kit generation: the recruiter clicked and is
+    waiting, and nothing here can strand a stage transition, so a background
+    task would only add latency and a polling problem.
+
+    Nothing is persisted. The draft goes back to the panel as an ordinary
+    editable row, so it is read — and can be reworded — before it ever
+    becomes part of the interview record.
+    """
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+
+    if llm is None:
+        raise HTTPException(
+            status_code=503,
+            detail="No LLM provider configured — set one in Settings → LLM.",
+        )
+
+    job = await session.get(Job, app_row.job_id)
+    candidate = await session.get(Candidate, app_row.candidate_id)
+    existing = [
+        q.get("text", "")
+        for q in ((app_row.interview_kit or {}).get("questions") or [])
+        if q.get("text")
+    ]
+    try:
+        question = await draft_question(
+            profile=candidate.summary or candidate.full_name or "",
+            criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
+            score_breakdown=app_row.score_breakdown,
+            existing_questions=existing,
+            hint=payload.hint,
+            llm=llm,
+        )
+    except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
+        logger.warning("interview question draft failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Could not draft a question: {exc}") from exc
+    return DraftQuestionResponse(question=question)
