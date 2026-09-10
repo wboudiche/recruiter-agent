@@ -30,7 +30,7 @@ def test_regeneration_keeps_answered_questions_untouched() -> None:
     existing = InterviewKit(status="ready", questions=[
         KitQuestion(id="b1", text="Why this role?", source="baseline",
                     answer="Wants scale", rating="strong"),
-        KitQuestion(id="p1", text="Old probe", source="probe", answer=None),
+        KitQuestion(id="p-oldprobe1", text="Old probe", source="probe", answer=None),
     ])
     merged = merge_regenerated(existing, _baseline(), ["Fresh probe"],
                                criteria_by_probe=[None], now=NOW)
@@ -43,6 +43,14 @@ def test_regeneration_keeps_answered_questions_untouched() -> None:
     assert "Old probe" not in [q.text for q in merged.questions]
     assert "Fresh probe" in [q.text for q in merged.questions]
 
+    # Verify no duplicates and correct totals
+    texts = [q.text for q in merged.questions]
+    ids = [q.id for q in merged.questions]
+    assert len(texts) == len(set(texts)), "Question texts should be unique"
+    assert len(ids) == len(set(ids)), "Question ids should be unique"
+    # 1 answered baseline + 1 fresh baseline (b2) + 1 fresh probe
+    assert len(merged.questions) == 3
+
 
 def test_regeneration_re_snapshots_unanswered_baseline_questions() -> None:
     """Explicit regeneration should pick up the role's current questions."""
@@ -53,3 +61,39 @@ def test_regeneration_re_snapshots_unanswered_baseline_questions() -> None:
     texts = [q.text for q in merged.questions]
     assert "Stale baseline wording" not in texts
     assert "Why this role?" in texts
+
+
+def test_regeneration_maintains_baseline_then_probe_ordering() -> None:
+    """Questions must stay in baseline-then-probe order to avoid reordering during
+    live interviews. This tests the critical case: answered probe and unanswered
+    baseline should not reorder.
+    """
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="b1", text="Why this role?", source="baseline", answer=None),
+        KitQuestion(id="p-answered1", text="Answered probe", source="probe",
+                    answer="Strong answer", rating="strong"),
+    ])
+    merged = merge_regenerated(existing, _baseline(), ["Fresh probe"],
+                               criteria_by_probe=[None], now=NOW)
+
+    # Extract sources and texts in order
+    sources = [q.source for q in merged.questions]
+    texts = [q.text for q in merged.questions]
+
+    # All baseline questions must come before all probe questions
+    baseline_indices = [i for i, s in enumerate(sources) if s == "baseline"]
+    probe_indices = [i for i, s in enumerate(sources) if s == "probe"]
+    if baseline_indices and probe_indices:
+        assert max(baseline_indices) < min(probe_indices), (
+            "Baseline questions must come before probe questions"
+        )
+
+    # Verify no duplicates
+    assert len(texts) == len(set(texts)), "Question texts should be unique"
+    assert len([q.id for q in merged.questions]) == len(
+        set([q.id for q in merged.questions])
+    ), "Question ids should be unique"
+
+    # Verify answered probe is present and fresh probe is there
+    assert "Answered probe" in texts
+    assert "Fresh probe" in texts

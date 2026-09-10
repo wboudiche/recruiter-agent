@@ -22,7 +22,7 @@ def _probe_questions(probes: list[str], criteria_by_probe: list[str | None]) -> 
 
 def _baseline_questions(baseline: list[BaselineQuestion]) -> list[KitQuestion]:
     return [
-        KitQuestion(id=f"b-{b.id}", text=b.text, source="baseline", criterion=b.criterion)
+        KitQuestion(id=b.id, text=b.text, source="baseline", criterion=b.criterion)
         for b in baseline
     ]
 
@@ -56,16 +56,33 @@ def merge_regenerated(
     they survive regeneration verbatim — including their rating and their
     original wording. Only unanswered questions are replaced: baseline ones
     re-snapshot from the job's current baseline, probes are regenerated.
-    """
-    answered = [q for q in existing.questions if q.answer is not None]
-    answered_baseline_ids = {q.id for q in answered if q.source == "baseline"}
 
+    Questions maintain baseline-then-probe ordering within each group:
+    answered baselines, unanswered baselines, answered probes, fresh probes.
+    """
+    # Separate answered from unanswered questions
+    answered_baseline = [
+        q for q in existing.questions
+        if q.answer is not None and q.source == "baseline"
+    ]
+    answered_probe = [
+        q for q in existing.questions
+        if q.answer is not None and q.source == "probe"
+    ]
+    answered_baseline_ids = {q.id for q in answered_baseline}
+
+    # Generate fresh unanswered questions
     fresh_baseline = [
         q for q in _baseline_questions(baseline) if q.id not in answered_baseline_ids
     ]
+    fresh_probes = _probe_questions(probes, criteria_by_probe)
+
+    # Combine in baseline-then-probe order within each group
     return InterviewKit(
         status="ready",
         generated_at=now,
         submitted_at=existing.submitted_at,
-        questions=answered + fresh_baseline + _probe_questions(probes, criteria_by_probe),
+        questions=(
+            answered_baseline + fresh_baseline + answered_probe + fresh_probes
+        ),
     )
