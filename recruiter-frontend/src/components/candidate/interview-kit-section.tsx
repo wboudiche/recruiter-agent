@@ -184,9 +184,15 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
           <li key={q.id} className="border border-border rounded p-2 space-y-2">
             <div className="flex items-start justify-between gap-2">
               {canWrite ? (
-                <input
+                // Questions run to 200+ characters; a single-line input
+                // clipped them so the interviewer couldn't read what to
+                // ask. `field-sizing: content` grows the box to fit (see
+                // jobs-new.tsx for browser support); `rows={1}` keeps a
+                // short question on one line where it isn't supported.
+                <textarea
                   aria-label={`Question ${i + 1}`}
-                  className="flex-1 bg-transparent text-sm outline-none"
+                  rows={1}
+                  className="flex-1 resize-none bg-transparent text-sm leading-snug outline-none [field-sizing:content]"
                   value={q.text}
                   onChange={(e) => update(q.id, { text: e.target.value })}
                 />
