@@ -73,6 +73,29 @@ describe("InterviewKitSection", () => {
     expect(screen.getByText(/for this candidate/i)).toBeInTheDocument();
   });
 
+  it("renders each question in a multi-line field so long text wraps instead of clipping", async () => {
+    const LONG = "Can you describe a specific instance where you mentored a junior engineer or led a "
+      + "small team through a challenging DevOps project? What was the outcome and what would you "
+      + "do differently next time?";
+    mountWithKit({ ...READY, questions: [{ ...READY.questions[0], text: LONG }] });
+    const field = await screen.findByLabelText("Question 1");
+    // A single-line <input> can only scroll horizontally; only a textarea
+    // lets the browser wrap the question onto as many lines as it needs.
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(field).toHaveValue(LONG);
+  });
+
+  it("saves an edit made through the question field", async () => {
+    const capture: { body?: any } = {};
+    mountWithKit(READY, capture);
+    const field = await screen.findByLabelText("Question 1");
+    await userEvent.clear(field);
+    await userEvent.type(field, "Why us?");
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await waitFor(() => expect(capture.body).toBeDefined());
+    expect(capture.body.questions[0].text).toBe("Why us?");
+  });
+
   it("gives each rating button a name that identifies its question", async () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
