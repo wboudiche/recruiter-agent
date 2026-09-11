@@ -195,3 +195,89 @@ async def test_discover_skips_blog_provider_with_empty_domains() -> None:
             assert "site:" in q  # never a degenerate site:<empty>
     finally:
         _restore(saved)
+
+
+class _ManyDomainsProvider:
+    name = "many"
+    domains = [f"site{i}.example" for i in range(10)]
+    def __init__(self, *_, **__): pass
+    async def enrich(self, hint): return None
+    async def aclose(self): pass
+
+
+class SlowSourcing(FakeSourcing):
+    """FakeSourcing whose queries take real (async) time, so concurrency
+    is observable: `max_in_flight` records the peak number of queries
+    that were awaiting at the same moment."""
+    def __init__(self, delay_by_query: dict[str, float] | None = None,
+                 default_delay: float = 0.02, **kw) -> None:
+        super().__init__(**kw)
+        self._delay = delay_by_query or {}
+        self._default_delay = default_delay
+        self.in_flight = 0
+        self.max_in_flight = 0
+
+    async def search(self, query: str, limit: int) -> list[SearchResult]:
+        import asyncio
+        self.in_flight += 1
+        self.max_in_flight = max(self.max_in_flight, self.in_flight)
+        try:
+            await asyncio.sleep(self._delay.get(query, self._default_delay))
+            return await super().search(query, limit)
+        finally:
+            self.in_flight -= 1
+
+
+@pytest.mark.asyncio
+async def test_discover_runs_domain_queries_concurrently() -> None:
+    """Ten domains at 20ms each must not take ten sequential round-trips."""
+    saved = _registry_with(_ManyDomainsProvider)
+    try:
+        sourcing = SlowSourcing()
+        fake_settings = type("S", (), {"enrichment_sources": {}})()
+        await discover("Alice", "Acme", sourcing=sourcing, settings=fake_settings)
+        assert len(sourcing.queries) == 10
+        assert sourcing.max_in_flight > 1
+    finally:
+        _restore(saved)
+
+
+@pytest.mark.asyncio
+async def test_discover_bounds_concurrency() -> None:
+    """Concurrency is capped so a burst of queries can't trip provider
+    rate limits (SerpAPI free tier, self-hosted SearXNG)."""
+    from recruiter.enrichment.discovery import DISCOVERY_CONCURRENCY
+
+    saved = _registry_with(_ManyDomainsProvider)
+    try:
+        sourcing = SlowSourcing()
+        fake_settings = type("S", (), {"enrichment_sources": {}})()
+        await discover("Alice", "Acme", sourcing=sourcing, settings=fake_settings)
+        assert 1 < DISCOVERY_CONCURRENCY < 10
+        assert sourcing.max_in_flight <= DISCOVERY_CONCURRENCY
+    finally:
+        _restore(saved)
+
+
+@pytest.mark.asyncio
+async def test_discover_hint_order_follows_registry_not_completion() -> None:
+    """The mastodon query is slower than github's, but mastodon is
+    registered first, so its hint still comes first."""
+    saved = _registry_with(_MastoProvider, _GitHubProvider)
+    try:
+        masto_q = '"Alice" "Acme" site:mastodon.social'
+        gh_q = '"Alice" "Acme" site:github.com'
+        sourcing = SlowSourcing(
+            delay_by_query={masto_q: 0.05, gh_q: 0.0},
+            results_by_query={
+                masto_q: [SearchResult(name="Alice", url="https://mastodon.social/@alice",
+                                       snippet="", source="web")],
+                gh_q: [SearchResult(name="Alice", url="https://github.com/alice",
+                                    snippet="", source="web")],
+            },
+        )
+        fake_settings = type("S", (), {"enrichment_sources": {}})()
+        hints = await discover("Alice", "Acme", sourcing=sourcing, settings=fake_settings)
+        assert [h.source for h in hints] == ["mastodon", "github"]
+    finally:
+        _restore(saved)
