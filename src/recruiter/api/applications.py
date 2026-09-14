@@ -20,7 +20,7 @@ from recruiter.api.jobs import get_llm_or_none
 from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, EventLog, Stage
+from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -55,7 +55,8 @@ async def get_application(application_id: int, session: AsyncSession = Depends(g
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     errors = await _latest_errors(session, [app_row.id])
-    return _to_read(app_row, errors.get(app_row.id))
+    counts = await _sheet_counts(session, [app_row.id])
+    return _to_read(app_row, errors.get(app_row.id), counts.get(app_row.id, (0, 0)))
 
 
 @router.get("/candidates/{candidate_id}", response_model=CandidateRead)
@@ -142,7 +143,8 @@ async def list_applications_for_job(
         )
     ).scalars().all()
     errors = await _latest_errors(session, [r.id for r in rows])
-    return [_to_read(r, errors.get(r.id)) for r in rows]
+    counts = await _sheet_counts(session, [r.id for r in rows])
+    return [_to_read(r, errors.get(r.id), counts.get(r.id, (0, 0))) for r in rows]
 
 
 # Event types that actually halt the pipeline and are worth surfacing as
@@ -200,8 +202,28 @@ async def _latest_errors(
     return out
 
 
+async def _sheet_counts(
+    session: AsyncSession, application_ids: list[int]
+) -> dict[int, tuple[int, int]]:
+    """application id → (assigned, submitted). One query for the board."""
+    if not application_ids:
+        return {}
+    rows = (await session.execute(
+        select(
+            InterviewAssignment.application_id,
+            func.count(InterviewAssignment.id),
+            func.count(InterviewAssignment.submitted_at),
+        )
+        .where(InterviewAssignment.application_id.in_(application_ids))
+        .group_by(InterviewAssignment.application_id)
+    )).all()
+    return {app_id: (total, submitted) for app_id, total, submitted in rows}
+
+
 def _to_read(
-    app_row: Application, last_error: tuple[str, int] | None = None
+    app_row: Application,
+    last_error: tuple[str, int] | None = None,
+    sheet_counts: tuple[int, int] = (0, 0),
 ) -> ApplicationRead:
     breakdown = (
         [ScoreBreakdownItem.model_validate(c) for c in app_row.score_breakdown]
@@ -250,6 +272,8 @@ def _to_read(
         last_error=last_error[0] if last_error else None,
         last_error_event_id=last_error[1] if last_error else None,
         enrichment=app_row.enrichment,
+        sheets_total=sheet_counts[0],
+        sheets_submitted=sheet_counts[1],
     )
 
 
@@ -399,7 +423,8 @@ async def patch_application(
             }
             await session.commit()
             await session.refresh(app_row)
-    return _to_read(app_row)
+    counts = await _sheet_counts(session, [app_row.id])
+    return _to_read(app_row, sheet_counts=counts.get(app_row.id, (0, 0)))
 
 
 
