@@ -18,6 +18,17 @@ class UserAdminRead(BaseModel):
     last_login_at: datetime | None
 
 
+class UserDirectoryRead(BaseModel):
+    """What a recruiter may see about colleagues when picking interviewers.
+    No activity or login data — that stays on the admin projection."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str | None
+    email: str
+    role: Role
+
+
 class UserCreate(BaseModel):
     # No EmailStr: it requires the optional `email-validator` dependency,
     # which isn't installed in this project (see schemas/auth.py's

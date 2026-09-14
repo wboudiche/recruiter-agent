@@ -8,8 +8,18 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select
 
 from recruiter.api import (
-    applications, auth, candidates, chat, events, interview, jobs, notifications, settings,
-    sourcing, users,
+    applications,
+    auth,
+    candidates,
+    chat,
+    events,
+    interview,
+    interviewers,
+    jobs,
+    notifications,
+    settings,
+    sourcing,
+    users,
 )
 from recruiter.api.deps import viewer_readonly_guard
 from recruiter.api.origin_check import OriginCheckMiddleware
@@ -98,6 +108,7 @@ _api_router.include_router(candidates.paste_router)
 _api_router.include_router(chat.router)
 _api_router.include_router(applications.router)
 _api_router.include_router(interview.router)
+_api_router.include_router(interviewers.router)
 _api_router.include_router(notifications.router)
 _api_router.include_router(settings.router)
 _api_router.include_router(events.router)
