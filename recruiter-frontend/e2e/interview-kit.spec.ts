@@ -124,7 +124,24 @@ test.describe("interview kit", () => {
     await waitForKitReady(page, appId);
 
     // --- UI flow against our own fixture from here on ---
-    await page.goto(`/applications/${appId}`);
+
+    // Second interviewer: created through the admin users API in this
+    // spec's own fixture, assigned alongside the admin running the test.
+    const stamp = Date.now();
+    const created = await page.request.post("/api/users", {
+      data: { email: `e2e-interviewer-${stamp}@example.test`, name: "Second Interviewer",
+              role: "viewer", password: "pw-12345678" },
+    });
+    expect(created.ok()).toBeTruthy();
+    const secondId = (await created.json()).id as number;
+    const meId = (await (await page.request.get("/api/auth/me")).json()).id as number;
+    const assign = await page.request.put(`/api/applications/${appId}/interviewers`, {
+      data: { user_ids: [meId, secondId] },
+    });
+    expect(assign.ok()).toBeTruthy();
+
+    // Admin fills and submits their sheet in the UI.
+    await page.goto(`/applications/${appId}?tab=interview`);
 
     // The kit may already be generating from the stage transition; if there
     // is nothing at all, ask for one.
@@ -134,9 +151,33 @@ test.describe("interview kit", () => {
     const firstAnswer = page.getByPlaceholder(/what they said/i).first();
     await expect(firstAnswer).toBeVisible({ timeout: 60_000 });
     await firstAnswer.fill("Ran the platform for two years.");
-
-    page.once("dialog", (d) => d.accept());
+    await page.getByRole("button", { name: /^hire$/i }).click();
     await page.getByRole("button", { name: /submit interview/i }).click();
+    const dialog = page.getByRole("dialog");
+    if (await dialog.isVisible().catch(() => false)) {
+      await dialog.getByRole("button", { name: /submit anyway/i }).click();
+    }
+    await expect(page.getByText(/interview recorded/i)).toBeVisible();
+
+    // One of two sheets in: still scheduled, and the card says so on the
+    // kanban board (the candidate page doesn't render that card).
+    await pollStage(page, appId, "scheduled", 5_000);
+    await page.goto(`/jobs/${jobId}`);
+    await expect(page.getByText("1/2 sheets in")).toBeVisible({ timeout: 10_000 });
+
+    // Second interviewer submits through the API (a separate browser
+    // context would be the purist option; the rule under test is the
+    // server's, and the API is the same path the UI takes).
+    const ctx = await page.context().browser()!.newContext();
+    const other = await ctx.newPage();
+    await other.goto("/login");
+    await other.getByRole("textbox", { name: "Email" }).fill(`e2e-interviewer-${stamp}@example.test`);
+    await other.getByRole("textbox", { name: "Password" }).fill("pw-12345678");
+    await other.getByRole("button", { name: /sign in/i }).click();
+    await expect(other).toHaveURL(/\/jobs/);
+    const submit = await other.request.post(`/api/applications/${appId}/interview-kit/sheet/submit`);
+    expect(submit.ok(), await submit.text()).toBeTruthy();
+    await ctx.close();
 
     await pollStage(page, appId, "interviewed", 30_000);
   });
