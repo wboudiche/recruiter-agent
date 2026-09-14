@@ -14,6 +14,7 @@ from recruiter.api.candidates import get_event_bus
 from recruiter.api.deps import get_session, require_role, require_user
 from recruiter.events import EventBus
 from recruiter.models import Application, InterviewAssignment, Role, User
+from recruiter.pipeline.interview_sheets import close_round_if_complete, sheet_has_content
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
 
@@ -71,22 +72,29 @@ async def put_interviewers(
     _: User = Depends(require_role(Role.ADMIN, Role.RECRUITER)),
 ) -> list[InterviewerRead]:
     """Reconcile to exactly `user_ids`: create missing rows, delete the rest.
-    Refuses to delete a submitted sheet — feedback must not vanish by
-    unticking a name."""
-    if await session.get(Application, application_id) is None:
+    Refuses to delete a submitted sheet, or an unsubmitted one with any
+    content — feedback must not vanish by unticking a name."""
+    # Row-locked: removing the last unsubmitted interviewer can complete the
+    # round (see close_round_if_complete below), same race as submit_sheet.
+    app_row = await session.get(Application, application_id, with_for_update=True)
+    if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
     wanted = list(dict.fromkeys(payload.user_ids))  # dedupe, keep order
-    if wanted:
+    existing = await load_assignments(session, application_id)
+    by_user = {r.user_id: r for r in existing}
+    # Only ids not already on the panel need to be active: an interviewer
+    # deactivated after being assigned must not make the panel unsaveable —
+    # their existing row is left alone below regardless of is_active.
+    to_validate = [uid for uid in wanted if uid not in by_user]
+    if to_validate:
         found = {u.id for u in (await session.execute(
-            select(User).where(User.id.in_(wanted), User.is_active.is_(True))
+            select(User).where(User.id.in_(to_validate), User.is_active.is_(True))
         )).scalars().all()}
-        missing = [uid for uid in wanted if uid not in found]
+        missing = [uid for uid in to_validate if uid not in found]
         if missing:
             raise HTTPException(status_code=422, detail=f"unknown or inactive users: {missing}")
 
-    existing = await load_assignments(session, application_id)
-    by_user = {r.user_id: r for r in existing}
     for row in existing:
         if row.user_id not in wanted:
             if row.submitted_at is not None:
@@ -94,14 +102,25 @@ async def put_interviewers(
                     status_code=409,
                     detail="cannot remove an interviewer whose sheet is submitted",
                 )
+            if sheet_has_content(row.sheet):
+                raise HTTPException(
+                    status_code=409,
+                    detail="cannot remove an interviewer whose sheet has content",
+                )
             await session.delete(row)
     for uid in wanted:
         if uid not in by_user:
             session.add(InterviewAssignment(application_id=application_id, user_id=uid))
+
+    # Removing the last unsubmitted interviewer can leave every remaining
+    # assignment submitted, which closes the round the same way a late
+    # submit would.
+    stage_changed = await close_round_if_complete(session, app_row)
     await session.commit()
     # Same event the kit uses, so any open candidate page refetches its
     # interviewer chips and sheets (see lib/sse.ts).
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": "ready",
+        "job_id": app_row.job_id, "stage_changed": stage_changed,
     })
     return await _read_all(session, application_id)

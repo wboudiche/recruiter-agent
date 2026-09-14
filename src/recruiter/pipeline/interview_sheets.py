@@ -3,9 +3,12 @@
 Design: docs/superpowers/specs/2026-09-14-multi-interviewer-design.md.
 """
 from collections.abc import Iterable
+from datetime import UTC, datetime
 
-from recruiter.models import InterviewAssignment, Role, User
-from recruiter.schemas.interview import InterviewSheet
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from recruiter.models import Application, InterviewAssignment, Role, Stage, User
+from recruiter.schemas.interview import InterviewKit, InterviewSheet
 
 
 def is_frozen(rows: Iterable[InterviewAssignment]) -> bool:
@@ -26,9 +29,12 @@ def can_edit_questions(user: User) -> bool:
 def visible_sheets(
     rows: Iterable[InterviewAssignment], *, user: User,
 ) -> list[InterviewAssignment]:
-    """Blind until submitted: an interviewer sees only their own sheet until
-    they submit, then everyone's. Recruiters and admins always see all;
-    an unassigned viewer sees none."""
+    """Blind until submitted: an interviewer sees only their own sheet
+    until they submit. Submitting reveals their own sheet plus every OTHER
+    sheet that has itself been submitted — drafts stay private to their
+    author until submitted, even from someone who has already submitted
+    their own. Recruiters and admins always see all; an unassigned viewer
+    sees none."""
     rows = list(rows)
     if can_edit_questions(user):
         return rows
@@ -37,7 +43,7 @@ def visible_sheets(
         return []
     if own.submitted_at is None:
         return [own]
-    return rows
+    return [r for r in rows if r.user_id == own.user_id or r.submitted_at is not None]
 
 
 def prune_answers(sheet: InterviewSheet, question_ids: set[str]) -> InterviewSheet:
@@ -47,3 +53,53 @@ def prune_answers(sheet: InterviewSheet, question_ids: set[str]) -> InterviewShe
     return sheet.model_copy(update={
         "answers": {k: v for k, v in sheet.answers.items() if k in question_ids},
     })
+
+
+def sheet_has_content(sheet: dict) -> bool:
+    """True if the sheet carries anything a recruiter would not want
+    silently discarded: an answer, a rating, or a verdict decision/note.
+    Used to refuse dropping an unsubmitted-but-populated interviewer from
+    the panel instead of quietly deleting their draft."""
+    answers = (sheet or {}).get("answers") or {}
+    for answer in answers.values():
+        if (answer or {}).get("answer") or (answer or {}).get("rating"):
+            return True
+    verdict = (sheet or {}).get("verdict") or {}
+    return bool(verdict.get("decision") or verdict.get("note"))
+
+
+def mark_interviewed(app_row: Application, kit: InterviewKit, now: datetime) -> None:
+    """Close the round: move the application to INTERVIEWED and stamp the
+    kit's closed_at. Shared by the automatic all-sheets-in rule
+    (close_round_if_complete) and the recruiter's manual override in
+    patch_application, so both paths stamp the same fields the same way."""
+    app_row.stage = Stage.INTERVIEWED
+    app_row.interviewed_at = now
+    kit.closed_at = now.isoformat()
+    app_row.interview_kit = kit.model_dump()
+
+
+async def close_round_if_complete(session: AsyncSession, app_row: Application) -> bool:
+    """Close the round if `app_row` is SCHEDULED, has a kit, and every
+    assigned interviewer has submitted. Returns True iff it did.
+
+    `app_row` must already be loaded with `with_for_update=True` by the
+    caller — see submit_sheet's row-lock comment: two interviewers
+    submitting their last two sheets at nearly the same instant would
+    otherwise both read all_submitted() as True under READ COMMITTED and
+    both try to close the round.
+
+    `load_assignments` is imported here, not at module level: it lives in
+    `api/interviewers.py`, a FastAPI router module, and that module needs
+    `sheet_has_content` from this one for its own panel-edit checks —  a
+    top-level import in both directions would be a cycle.
+    """
+    from recruiter.api.interviewers import load_assignments
+
+    if app_row.stage != Stage.SCHEDULED or not app_row.interview_kit:
+        return False
+    rows = await load_assignments(session, app_row.id)
+    if not all_submitted(rows):
+        return False
+    mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), datetime.now(UTC))
+    return True

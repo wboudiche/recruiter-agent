@@ -1,11 +1,27 @@
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep
 from recruiter.auth.passwords import hash_password
 from recruiter.main import app
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, Role, Stage, User
+
+
+@pytest.fixture(autouse=True)
+def _reset_limiter():
+    # This module logs users in and out; without a reset the shared 5/min
+    # login budget (see rate_limit.py) trips across tests — and across
+    # files, since the in-memory store is process-wide. Same pattern as
+    # test_interview_sheets_api.py and test_viewer_interviewer_exception.py.
+    from recruiter.api.rate_limit import limiter
+
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 async def _add(session: AsyncSession, email: str, role: Role, active: bool = True) -> User:
@@ -152,3 +168,81 @@ async def test_directory_lists_active_users_for_recruiters_only(
     await api_client_unauth.post("/api/auth/logout")
     await _login(api_client_unauth, "viewer@acme.com")
     assert (await api_client_unauth.get("/api/users/directory")).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_closes_the_round_when_the_last_unsubmitted_interviewer_is_removed(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A and B are on the panel; A has already submitted. Removing B — the
+    only one left who hasn't — leaves every remaining assignment submitted,
+    so the round must close exactly as a late submit would."""
+    app_id = await create_scored_app()
+    a = await _add_user_via_engine("a@acme.com", Role.VIEWER)
+    b = await _add_user_via_engine("b@acme.com", Role.VIEWER)
+    async with _sessionmaker()() as session:
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                stage=Stage.SCHEDULED,
+                interview_kit={"status": "ready",
+                               "questions": [{"id": "q1", "text": "Why?", "source": "probe"}]},
+            )
+        )
+        session.add(InterviewAssignment(application_id=app_id, user_id=a,
+                                        submitted_at=datetime.now(UTC)))
+        session.add(InterviewAssignment(application_id=app_id, user_id=b))
+        await session.commit()
+
+    resp = await api_client.put(
+        f"/api/applications/{app_id}/interviewers", json={"user_ids": [a]},
+    )
+    assert resp.status_code == 200
+
+    app_read = (await api_client.get(f"/api/applications/{app_id}")).json()
+    assert app_read["stage"] == "interviewed"
+
+
+@pytest.mark.asyncio
+async def test_put_keeps_an_already_assigned_user_even_if_deactivated_since(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A user assigned while active, then deactivated, must not make the
+    panel unsaveable: only ids being newly ADDED are checked for is_active."""
+    app_id = await create_scored_app()
+    x = await _add_user_via_engine("x@acme.com", Role.VIEWER)
+    y = await _add_user_via_engine("y@acme.com", Role.VIEWER)
+    put = await api_client.put(
+        f"/api/applications/{app_id}/interviewers", json={"user_ids": [x]},
+    )
+    assert put.status_code == 200
+
+    async with _sessionmaker()() as session:
+        await session.execute(update(User).where(User.id == x).values(is_active=False))
+        await session.commit()
+
+    resp = await api_client.put(
+        f"/api/applications/{app_id}/interviewers", json={"user_ids": [x, y]},
+    )
+    assert resp.status_code == 200
+    assert {r["user_id"] for r in resp.json()} == {x, y}
+
+
+@pytest.mark.asyncio
+async def test_put_refuses_removing_an_unsubmitted_sheet_with_content(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """An unsubmitted draft with an answer must not vanish silently by
+    unticking a name — same principle as the submitted-sheet 409, one step
+    earlier."""
+    app_id = await create_scored_app()
+    a = await _add_user_via_engine("a@acme.com", Role.VIEWER)
+    async with _sessionmaker()() as session:
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=a,
+            sheet={"answers": {"q1": {"answer": "Some notes.", "rating": None}},
+                   "verdict": {"decision": None, "note": None}},
+        ))
+        await session.commit()
+    r = await api_client.put(f"/api/applications/{app_id}/interviewers", json={"user_ids": []})
+    assert r.status_code == 409
+    assert "content" in r.json()["detail"]

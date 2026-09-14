@@ -40,4 +40,7 @@ VIEWER_ALLOWED_ROUTES = frozenset({
     ("PATCH", "/api/applications/{application_id}/interview-kit/sheet"),
     ("POST", "/api/applications/{application_id}/interview-kit/sheet/submit"),
     ("PATCH", "/api/applications/{application_id}/interview-kit"),
+    # Drafting a question is the same append-only privilege as the kit
+    # PATCH above; the handler refuses an unassigned caller with 403.
+    ("POST", "/api/applications/{application_id}/interview-kit/draft-question"),
 })

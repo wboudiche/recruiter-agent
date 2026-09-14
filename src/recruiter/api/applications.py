@@ -16,11 +16,13 @@ from recruiter.api.candidates import (
 )
 from recruiter.api.deps import get_session, require_user
 from recruiter.api.interview import run_generate_kit
+from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
 from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
+from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -28,6 +30,7 @@ from recruiter.pipeline.orchestrator import (
 from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
+from recruiter.schemas.interview import InterviewKit
 
 # Authorization model: shared workspace. Any user authenticated via OIDC and
 # accepted by the domain allowlist (`auth.allowlist`) can read and mutate any
@@ -363,24 +366,36 @@ async def patch_application(
             app_row.validated_at = now
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
-            # Mark the kit pending here, but enqueue the model call for AFTER
-            # the commit below. The transition must be durable before
-            # anything that can fail runs — a stuck stage is far worse than
-            # a missing kit. Preserve any existing questions (e.g. a
-            # candidate moved back to SCHEDULED after an interview must not
-            # lose recorded answers/ratings) — mirrors generate_kit's logic.
-            existing = app_row.interview_kit or {}
-            app_row.interview_kit = {
-                **existing, "status": "generating", "error": None,
-                "questions": existing.get("questions") or [],
-            }
-            schedule_kit_generation = True
+            # If a sheet was already submitted (a prior round on this same
+            # application), the question list is frozen — see
+            # pipeline/interview_sheets.is_frozen. Regenerating would mint
+            # fresh question ids and orphan that submitted sheet's answers,
+            # so leave the kit exactly as it is; its status stays "ready".
+            if is_frozen(await load_assignments(session, app_row.id)):
+                pass
+            else:
+                # Mark the kit pending here, but enqueue the model call for
+                # AFTER the commit below. The transition must be durable
+                # before anything that can fail runs — a stuck stage is far
+                # worse than a missing kit. Preserve any existing questions
+                # (e.g. a candidate moved back to SCHEDULED after an
+                # interview must not lose recorded answers/ratings) —
+                # mirrors generate_kit's logic.
+                existing = app_row.interview_kit or {}
+                app_row.interview_kit = {
+                    **existing, "status": "generating", "error": None,
+                    "questions": existing.get("questions") or [],
+                }
+                schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
-            app_row.interviewed_at = now
-            # The recruiter closed the round by hand (a no-show, say). Stamp
-            # the kit so late sheets know the round is over.
+            # The recruiter closed the round by hand (a no-show, say).
+            # Shares mark_interviewed with the all-sheets-in path in
+            # submit_sheet so both stamp interviewed_at/closed_at the same
+            # way. With no kit yet, there's nothing to stamp closed.
             if app_row.interview_kit:
-                app_row.interview_kit = {**app_row.interview_kit, "closed_at": now.isoformat()}
+                mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), now)
+            else:
+                app_row.interviewed_at = now
         elif new_stage == Stage.OFFER:
             app_row.offer_at = now
         elif new_stage == Stage.HIRED:

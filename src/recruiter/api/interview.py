@@ -18,12 +18,12 @@ from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, InterviewAssignment, Job, Stage, User
+from recruiter.models import Application, Candidate, InterviewAssignment, Job, User
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
 from recruiter.pipeline.interview_sheets import (
-    all_submitted,
     can_edit_questions,
+    close_round_if_complete,
     is_frozen,
     prune_answers,
     visible_sheets,
@@ -131,6 +131,7 @@ async def run_generate_kit(
         await session.commit()
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": kit.status,
+        "job_id": app_row.job_id, "stage_changed": False,
     })
 
 
@@ -258,7 +259,11 @@ async def patch_sheet(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
 ) -> InterviewKitRead:
-    app_row = await session.get(Application, application_id)
+    # Row-locked, like submit_sheet: the auto-create in _own_assignment
+    # must not run twice for a recruiter's first save arriving concurrently
+    # from two tabs, which would otherwise both pass the "no rows yet"
+    # check and try to insert the same (application_id, user_id) row.
+    app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     kit = _require_kit(app_row)
@@ -294,15 +299,11 @@ async def submit_sheet(
 
     # Advance only from SCHEDULED, and only once every sheet is in. Already
     # interviewed or beyond means this is a late sheet on a closed round.
-    rows = await load_assignments(session, app_row.id)
-    if app_row.stage == Stage.SCHEDULED and all_submitted(rows):
-        app_row.stage = Stage.INTERVIEWED
-        app_row.interviewed_at = datetime.now(UTC)
-        kit.closed_at = _now()
-        app_row.interview_kit = kit.model_dump()
+    stage_changed = await close_round_if_complete(session, app_row)
     await session.commit()
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": kit.status,
+        "job_id": app_row.job_id, "stage_changed": stage_changed,
     })
     return await _read(session, app_row, user)
 
@@ -325,6 +326,7 @@ async def draft_kit_question(
     application_id: int,
     payload: DraftQuestionRequest,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
     # get_llm_or_none, not get_llm: FastAPI resolves dependencies eagerly, so
     # Depends(get_llm) would 503 before this handler could 404 an unknown
     # application. Validate the request first, then require the model.
@@ -343,6 +345,11 @@ async def draft_kit_question(
     app_row = await session.get(Application, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
+
+    if not can_edit_questions(user):
+        rows = await load_assignments(session, application_id)
+        if user.id not in {r.user_id for r in rows}:
+            raise HTTPException(status_code=403, detail="not assigned to this interview")
 
     if llm is None:
         raise HTTPException(

@@ -41,8 +41,10 @@ Recorded so the plan does not re-open them.
    has submitted. The recruiter's existing "Mark as interviewed" action
    remains as the override for a no-show.
 6. **Feedback is blind until submitted.** An interviewer sees only their
-   own sheet until they submit; then they see everyone's. Recruiters and
-   admins always see all.
+   own sheet until they submit; then they see their own sheet plus every
+   other sheet that has itself been submitted — an unsubmitted draft stays
+   private to its author regardless of who else has submitted. Recruiters
+   and admins always see all.
 7. **Storage is a new assignments table**, questions stay in the kit
    JSON. Each interviewer writes their own row, so concurrent saves do
    not race; the viewer exception is a row lookup; "my interviews" is a
@@ -212,7 +214,7 @@ submit then hits rule 1 and does not move the stage again.
 | Caller | Before own submit | After own submit |
 |---|---|---|
 | Recruiter or admin | all sheets | all sheets |
-| Assigned interviewer (any role) | own sheet only | all sheets |
+| Assigned interviewer (any role) | own sheet only | own sheet plus others' submitted sheets |
 | Unassigned viewer | no sheets | no sheets |
 
 The kanban card shows `n/m sheets in` while the application is in

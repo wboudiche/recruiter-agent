@@ -78,3 +78,41 @@ async def test_assigned_viewer_writes_only_their_own_sheet(
         f"/api/applications/{assigned_app}/interview-kit/generate")).status_code == 403
     assert (await api_client_unauth.put(
         f"/api/applications/{assigned_app}/interviewers", json={"user_ids": []})).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_assigned_viewer_can_draft_a_question_unassigned_cannot(
+    api_client_unauth: AsyncClient, db_session_with_schema: AsyncSession,
+) -> None:
+    """draft-question is the same append-only privilege as the kit PATCH:
+    an assigned interviewer may use it (a viewer's UI offers it), an
+    unassigned viewer may not — the row check, not the guard, says no."""
+    from recruiter.api.jobs import get_llm_or_none
+    from recruiter.llm.client import FakeLLMClient
+    from recruiter.main import app
+
+    assigned_app = await _seed(db_session_with_schema)
+    unassigned_app = await _seed(db_session_with_schema)
+    v = await _add(db_session_with_schema, "drafting-viewer@acme.com", Role.VIEWER)
+    db_session_with_schema.add(InterviewAssignment(application_id=assigned_app, user_id=v.id))
+    await db_session_with_schema.commit()
+    await _login(api_client_unauth, "drafting-viewer@acme.com")
+
+    app.dependency_overrides[get_llm_or_none] = lambda: FakeLLMClient()
+    try:
+        ok = await api_client_unauth.post(
+            f"/api/applications/{assigned_app}/interview-kit/draft-question",
+            json={"hint": None},
+        )
+        # Not 403: assigned. FakeLLMClient() has no queued structured
+        # response, so a real attempt to call it 502s; either way proves
+        # the assignment check let the request through to the LLM call.
+        assert ok.status_code in (200, 502)
+
+        refused = await api_client_unauth.post(
+            f"/api/applications/{unassigned_app}/interview-kit/draft-question",
+            json={"hint": None},
+        )
+        assert refused.status_code == 403
+    finally:
+        app.dependency_overrides.pop(get_llm_or_none, None)

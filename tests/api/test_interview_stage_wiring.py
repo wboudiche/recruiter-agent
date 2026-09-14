@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import update
@@ -6,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
-from recruiter.models import Application, Stage
+from recruiter.models import Application, InterviewAssignment, Role, Stage, User
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 
@@ -174,5 +176,61 @@ async def test_re_entering_scheduled_preserves_answered_questions(
         answered_q = next(q for q in questions if q["id"] == answered_id)
         assert answered_q["answer"] == "Handled a prod outage calmly."
         assert answered_q["rating"] == "strong"
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_re_entering_scheduled_does_not_regenerate_once_frozen(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Once any sheet is submitted the question list is frozen (see
+    pipeline/interview_sheets.is_frozen). Re-entering SCHEDULED must leave
+    the kit exactly as it is: regenerating would mint fresh question ids
+    and orphan the submitted sheet's answers. Exercises the same legal
+    path back to SCHEDULED as test_re_entering_scheduled_preserves_answered_questions
+    above: interviewed -> rejected -> scored -> validated -> (direct DB)
+    invited -> scheduled."""
+    app.dependency_overrides[get_llm] = _fake_llm_with_one_question
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        await _move_to_invited(api_client, app_id)
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        kit_before = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit",
+        )).json()["kit"]
+        assert kit_before["status"] == "ready"
+        ids_before = {q["id"] for q in kit_before["questions"]}
+
+        engine = app.dependency_overrides[get_engine_dep]()
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+        async with SessionLocal() as session:
+            interviewer = User(email="panel@acme.com", role=Role.VIEWER, is_active=True)
+            session.add(interviewer)
+            await session.flush()
+            session.add(InterviewAssignment(
+                application_id=app_id, user_id=interviewer.id,
+                submitted_at=datetime.now(UTC),
+            ))
+            await session.commit()
+
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "rejected"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scored"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        await _move_to_invited(api_client, app_id)
+
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}", json={"stage": "scheduled"},
+        )
+        assert resp.status_code == 200
+
+        kit_after = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit",
+        )).json()["kit"]
+        assert kit_after["status"] == "ready", "a frozen kit must not be marked generating"
+        assert {q["id"] for q in kit_after["questions"]} == ids_before
     finally:
         app.dependency_overrides.pop(get_llm, None)

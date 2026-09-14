@@ -6,6 +6,7 @@ from recruiter.pipeline.interview_sheets import (
     can_edit_questions,
     is_frozen,
     prune_answers,
+    sheet_has_content,
     visible_sheets,
 )
 from recruiter.schemas.interview import InterviewSheet
@@ -48,8 +49,10 @@ def test_assigned_interviewer_sees_only_own_sheet_until_submitted() -> None:
 
 
 def test_assigned_interviewer_sees_all_after_own_submit() -> None:
-    rows = [_row(1, True), _row(2, False)]
-    assert visible_sheets(rows, user=_user(1, Role.VIEWER)) == rows
+    """After submitting, drafts stay private to their author: row 2 (not
+    submitted) stays hidden even though the caller has now submitted."""
+    rows = [_row(1, True), _row(2, False), _row(3, True)]
+    assert visible_sheets(rows, user=_user(1, Role.VIEWER)) == [rows[0], rows[2]]
 
 
 def test_unassigned_viewer_sees_no_sheets() -> None:
@@ -72,3 +75,36 @@ def test_only_recruiters_and_admins_edit_questions() -> None:
     assert can_edit_questions(_user(1, Role.ADMIN))
     assert can_edit_questions(_user(1, Role.RECRUITER))
     assert not can_edit_questions(_user(1, Role.VIEWER))
+
+
+def test_sheet_has_content_false_when_empty() -> None:
+    assert not sheet_has_content({})
+    assert not sheet_has_content({"answers": {}, "verdict": {"decision": None, "note": None}})
+
+
+def test_sheet_has_content_true_for_an_answer() -> None:
+    assert sheet_has_content({
+        "answers": {"q1": {"answer": "Handled it calmly.", "rating": None}},
+        "verdict": {"decision": None, "note": None},
+    })
+
+
+def test_sheet_has_content_true_for_a_rating_with_no_text() -> None:
+    assert sheet_has_content({
+        "answers": {"q1": {"answer": None, "rating": "strong"}},
+        "verdict": {"decision": None, "note": None},
+    })
+
+
+def test_sheet_has_content_true_for_a_verdict_note() -> None:
+    assert sheet_has_content({
+        "answers": {},
+        "verdict": {"decision": None, "note": "Strong communicator."},
+    })
+
+
+def test_sheet_has_content_true_for_a_verdict_decision() -> None:
+    assert sheet_has_content({
+        "answers": {},
+        "verdict": {"decision": "hire", "note": None},
+    })
