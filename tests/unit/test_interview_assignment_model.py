@@ -65,3 +65,17 @@ async def test_deleting_the_application_deletes_assignments(
     await db_session_with_schema.commit()
     left = (await db_session_with_schema.execute(select(InterviewAssignment))).scalars().all()
     assert left == []
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_user_deletes_their_assignments(
+    db_session_with_schema: AsyncSession,
+) -> None:
+    app_id, user_id = await _seed(db_session_with_schema)
+    db_session_with_schema.add(InterviewAssignment(application_id=app_id, user_id=user_id))
+    await db_session_with_schema.commit()
+    user = await db_session_with_schema.get(User, user_id)
+    await db_session_with_schema.delete(user)
+    await db_session_with_schema.commit()
+    left = (await db_session_with_schema.execute(select(InterviewAssignment))).scalars().all()
+    assert left == []
