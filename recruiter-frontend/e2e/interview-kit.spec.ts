@@ -124,7 +124,9 @@ test.describe("interview kit", () => {
     await waitForKitReady(page, appId);
 
     // --- UI flow against our own fixture from here on ---
-    await page.goto(`/applications/${appId}`);
+    // The kit lives behind its own tab (see application-detail.tsx); the
+    // `tab=interview` query param opens it directly.
+    await page.goto(`/applications/${appId}?tab=interview`);
 
     // The kit may already be generating from the stage transition; if there
     // is nothing at all, ask for one.
