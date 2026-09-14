@@ -144,7 +144,7 @@ function JobCard({ job }: { job: JobRead }) {
   const status = STATUS_META[statusKey] ?? STATUS_META.open;
   const criteriaCount = job.criteria?.length ?? 0;
   return (
-    <li>
+    <li className="min-w-0">
       <Link
         to={`/jobs/${job.id}`}
         className="group block rounded-xl border bg-card p-5 transition-all hover:border-primary/40 hover:shadow-[0_0_0_4px_hsl(var(--primary)/0.08)]"
@@ -162,7 +162,7 @@ function JobCard({ job }: { job: JobRead }) {
               <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                 {job.description}
               </p>
-              <div className="flex items-center gap-3 mt-3 text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1">
                   <ListChecks className="h-3.5 w-3.5" />
                   {criteriaCount} {criteriaCount === 1 ? "criterion" : "criteria"}

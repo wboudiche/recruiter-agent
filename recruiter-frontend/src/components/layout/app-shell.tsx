@@ -9,8 +9,8 @@ export function AppShell() {
     <CommandPaletteProvider>
       <div className="geist-theme min-h-screen flex flex-col">
         <header className="sticky top-0 z-40 border-b border-border/60 bg-background/70 backdrop-blur-md">
-          <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between px-6 md:px-10">
-            <Link to="/jobs" className="ed-wordmark group">
+          <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between gap-2 px-4 sm:gap-3 sm:px-6 md:px-10">
+            <Link to="/jobs" className="ed-wordmark group shrink-0">
               <span className="font-serif italic text-[18px] text-foreground">
                 Recruiter
               </span>
@@ -21,16 +21,16 @@ export function AppShell() {
                 Agent
               </span>
             </Link>
-            <nav className="flex items-center gap-6">
+            <nav className="flex min-w-0 items-center gap-2 sm:gap-6">
               <NavLink to="/jobs">Jobs</NavLink>
               <NavLink to="/settings">Settings</NavLink>
-              <div className="mx-1 h-4 w-px bg-border" />
+              <div className="mx-1 hidden h-4 w-px bg-border sm:block" />
               <SearchTrigger />
               <UserChip />
             </nav>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-[1800px] flex-1 px-6 py-10 md:px-10">
+        <main className="mx-auto w-full max-w-[1800px] flex-1 px-4 py-10 sm:px-6 md:px-10">
           <Outlet />
         </main>
         <CommandPalette />

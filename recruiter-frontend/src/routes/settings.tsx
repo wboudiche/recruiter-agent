@@ -36,7 +36,7 @@ export default function Settings() {
           those would leave non-admins looking at a blank tab panel since
           none of their visible triggers would match it. */}
       <Tabs defaultValue="profile">
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           {isAdmin && <TabsTrigger value="llm">LLM</TabsTrigger>}
           {isAdmin && <TabsTrigger value="notifications">Notifications</TabsTrigger>}
           {isAdmin && <TabsTrigger value="sourcing">Sourcing</TabsTrigger>}

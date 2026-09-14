@@ -57,12 +57,12 @@ export default function JobDetail() {
           { label: job.data.title },
         ]}
       />
-      <header className="flex items-baseline justify-between">
+      <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold">{job.data.title}</h2>
           <p className="text-sm text-muted-foreground">{job.data.status}</p>
         </div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <KanbanDensityToggle value={density} onChange={changeDensity} />
           <Button
             variant="outline"
