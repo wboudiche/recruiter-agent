@@ -25,10 +25,15 @@ export interface SheetRead {
   submitted_at: string | null;
 }
 
-export const EMPTY_SHEET: InterviewSheet = {
+// Frozen: this object is a shared default handed out to every caller with
+// no sheet of their own yet. Every update must build a new object (see
+// interview-kit-section.tsx's setAnswer/setSheet) — mutating this one would
+// corrupt it for every other consumer. Object.freeze makes an accidental
+// mutation throw instead of silently leaking across components.
+export const EMPTY_SHEET: InterviewSheet = Object.freeze({
   answers: {},
   verdict: { decision: null, note: null },
-};
+});
 
 export interface KitQuestion {
   id: string;
@@ -123,8 +128,5 @@ export function useInterviewKit(applicationId: number) {
     patch,
     saveSheet,
     submitSheet,
-    // Kept as an alias of `submitSheet` so `interview-kit-section.tsx` keeps
-    // type-checking; removed once that component is rewritten (Task 10).
-    submit: submitSheet,
   };
 }
