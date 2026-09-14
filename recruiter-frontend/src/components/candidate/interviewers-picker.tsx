@@ -32,6 +32,13 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
     return !q || u.email.toLowerCase().includes(q) || (u.name ?? "").toLowerCase().includes(q);
   });
 
+  // An interviewer already on the panel whose account no longer shows up in
+  // the directory (deactivated) would otherwise be un-removable: they'd
+  // never appear as a row to untick. Surface them from `interviewers`
+  // itself, not the directory, so they can still be unassigned.
+  const directoryIds = new Set((directory.data ?? []).map((u) => u.id));
+  const inactiveAssigned = interviewers.filter((i) => !directoryIds.has(i.user_id));
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -50,7 +57,13 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
         </span>
       ))}
       {canWrite && (
-        <Button variant="outline" size="sm" className="h-auto px-2 py-1 text-xs" onClick={openDialog}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-auto px-2 py-1 text-xs"
+          onClick={openDialog}
+          disabled={interviewersLoading}
+        >
           Assign
         </Button>
       )}
@@ -67,7 +80,7 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
           />
           {directory.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading users…</p>
-          ) : visible.length === 0 ? (
+          ) : visible.length === 0 && inactiveAssigned.length === 0 ? (
             <p className="text-sm text-muted-foreground">No users match.</p>
           ) : (
             <ul className="max-h-72 space-y-1 overflow-y-auto">
@@ -85,6 +98,24 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
                             e.target.checked ? [...ids, u.id] : ids.filter((x) => x !== u.id))}
                       />
                       {label}
+                    </label>
+                  </li>
+                );
+              })}
+              {inactiveAssigned.map((i) => {
+                const label = i.name ?? i.email;
+                return (
+                  <li key={`inactive-${i.user_id}`}>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={label}
+                        checked={checked.includes(i.user_id)}
+                        onChange={(e) =>
+                          setChecked((ids) =>
+                            e.target.checked ? [...ids, i.user_id] : ids.filter((x) => x !== i.user_id))}
+                      />
+                      {label} <span className="text-muted-foreground">(inactive)</span>
                     </label>
                   </li>
                 );

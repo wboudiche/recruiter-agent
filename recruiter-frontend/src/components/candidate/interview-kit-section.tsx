@@ -53,6 +53,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   const me = useCurrentUser();
   const { interviewers } = useInterviewers(applicationId);
   const [draft, setDraft] = useState<KitQuestion[]>([]);
+  // Explicit edit flag rather than diffing `draft` against `kit.questions`:
+  // a background refetch can update `kit.questions` (someone else's edit)
+  // without the user having touched anything, and a JSON diff would then
+  // read as "changed" for the wrong reason — resending the whole draft as
+  // a PATCH would silently overwrite that other edit. Only the user's own
+  // edits (below) set this, and only a successful PATCH or a re-seed from
+  // the server clears it.
+  const [questionsDirty, setQuestionsDirty] = useState(false);
   const [hint, setHint] = useState("");
   const [sheet, setSheet] = useState<InterviewSheet>(EMPTY_SHEET);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -93,9 +101,12 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   const addedByName = (id: number) => nameById.get(id) ?? "another interviewer";
 
   // The server is the source of truth; local edits are a draft until saved.
-  // Deliberately keyed on `generated_at`/`status`, not on `kit.questions`
-  // itself: a background refetch must not clobber answers the recruiter has
-  // typed but not yet saved.
+  // Keyed on `generated_at`/`status` plus a stable digest of the questions
+  // themselves (id+text), so an *untouched* draft follows the server even
+  // when neither `generated_at` nor `status` changes — e.g. a colleague
+  // appends a question and a background refetch picks it up. Re-seeding is
+  // gated on `!questionsDirty` so a user's own in-progress edits are never
+  // clobbered by that same background refetch.
   //
   // This seeding used to live in a `useEffect`. Effects run after the
   // commit that first shows a loaded `kit`, so there was a render — the one
@@ -114,11 +125,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // racing to close it: the mismatched render is discarded and redone with
   // the fresh draft before anything commits, so `isDirty` below can never
   // observe an unseeded draft as dirty.
-  const seedKey = kit ? `${kit.generated_at}:${kit.status}` : null;
+  const questionsDigest = (qs: KitQuestion[] | undefined) =>
+    (qs ?? []).map((q) => `${q.id}:${q.text}`).join("|");
+  const seedKey = kit ? `${kit.generated_at}:${kit.status}:${questionsDigest(kit.questions)}` : null;
   const [seededKey, setSeededKey] = useState<string | null>(null);
-  if (kit?.questions && seedKey !== seededKey) {
+  if (kit?.questions && seedKey !== seededKey && !questionsDirty) {
     setSeededKey(seedKey);
     setDraft(kit.questions);
+    setQuestionsDirty(false);
   }
 
   // Same seeding pattern for the caller's own sheet, keyed on its identity
@@ -137,11 +151,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
       return { ...s, answers: { ...s.answers, [id]: { ...current, ...fields } } };
     });
 
-  // Dirty = the question draft or the sheet draft has diverged from what
-  // the server last returned. Used both for a visible affordance on Save
-  // and to warn before an unsaved navigation/refresh wipes typed answers.
+  // Dirty = the user has edited the question draft, or the sheet draft has
+  // diverged from what the server last returned. Used both for a visible
+  // affordance on Save and to warn before an unsaved navigation/refresh
+  // wipes typed answers. `questionsDirty` (not a diff against
+  // `kit.questions`) avoids flagging dirty purely because a background
+  // refetch changed the server's list underneath an untouched draft.
   const isDirty =
-    JSON.stringify(draft) !== JSON.stringify(kit?.questions ?? []) ||
+    questionsDirty ||
     JSON.stringify(sheet) !== JSON.stringify(mySheetRead?.sheet ?? EMPTY_SHEET);
 
   useEffect(() => {
@@ -220,14 +237,15 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     );
   }
 
-  const update = (id: string, patchFields: Partial<KitQuestion>) =>
+  const update = (id: string, patchFields: Partial<KitQuestion>) => {
+    setQuestionsDirty(true);
     setDraft((qs) => qs.map((q) => (q.id === id ? { ...q, ...patchFields } : q)));
+  };
 
   const unanswered = draft.filter((q) => !sheet.answers[q.id]?.answer?.trim()).length;
   const serverQuestionIds = new Set((kit.questions ?? []).map((q) => q.id));
 
   function saveAll(onDone?: () => void) {
-    const questionsChanged = JSON.stringify(draft) !== JSON.stringify(kit?.questions ?? []);
     const afterQuestions = () =>
       canWriteSheet
         ? saveSheet.mutate(sheet, {
@@ -235,10 +253,13 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
             onSuccess: onDone,
           })
         : onDone?.();
-    if (questionsChanged && canAppend) {
+    if (questionsDirty && canAppend) {
       patch.mutate(draft, {
         onError: (err) => toast.error(errorMessage(err, "Couldn't save questions")),
-        onSuccess: afterQuestions,
+        onSuccess: () => {
+          setQuestionsDirty(false);
+          afterQuestions();
+        },
       });
     } else {
       afterQuestions();
@@ -301,7 +322,10 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
                     aria-label={`Remove question ${i + 1}`}
                     disabled={frozen}
                     title={frozen ? "Questions are frozen once a sheet is submitted" : undefined}
-                    onClick={() => setDraft((qs) => qs.filter((x) => x.id !== q.id))}
+                    onClick={() => {
+                      setQuestionsDirty(true);
+                      setDraft((qs) => qs.filter((x) => x.id !== q.id));
+                    }}
                   >
                     Remove
                   </Button>
@@ -351,11 +375,13 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
         {canAppend && (
           <Button
             variant="outline"
-            onClick={() =>
+            onClick={() => {
+              setQuestionsDirty(true);
               setDraft((qs) => [...qs, {
                 id: newQuestionId(), text: "", source: "probe",
                 criterion: null, answer: null, rating: null, added_by: myId,
-              }])}
+              }]);
+            }}
           >
             Add question
           </Button>
@@ -377,6 +403,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
                 // backend reads as a null hint — not an empty string.
                 draftQuestion.mutate(hint.trim() || null, {
                   onSuccess: (res) => {
+                    setQuestionsDirty(true);
                     setDraft((qs) => [...qs, {
                       id: newQuestionId(),
                       text: res.question.text,
@@ -404,10 +431,18 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
               onClick={() => saveAll()}
               data-dirty={isDirty}
               className={isDirty ? "border-amber-400 text-amber-400" : undefined}
+              disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
             >
               {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}
             </Button>
-            {canWriteSheet && <Button onClick={onSubmitClick}>Submit interview</Button>}
+            {canWriteSheet && (
+              <Button
+                onClick={onSubmitClick}
+                disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+              >
+                Submit interview
+              </Button>
+            )}
           </>
         )}
       </div>
@@ -450,7 +485,12 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
           </DialogDescription>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button>
-            <Button onClick={doSubmit}>Submit anyway</Button>
+            <Button
+              onClick={doSubmit}
+              disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+            >
+              Submit anyway
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

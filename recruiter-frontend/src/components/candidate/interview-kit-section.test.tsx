@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { Toaster } from "sonner";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { queryKeys } from "@/lib/query-keys";
 import { InterviewKitSection } from "./interview-kit-section";
 
 const server = setupServer();
@@ -45,7 +46,8 @@ function mountWithKit(
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}<Toaster /></QueryClientProvider>
   );
-  return render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} /></Wrapper>);
+  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} /></Wrapper>);
+  return { ...result, qc };
 }
 
 const READY = {
@@ -465,5 +467,96 @@ describe("InterviewKitSection", () => {
     expect(screen.getByRole("button", { name: /add question/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /remove question 1/i })).not.toBeInTheDocument();
     expect(screen.getAllByPlaceholderText(/what they said/i)[0]).toBeInTheDocument();
+  });
+
+  // F1: the question draft used to be resent unconditionally whenever it
+  // differed (by JSON) from the last-seen server questions. A background
+  // refetch that updated `kit.questions` (someone else's edit) without the
+  // draft being re-seeded meant an unrelated "Save answers" click could
+  // resend a stale question list and silently drop a colleague's question.
+  // An explicit `questionsDirty` flag, set only by the user's own edits,
+  // fixes this.
+  it("saves only the sheet, never the question list, when only an answer changed (F1)", async () => {
+    const mine = {
+      user_id: 5, name: "V", email: "v@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } },
+      submitted_at: null,
+    };
+    const capture: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, capture, { sheets: [mine], me: { id: 5, role: "viewer" }, canWrite: false });
+    await screen.findByText("Why this role?");
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Good answer");
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+
+    await waitFor(() => expect(capture.sheet).toBeDefined());
+    // No question PATCH must have been sent at all.
+    expect(capture.body).toBeUndefined();
+  });
+
+  it("re-seeds the untouched draft when the server's question list changes underneath it (F1)", async () => {
+    const { qc } = mountWithKit(READY);
+    await screen.findByDisplayValue("Why this role?");
+
+    const UPDATED = {
+      ...READY,
+      questions: [
+        ...READY.questions,
+        { id: "p2", text: "Added by a colleague", source: "probe", criterion: null, answer: null, rating: null },
+      ],
+    };
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: UPDATED, sheets: [] })),
+    );
+    await qc.invalidateQueries({ queryKey: queryKeys.interviewKit(1) });
+
+    // No user action taken — the new question must appear on its own.
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Added by a colleague")).toBeInTheDocument(),
+    );
+  });
+
+  it("does not resend a question PATCH on a second save once nothing has changed since (F1)", async () => {
+    const cap: { body?: any } = {};
+    mountWithKit(READY, cap);
+    await screen.findByDisplayValue("Why this role?");
+
+    let patchCalls = 0;
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit", async ({ request }) => {
+        patchCalls += 1;
+        cap.body = await request.json();
+        return HttpResponse.json({ kit: READY, sheets: [] });
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /remove question 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await waitFor(() => expect(patchCalls).toBe(1));
+
+    // Nothing else changed the draft — a second Save must not re-PATCH.
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(patchCalls).toBe(1);
+  });
+
+  // F3: guard against a double-submit while a save/patch/submit is in flight.
+  it("disables Save while a save is in flight, and re-enables once it resolves (F3)", async () => {
+    mountWithKit(READY);
+    await screen.findByDisplayValue("Why this role?");
+
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", async () => {
+        await delay(200);
+        return HttpResponse.json({ kit: READY, sheets: [] });
+      }),
+    );
+
+    const saveButton = screen.getByRole("button", { name: /save answers/i });
+    await userEvent.click(saveButton);
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    await waitFor(() => expect(saveButton).toBeEnabled(), { timeout: 3000 });
   });
 });
