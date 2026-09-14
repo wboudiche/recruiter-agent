@@ -169,15 +169,24 @@ test.describe("interview kit", () => {
     // context would be the purist option; the rule under test is the
     // server's, and the API is the same path the UI takes).
     const ctx = await page.context().browser()!.newContext();
-    const other = await ctx.newPage();
-    await other.goto("/login");
-    await other.getByRole("textbox", { name: "Email" }).fill(`e2e-interviewer-${stamp}@example.test`);
-    await other.getByRole("textbox", { name: "Password" }).fill("pw-12345678");
-    await other.getByRole("button", { name: /sign in/i }).click();
-    await expect(other).toHaveURL(/\/jobs/);
-    const submit = await other.request.post(`/api/applications/${appId}/interview-kit/sheet/submit`);
-    expect(submit.ok(), await submit.text()).toBeTruthy();
-    await ctx.close();
+    try {
+      const other = await ctx.newPage();
+      // This is the suite's one deliberate extra real login beyond
+      // auth.setup.ts's and auth.spec.ts's: the sheet submit below must be
+      // attributed to the second interviewer, and logging in as them is the
+      // only way to do that. The login endpoint allows 5 attempts per
+      // minute; this test's earlier LLM/SMTP work keeps its one login well
+      // clear of the other logins in a serial run.
+      await other.goto("/login");
+      await other.getByRole("textbox", { name: "Email" }).fill(`e2e-interviewer-${stamp}@example.test`);
+      await other.getByRole("textbox", { name: "Password" }).fill("pw-12345678");
+      await other.getByRole("button", { name: /sign in/i }).click();
+      await expect(other).toHaveURL(/\/jobs/);
+      const submit = await other.request.post(`/api/applications/${appId}/interview-kit/sheet/submit`);
+      expect(submit.ok(), await submit.text()).toBeTruthy();
+    } finally {
+      await ctx.close();
+    }
 
     await pollStage(page, appId, "interviewed", 30_000);
   });
