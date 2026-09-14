@@ -248,7 +248,11 @@ async def submit_sheet(
     user: User = Depends(require_user),
     bus: EventBus = Depends(get_event_bus),
 ) -> InterviewKitRead:
-    app_row = await session.get(Application, application_id)
+    # Row-locked: two interviewers submitting their last two sheets at
+    # nearly the same instant would otherwise both read all_submitted() as
+    # True under READ COMMITTED and both close the round. The lock queues
+    # the second submit behind the first's commit.
+    app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
     kit = _require_kit(app_row)
