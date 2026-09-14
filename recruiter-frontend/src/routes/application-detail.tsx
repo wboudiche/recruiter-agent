@@ -8,6 +8,7 @@ import {
   EnrichmentSection,
   type Bundle as EnrichmentBundle,
 } from "@/components/candidate/enrichment-section";
+import { InterviewersPicker } from "@/components/candidate/interviewers-picker";
 import { InterviewKitSection } from "@/components/candidate/interview-kit-section";
 import { RejectionBanner } from "@/components/candidate/rejection-banner";
 import { ScoreBreakdown } from "@/components/candidate/score-breakdown";
@@ -84,6 +85,7 @@ export default function ApplicationDetail() {
             )}
           </div>
         </div>
+        <InterviewersPicker applicationId={id} canWrite={canWrite} />
         {application.data.awaiting_paste && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
             <p className="font-medium text-amber-200">
