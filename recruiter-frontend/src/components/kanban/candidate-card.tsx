@@ -122,6 +122,11 @@ export function CandidateCard({
           </span>
           <TimeInStageBadge application={application} />
         </div>
+        {application.stage === "scheduled" && (application.sheets_total ?? 0) > 0 && (
+          <span className="block text-xs text-muted-foreground">
+            {application.sheets_submitted ?? 0}/{application.sheets_total} sheets in
+          </span>
+        )}
         {!compact && awaitingPaste && (
           <Badge
             variant="outline"
