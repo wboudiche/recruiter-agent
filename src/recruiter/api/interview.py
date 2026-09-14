@@ -24,6 +24,7 @@ from recruiter.pipeline.interview_kit_generator import draft_question, generate_
 from recruiter.pipeline.interview_sheets import (
     all_submitted,
     can_edit_questions,
+    is_frozen,
     prune_answers,
     visible_sheets,
 )
@@ -146,6 +147,11 @@ async def generate_kit(
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
+    if is_frozen(await load_assignments(session, application_id)):
+        raise HTTPException(
+            status_code=409, detail="questions are frozen: a sheet has been submitted",
+        )
+
     existing = app_row.interview_kit or {}
     app_row.interview_kit = {**existing, "status": "generating", "error": None,
                               "questions": existing.get("questions") or []}
@@ -167,6 +173,7 @@ async def patch_kit(
     application_id: int,
     payload: InterviewKitPatch,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ) -> InterviewKitRead:
     app_row = await session.get(Application, application_id)
     if app_row is None:
@@ -181,19 +188,42 @@ async def patch_kit(
         raise HTTPException(status_code=422, detail="duplicate question ids")
 
     kit = InterviewKit.model_validate(app_row.interview_kit)
+    rows = await load_assignments(session, application_id)
+    stored_ids = [q.id for q in kit.questions]
+    incoming_ids = [q.id for q in payload.questions]
+
+    if not can_edit_questions(user):
+        # An assigned interviewer may append, and nothing else.
+        if user.id not in {r.user_id for r in rows}:
+            raise HTTPException(status_code=403, detail="not assigned to this interview")
+        prefix = payload.questions[:len(stored_ids)]
+        unchanged = [q.model_dump(exclude={"added_by", "answer", "rating"}) for q in prefix] == [
+            q.model_dump(exclude={"added_by", "answer", "rating"}) for q in kit.questions
+        ]
+        if not unchanged:
+            raise HTTPException(status_code=403, detail="interviewers may only add questions")
+
+    if is_frozen(rows) and any(qid not in incoming_ids for qid in stored_ids):
+        raise HTTPException(
+            status_code=409, detail="questions are frozen: a sheet has been submitted",
+        )
+
     # Legacy per-question answer/rating are read-only: carry over whatever
-    # the stored kit has and never take them from the client.
+    # the stored kit has and never take them from the client. `added_by`
+    # is server-assigned on append and preserved otherwise.
     legacy = {q.id: q for q in kit.questions}
     kit.questions = [
         q.model_copy(update={
             "answer": legacy[q.id].answer if q.id in legacy else None,
             "rating": legacy[q.id].rating if q.id in legacy else None,
+            "added_by": legacy[q.id].added_by if q.id in legacy
+                        else (None if can_edit_questions(user) else user.id),
         })
         for q in payload.questions
     ]
     app_row.interview_kit = kit.model_dump()
     await session.commit()
-    return InterviewKitRead(kit=kit)
+    return await _read(session, app_row, user)
 
 
 async def _own_assignment(

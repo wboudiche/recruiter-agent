@@ -32,4 +32,9 @@ VIEWER_ALLOWED_ROUTES = frozenset({
     # to viewers at large.
     ("PATCH", "/api/applications/{application_id}/interview-kit/sheet"),
     ("POST", "/api/applications/{application_id}/interview-kit/sheet/submit"),
+    # Same reasoning: an assigned interviewer may append a question to the
+    # shared kit. `patch_kit` (interview.py) refuses every other change
+    # from a non-recruiter with 403 — this only opens the route, not the
+    # ability to edit or remove questions.
+    ("PATCH", "/api/applications/{application_id}/interview-kit"),
 })
