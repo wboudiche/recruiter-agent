@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { useInterviewKit } from "./use-interview-kit";
+import { EMPTY_SHEET, useInterviewKit } from "./use-interview-kit";
 import { queryKeys } from "@/lib/query-keys";
 
 const server = setupServer();
@@ -59,8 +59,8 @@ describe("useInterviewKit", () => {
 
   it("invalidates both interview-kit and application queries on submit", async () => {
     server.use(
-      http.post("http://localhost:8000/api/applications/1/interview-kit/submit", () =>
-        HttpResponse.json({ status: "submitted", questions: [] }),
+      http.post("http://localhost:8000/api/applications/1/interview-kit/sheet/submit", () =>
+        HttpResponse.json({ kit: { status: "submitted", questions: [] }, sheets: [] }),
       ),
     );
     const qc = new QueryClient({
@@ -72,7 +72,7 @@ describe("useInterviewKit", () => {
         <QueryClientProvider client={qc}>{children}</QueryClientProvider>
       ),
     });
-    result.current.submit.mutate();
+    result.current.submitSheet.mutate();
     await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.interviewKit(1),
@@ -108,5 +108,45 @@ describe("useInterviewKit", () => {
     expect(hintSent).toBe("Terraform state locking");
     expect(drafted.question.text).toBe("How do you handle Terraform state locking?");
     expect(result.current.kit?.questions).toHaveLength(0);
+  });
+});
+
+const KIT = { status: "ready", questions: [{ id: "q1", text: "Why?", source: "probe", answer: null, rating: null }] };
+
+describe("useInterviewKit sheets", () => {
+  it("exposes the caller-visible sheets and saves through the sheet route", async () => {
+    const seen: { body?: unknown; path?: string } = {};
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: KIT, sheets: [{ user_id: 4, name: "Ann", email: "ann@acme.com", sheet: EMPTY_SHEET, submitted_at: null }] })),
+      http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", async ({ request }) => {
+        seen.body = await request.json();
+        seen.path = new URL(request.url).pathname;
+        return HttpResponse.json({ kit: KIT, sheets: [] });
+      }),
+    );
+    const { result } = renderHook(() => useInterviewKit(1), { wrapper: wrap() });
+    await waitFor(() => expect(result.current.sheets).toHaveLength(1));
+    expect(result.current.sheets[0].name).toBe("Ann");
+
+    result.current.saveSheet.mutate({ ...EMPTY_SHEET, verdict: { decision: "hire", note: null } });
+    await waitFor(() => expect(seen.path).toBe("/api/applications/1/interview-kit/sheet"));
+    expect((seen.body as { verdict: { decision: string } }).verdict.decision).toBe("hire");
+  });
+
+  it("submits through the sheet submit route", async () => {
+    let hit = "";
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: KIT, sheets: [] })),
+      http.post("http://localhost:8000/api/applications/1/interview-kit/sheet/submit", ({ request }) => {
+        hit = new URL(request.url).pathname;
+        return HttpResponse.json({ kit: KIT, sheets: [] });
+      }),
+    );
+    const { result } = renderHook(() => useInterviewKit(1), { wrapper: wrap() });
+    await waitFor(() => expect(result.current.kit).not.toBeNull());
+    result.current.submitSheet.mutate();
+    await waitFor(() => expect(hit).toBe("/api/applications/1/interview-kit/sheet/submit"));
   });
 });

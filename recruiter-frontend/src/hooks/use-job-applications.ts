@@ -32,6 +32,9 @@ export interface ApplicationRead {
   hired_at?: string | null;
   rejected_at: string | null;
   rejection_reason?: string | null;
+  /** Interviewer sheets assigned / submitted. Shown as "n/m sheets in" while scheduled. */
+  sheets_total?: number;
+  sheets_submitted?: number;
   created_at: string;
   updated_at: string;
   awaiting_paste: boolean;

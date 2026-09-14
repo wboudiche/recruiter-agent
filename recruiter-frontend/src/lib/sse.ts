@@ -34,6 +34,12 @@ export function handleServerEvent(
     queryClient.invalidateQueries({
       queryKey: queryKeys.interviewKit(payload.application_id),
     });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.interviewers(payload.application_id),
+    });
+    // A sheet submit can move the stage.
+    queryClient.invalidateQueries({ queryKey: queryKeys.application(payload.application_id) });
+    queryClient.invalidateQueries({ queryKey: ["jobs"], exact: false });
   } else {
     queryClient.invalidateQueries({
       queryKey: queryKeys.application(payload.application_id),
