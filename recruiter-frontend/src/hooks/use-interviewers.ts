@@ -1,0 +1,48 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+
+export interface InterviewerRead {
+  user_id: number;
+  name: string | null;
+  email: string;
+  submitted_at: string | null;
+}
+
+export interface DirectoryUser {
+  id: number;
+  name: string | null;
+  email: string;
+  role: "admin" | "recruiter" | "viewer";
+}
+
+export function useInterviewers(applicationId: number) {
+  const qc = useQueryClient();
+  const key = queryKeys.interviewers(applicationId);
+  const path = `/api/applications/${applicationId}/interviewers`;
+  const query = useQuery({
+    queryKey: key,
+    queryFn: () => api<InterviewerRead[]>(path),
+    enabled: !Number.isNaN(applicationId),
+  });
+  const setInterviewers = useMutation({
+    mutationFn: (userIds: number[]) =>
+      api<InterviewerRead[]>(path, { method: "PUT", json: { user_ids: userIds } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key });
+      qc.invalidateQueries({ queryKey: queryKeys.interviewKit(applicationId) });
+      qc.invalidateQueries({ queryKey: queryKeys.application(applicationId) });
+    },
+  });
+  return { interviewers: query.data ?? [], isLoading: query.isLoading, setInterviewers };
+}
+
+/** Only fetched when the picker opens — a recruiter-only endpoint, and
+ *  viewers never open the picker. */
+export function useUserDirectory(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.userDirectory(),
+    queryFn: () => api<DirectoryUser[]>("/api/users/directory"),
+    enabled,
+  });
+}

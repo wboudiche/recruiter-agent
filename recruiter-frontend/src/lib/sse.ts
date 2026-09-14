@@ -19,7 +19,11 @@ interface ServerErrorEvent {
 interface InterviewKitEvent {
   type: "interview_kit";
   application_id: number;
+  // Absent on events published before the backend started sending them —
+  // handle both as "unknown", which we treat conservatively (see below).
+  job_id?: number;
   status: "generating" | "ready" | "error";
+  stage_changed?: boolean;
 }
 
 type ServerEvent = StageEvent | ServerErrorEvent | InterviewKitEvent;
@@ -34,6 +38,23 @@ export function handleServerEvent(
     queryClient.invalidateQueries({
       queryKey: queryKeys.interviewKit(payload.application_id),
     });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.interviewers(payload.application_id),
+    });
+    // A sheet submit can move the stage.
+    queryClient.invalidateQueries({ queryKey: queryKeys.application(payload.application_id) });
+    // When we know which job's board this application lives on, refetch
+    // just that job's application list instead of every mounted kanban
+    // board. Only fall back to the broad ["jobs"] prefix when the stage
+    // actually changed (the card may need to move columns) or when the
+    // event predates `job_id`/`stage_changed` (old events — we can't tell
+    // whether the stage moved, so refetch everything to be safe).
+    if (typeof payload.job_id === "number") {
+      queryClient.invalidateQueries({ queryKey: queryKeys.jobApplications(payload.job_id) });
+    }
+    if (payload.stage_changed === true || payload.job_id === undefined) {
+      queryClient.invalidateQueries({ queryKey: ["jobs"], exact: false });
+    }
   } else {
     queryClient.invalidateQueries({
       queryKey: queryKeys.application(payload.application_id),

@@ -50,7 +50,65 @@ describe("handleServerEvent", () => {
     expect(spy).toHaveBeenCalledWith({
       queryKey: queryKeys.interviewKit(42),
     });
-    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it("also invalidates interviewers, application, and jobs for interview_kit events", () => {
+    // A sheet submit can add/remove an interviewer's row or move the stage,
+    // so the interviewers panel, the detail header, and the kanban all need
+    // a refetch alongside the kit itself.
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    const payload = {
+      type: "interview_kit" as const,
+      application_id: 42,
+      status: "ready" as const,
+    };
+    handleServerEvent(payload, qc);
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.interviewers(42),
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: queryKeys.application(42),
+    });
+    expect(spy).toHaveBeenCalledWith({
+      queryKey: ["jobs"],
+      exact: false,
+    });
+  });
+
+  it("invalidates jobApplications but not the jobs prefix when job_id is set and stage_changed is false", () => {
+    // The backend now tells us which job's board is affected and whether
+    // the stage actually moved. When it didn't, only that job's application
+    // list needs a refetch — invalidating the whole ["jobs"] prefix would
+    // refetch every mounted kanban board for nothing.
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    const payload = {
+      type: "interview_kit" as const,
+      application_id: 42,
+      job_id: 8,
+      status: "ready" as const,
+      stage_changed: false,
+    };
+    handleServerEvent(payload, qc);
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.jobApplications(8) });
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: ["jobs"], exact: false });
+  });
+
+  it("invalidates the jobs prefix when stage_changed is true", () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+    const payload = {
+      type: "interview_kit" as const,
+      application_id: 42,
+      job_id: 8,
+      status: "ready" as const,
+      stage_changed: true,
+    };
+    handleServerEvent(payload, qc);
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.jobApplications(8) });
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["jobs"], exact: false });
   });
 
   it("invalidates application, jobs, and candidates for stage events", () => {

@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { Toaster } from "sonner";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { queryKeys } from "@/lib/query-keys";
 import { InterviewKitSection } from "./interview-kit-section";
 
 const server = setupServer();
@@ -13,29 +14,40 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-function mountWithKit(kit: unknown, capture: { body?: any } = {}) {
+function mountWithKit(
+  kit: unknown,
+  capture: { body?: any; sheet?: any; submitted?: boolean } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[] } = {},
+) {
+  const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
+    http.get("http://localhost:8000/api/auth/me", () =>
+      HttpResponse.json({ id: me.id, email: "me@acme.com", name: "Me", picture: null, role: me.role })),
     http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
-      HttpResponse.json({ kit }),
-    ),
+      HttpResponse.json({ kit, sheets: opts.sheets ?? [] })),
     http.patch("http://localhost:8000/api/applications/1/interview-kit", async ({ request }) => {
       capture.body = await request.json();
-      return HttpResponse.json({ kit });
+      return HttpResponse.json({ kit, sheets: opts.sheets ?? [] });
+    }),
+    http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", async ({ request }) => {
+      capture.sheet = await request.json();
+      return HttpResponse.json({ kit, sheets: opts.sheets ?? [] });
+    }),
+    http.post("http://localhost:8000/api/applications/1/interview-kit/sheet/submit", () => {
+      capture.submitted = true;
+      return HttpResponse.json({ kit, sheets: opts.sheets ?? [] });
     }),
     http.post("http://localhost:8000/api/applications/1/interview-kit/generate", () =>
-      HttpResponse.json({ application_id: 1 }, { status: 202 }),
-    ),
+      HttpResponse.json({ application_id: 1 }, { status: 202 })),
+    http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+      HttpResponse.json(opts.interviewers ?? [])),
   );
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>
-      {children}
-      <Toaster />
-    </QueryClientProvider>
+    <QueryClientProvider client={qc}>{children}<Toaster /></QueryClientProvider>
   );
-  return render(<Wrapper><InterviewKitSection applicationId={1} canWrite /></Wrapper>);
+  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} /></Wrapper>);
+  return { ...result, qc };
 }
 
 const READY = {
@@ -109,18 +121,6 @@ describe("InterviewKitSection", () => {
     ).not.toBe(screen.getByRole("button", { name: /rate question 2 as strong/i }));
   });
 
-  it("saves a typed answer", async () => {
-    const cap: { body?: any } = {};
-    mountWithKit(READY, cap);
-    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
-
-    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Wants scale");
-    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
-
-    await waitFor(() => expect(cap.body).toBeDefined());
-    expect(cap.body.questions[0].answer).toBe("Wants scale");
-  });
-
   it("adds a question and includes it when saving", async () => {
     const cap: { body?: any } = {};
     mountWithKit(READY, cap);
@@ -174,7 +174,7 @@ describe("InterviewKitSection", () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
     server.use(
-      http.patch("http://localhost:8000/api/applications/1/interview-kit", () =>
+      http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
     );
@@ -188,8 +188,8 @@ describe("InterviewKitSection", () => {
   });
 
   it("marks Save dirty once the draft diverges, and clean again after saving", async () => {
-    const cap: { body?: any } = {};
-    mountWithKit(READY, cap);
+    const capture: { sheet?: any } = {};
+    mountWithKit(READY, capture);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
 
     const saveButton = screen.getByRole("button", { name: /save answers/i });
@@ -199,11 +199,8 @@ describe("InterviewKitSection", () => {
     expect(saveButton).toHaveAttribute("data-dirty", "true");
 
     await userEvent.click(saveButton);
-    await waitFor(() => expect(cap.body).toBeDefined());
-    // The server mock echoes back the same (still-unanswered) READY kit, so
-    // the draft the component holds no longer matches it: still dirty.
-    // What matters here is that the flag reflects the draft/saved diff —
-    // covered above and by the beforeunload test below.
+    await waitFor(() => expect(capture.sheet).toBeDefined());
+    expect(capture.sheet.answers.b1.answer).toBe("Wants scale");
   });
 
   it("warns before unload while the draft is dirty, not once saved", async () => {
@@ -223,9 +220,13 @@ describe("InterviewKitSection", () => {
 
   it("shows a distinct error state with retry when the kit request fails", async () => {
     server.use(
+      http.get("http://localhost:8000/api/auth/me", () =>
+        HttpResponse.json({ id: 1, email: "me@acme.com", name: "Me", picture: null, role: "recruiter" })),
       http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json([])),
     );
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -247,17 +248,7 @@ describe("InterviewKitSection", () => {
   });
 
   it("hides every write control for a viewer", async () => {
-    server.use(
-      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
-        HttpResponse.json({ kit: READY }),
-      ),
-    );
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <InterviewKitSection applicationId={1} canWrite={false} />
-      </QueryClientProvider>,
-    );
+    mountWithKit(READY, {}, { canWrite: false });
     await waitFor(() => expect(screen.getByText("Why this role?")).toBeInTheDocument());
 
     // No mutation-triggering controls at all — not just Save/Submit.
@@ -337,19 +328,235 @@ describe("InterviewKitSection", () => {
   });
 
   it("offers no AI drafting to a viewer", async () => {
-    server.use(
-      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
-        HttpResponse.json({ kit: READY }),
-      ),
-    );
-    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={qc}>
-        <InterviewKitSection applicationId={1} canWrite={false} />
-      </QueryClientProvider>,
-    );
+    mountWithKit(READY, {}, { canWrite: false });
     await waitFor(() => expect(screen.getByText("Why this role?")).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /draft with ai/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/about/i)).not.toBeInTheDocument();
+  });
+
+  it("saves answers and ratings to the caller's sheet", async () => {
+    const capture: { sheet?: any } = {};
+    mountWithKit(READY, capture);
+    await screen.findByDisplayValue("Why this role?");
+    // Both questions get an answer box; the assertion below is scoped to
+    // b1 (question 1), so type into the first one.
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Good answer");
+    await userEvent.click(screen.getByRole("button", { name: /rate question 1 as strong/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await waitFor(() => expect(capture.sheet).toBeDefined());
+    expect(capture.sheet.answers.b1).toEqual({ answer: "Good answer", rating: "strong" });
+  });
+
+  it("records a verdict on the sheet", async () => {
+    const capture: { sheet?: any } = {};
+    mountWithKit(READY, capture);
+    await screen.findByDisplayValue("Why this role?");
+    await userEvent.click(screen.getByRole("button", { name: /^hire$/i }));
+    await userEvent.type(screen.getByLabelText(/verdict note/i), "Strong on infra.");
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await waitFor(() => expect(capture.sheet?.verdict).toEqual({ decision: "hire", note: "Strong on infra." }));
+  });
+
+  it("asks before submitting with unanswered questions, then submits the sheet", async () => {
+    const capture: { sheet?: any; submitted?: boolean } = {};
+    mountWithKit(READY, capture);
+    await screen.findByDisplayValue("Why this role?");
+    await userEvent.click(screen.getByRole("button", { name: /submit interview/i }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(/2 question\(s\) have no answer/);
+    await userEvent.click(screen.getByRole("button", { name: /submit anyway/i }));
+    await waitFor(() => expect(capture.submitted).toBe(true));
+  });
+
+  it("renders a submitted sheet read-only", async () => {
+    const mine = { user_id: 1, name: "Me", email: "me@acme.com",
+      sheet: { answers: { b1: { answer: "Done", rating: "weak" } }, verdict: { decision: "no_hire", note: null } },
+      submitted_at: "2026-09-14T10:00:00Z" };
+    mountWithKit(READY, {}, { sheets: [mine] });
+    // Question ids are stable, so renaming stays allowed even once frozen —
+    // the row is still an editable textarea, not read-only text.
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
+    expect(screen.getByText("Done")).toBeInTheDocument();
+  });
+
+  it("disables removal and regenerate once any sheet is submitted", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: "2026-09-14T10:00:00Z" };
+    mountWithKit(READY, {}, { sheets: [other] });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByRole("button", { name: /remove question 1/i })).toBeDisabled();
+    // Freezing only refuses removal (and regenerate) — the question text
+    // itself stays editable for a recruiter/admin.
+    expect(screen.getByLabelText("Question 1")).toBeEnabled();
+  });
+
+  it("locks out a recruiter with no panel row on a kit that already has one", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const cap: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, cap, { sheets: [other], me: { id: 1, role: "recruiter" } });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.queryByPlaceholderText(/what they said/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove question 1/i })).toBeInTheDocument();
+
+    // No sheet to write, but question edits must still be saveable.
+    await userEvent.click(screen.getByRole("button", { name: /remove question 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save questions/i }));
+
+    await waitFor(() => expect(cap.body).toBeDefined());
+    expect(cap.body.questions).toHaveLength(1);
+    expect(cap.sheet).toBeUndefined();
+  });
+
+  it("lets a submitted interviewer keep saving question edits with no sheet to write", async () => {
+    const mine = {
+      user_id: 5, name: "V", email: "v@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } },
+      submitted_at: "2026-09-14T10:00:00Z",
+    };
+    const cap: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, cap, { sheets: [mine], me: { id: 5, role: "viewer" }, canWrite: false });
+    await screen.findByText("Why this role?");
+
+    expect(screen.getByRole("button", { name: /add question/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /add question/i }));
+    const inputs = screen.getAllByLabelText(/^Question \d+$/i);
+    expect(inputs[inputs.length - 1]).toHaveAccessibleName("Question 3");
+    await userEvent.type(inputs[inputs.length - 1], "One more thing?");
+
+    await userEvent.click(screen.getByRole("button", { name: /save questions/i }));
+
+    await waitFor(() => expect(cap.body).toBeDefined());
+    expect(cap.body.questions).toHaveLength(3);
+    expect(cap.sheet).toBeUndefined();
+  });
+
+  it("shows legacy per-question answers read-only", async () => {
+    const legacy = { ...READY, questions: [{ ...READY.questions[0], answer: "Old answer", rating: "strong" }] };
+    mountWithKit(legacy);
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/recorded before interviewer sheets/i)).toBeInTheDocument();
+    expect(screen.getByText("Old answer")).toBeInTheDocument();
+  });
+
+  it("resolves an added-by id to the interviewer's name", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 7 }, READY.questions[1]] };
+    mountWithKit(withAddedBy, {}, { sheets: [other] });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by bob/i)).toBeInTheDocument();
+  });
+
+  it("resolves an added-by id via the interviewer roster when no sheet names them yet", async () => {
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 9 }, READY.questions[1]] };
+    mountWithKit(withAddedBy, {}, { interviewers: [{ user_id: 9, name: "Priya", email: "priya@acme.com", submitted_at: null }] });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by priya/i)).toBeInTheDocument();
+  });
+
+  it("falls back to a generic label when the added-by id resolves to nobody known", async () => {
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 42 }, READY.questions[1]] };
+    mountWithKit(withAddedBy);
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by another interviewer/i)).toBeInTheDocument();
+  });
+
+  it("gives an assigned viewer only Add question on the question list", async () => {
+    const mine = { user_id: 5, name: "V", email: "v@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    mountWithKit(READY, {}, { sheets: [mine], me: { id: 5, role: "viewer" }, canWrite: false });
+    await screen.findByText("Why this role?");
+    expect(screen.getByRole("button", { name: /add question/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /remove question 1/i })).not.toBeInTheDocument();
+    expect(screen.getAllByPlaceholderText(/what they said/i)[0]).toBeInTheDocument();
+  });
+
+  // F1: the question draft used to be resent unconditionally whenever it
+  // differed (by JSON) from the last-seen server questions. A background
+  // refetch that updated `kit.questions` (someone else's edit) without the
+  // draft being re-seeded meant an unrelated "Save answers" click could
+  // resend a stale question list and silently drop a colleague's question.
+  // An explicit `questionsDirty` flag, set only by the user's own edits,
+  // fixes this.
+  it("saves only the sheet, never the question list, when only an answer changed (F1)", async () => {
+    const mine = {
+      user_id: 5, name: "V", email: "v@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } },
+      submitted_at: null,
+    };
+    const capture: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, capture, { sheets: [mine], me: { id: 5, role: "viewer" }, canWrite: false });
+    await screen.findByText("Why this role?");
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Good answer");
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+
+    await waitFor(() => expect(capture.sheet).toBeDefined());
+    // No question PATCH must have been sent at all.
+    expect(capture.body).toBeUndefined();
+  });
+
+  it("re-seeds the untouched draft when the server's question list changes underneath it (F1)", async () => {
+    const { qc } = mountWithKit(READY);
+    await screen.findByDisplayValue("Why this role?");
+
+    const UPDATED = {
+      ...READY,
+      questions: [
+        ...READY.questions,
+        { id: "p2", text: "Added by a colleague", source: "probe", criterion: null, answer: null, rating: null },
+      ],
+    };
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: UPDATED, sheets: [] })),
+    );
+    await qc.invalidateQueries({ queryKey: queryKeys.interviewKit(1) });
+
+    // No user action taken — the new question must appear on its own.
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Added by a colleague")).toBeInTheDocument(),
+    );
+  });
+
+  it("does not resend a question PATCH on a second save once nothing has changed since (F1)", async () => {
+    const cap: { body?: any } = {};
+    mountWithKit(READY, cap);
+    await screen.findByDisplayValue("Why this role?");
+
+    let patchCalls = 0;
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit", async ({ request }) => {
+        patchCalls += 1;
+        cap.body = await request.json();
+        return HttpResponse.json({ kit: READY, sheets: [] });
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /remove question 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await waitFor(() => expect(patchCalls).toBe(1));
+
+    // Nothing else changed the draft — a second Save must not re-PATCH.
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(patchCalls).toBe(1);
+  });
+
+  // F3: guard against a double-submit while a save/patch/submit is in flight.
+  it("disables Save while a save is in flight, and re-enables once it resolves (F3)", async () => {
+    mountWithKit(READY);
+    await screen.findByDisplayValue("Why this role?");
+
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", async () => {
+        await delay(200);
+        return HttpResponse.json({ kit: READY, sheets: [] });
+      }),
+    );
+
+    const saveButton = screen.getByRole("button", { name: /save answers/i });
+    await userEvent.click(saveButton);
+
+    await waitFor(() => expect(saveButton).toBeDisabled());
+    await waitFor(() => expect(saveButton).toBeEnabled(), { timeout: 3000 });
   });
 });

@@ -42,6 +42,10 @@ class ApplicationRead(BaseModel):
     # apart from "it failed again the same way". The id can.
     last_error_event_id: int | None = None
     enrichment: dict | None = None
+    # Interviewer sheets on this application; the kanban shows "n/m sheets
+    # in" while SCHEDULED. Batched in one query per read — see _sheet_counts.
+    sheets_total: int = 0
+    sheets_submitted: int = 0
 
 
 class ApplicationUpdate(BaseModel):

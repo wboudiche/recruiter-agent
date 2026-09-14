@@ -2,14 +2,27 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
+import { useCurrentUser } from "@/hooks/use-current-user";
+import { useInterviewers } from "@/hooks/use-interviewers";
 import {
-  type KitQuestion, type Rating, useInterviewKit,
+  EMPTY_SHEET, type InterviewSheet, type KitQuestion, type Rating, type VerdictDecision,
+  useInterviewKit,
 } from "@/hooks/use-interview-kit";
+import { FeedbackTable } from "./feedback-table";
 
 const RATINGS: Rating[] = ["strong", "adequate", "weak"];
+
+const VERDICTS: { value: VerdictDecision; label: string }[] = [
+  { value: "hire", label: "Hire" },
+  { value: "no_hire", label: "No hire" },
+  { value: "unsure", label: "Unsure" },
+];
 
 interface Props {
   applicationId: number;
@@ -35,15 +48,65 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function InterviewKitSection({ applicationId, canWrite }: Props) {
-  const { kit, isLoading, isError, refetch, generate, patch, submit, draftQuestion } =
+  const { kit, sheets, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
     useInterviewKit(applicationId);
+  const me = useCurrentUser();
+  const { interviewers } = useInterviewers(applicationId);
   const [draft, setDraft] = useState<KitQuestion[]>([]);
+  // Explicit edit flag rather than diffing `draft` against `kit.questions`:
+  // a background refetch can update `kit.questions` (someone else's edit)
+  // without the user having touched anything, and a JSON diff would then
+  // read as "changed" for the wrong reason — resending the whole draft as
+  // a PATCH would silently overwrite that other edit. Only the user's own
+  // edits (below) set this, and only a successful PATCH or a re-seed from
+  // the server clears it.
+  const [questionsDirty, setQuestionsDirty] = useState(false);
   const [hint, setHint] = useState("");
+  const [sheet, setSheet] = useState<InterviewSheet>(EMPTY_SHEET);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const myId = me.data?.id ?? null;
+  // Whether the caller may write a sheet is derived, not passed in: it's
+  // their own sheet's identity (present + not yet submitted), or — for a
+  // writer who has never touched this kit — the fact that no one has
+  // created a sheet yet, so the server will create theirs on first save.
+  //
+  // For a recruiter/admin, `sheets` is every sheet on the kit (not just
+  // theirs), so `sheets.length === 0` really does mean "no one has a panel
+  // row yet". This mirrors the server: a recruiter/admin with no assignment
+  // row on the application gets one created on first save; an unassigned
+  // recruiter on an application that already has rows gets a 404.
+  const mySheetRead = sheets.find((s) => s.user_id === myId) ?? null;
+  const canWriteSheet = mySheetRead ? mySheetRead.submitted_at === null : (canWrite && sheets.length === 0);
+  const isSubmitted = mySheetRead?.submitted_at != null;
+  // Once any interviewer has submitted, the question list freezes for
+  // removal — every sheet keeps scoring against the same set of questions.
+  // Question ids are stable, so renaming an existing question's text stays
+  // allowed after a freeze; only Remove (and regenerate, not a button here)
+  // are refused.
+  const frozen = sheets.some((s) => s.submitted_at !== null);
+  // A recruiter/admin may always reword a question's text; an interviewer
+  // (no `canWrite`) may only edit a question they appended this session
+  // (see `canEditThisQuestion` below) — freezing never affects this.
+  const canEditQuestions = canWrite;
+  const canAppend = canWrite || mySheetRead !== null;
+
+  // "added by" resolves an id to a name for display. `sheets` only covers
+  // people who have saved a sheet; `interviewers` covers everyone assigned
+  // to the panel (visible to every role), so combine both — a name beats an
+  // email, and an id neither list recognizes falls back to a generic label.
+  const nameById = new Map<number, string>();
+  for (const s of sheets) nameById.set(s.user_id, s.name ?? s.email);
+  for (const i of interviewers) if (!nameById.has(i.user_id)) nameById.set(i.user_id, i.name ?? i.email);
+  const addedByName = (id: number) => nameById.get(id) ?? "another interviewer";
 
   // The server is the source of truth; local edits are a draft until saved.
-  // Deliberately keyed on `generated_at`/`status`, not on `kit.questions`
-  // itself: a background refetch must not clobber answers the recruiter has
-  // typed but not yet saved.
+  // Keyed on `generated_at`/`status` plus a stable digest of the questions
+  // themselves (id+text), so an *untouched* draft follows the server even
+  // when neither `generated_at` nor `status` changes — e.g. a colleague
+  // appends a question and a background refetch picks it up. Re-seeding is
+  // gated on `!questionsDirty` so a user's own in-progress edits are never
+  // clobbered by that same background refetch.
   //
   // This seeding used to live in a `useEffect`. Effects run after the
   // commit that first shows a loaded `kit`, so there was a render — the one
@@ -62,17 +125,41 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // racing to close it: the mismatched render is discarded and redone with
   // the fresh draft before anything commits, so `isDirty` below can never
   // observe an unseeded draft as dirty.
-  const seedKey = kit ? `${kit.generated_at}:${kit.status}` : null;
+  const questionsDigest = (qs: KitQuestion[] | undefined) =>
+    (qs ?? []).map((q) => `${q.id}:${q.text}`).join("|");
+  const seedKey = kit ? `${kit.generated_at}:${kit.status}:${questionsDigest(kit.questions)}` : null;
   const [seededKey, setSeededKey] = useState<string | null>(null);
-  if (kit?.questions && seedKey !== seededKey) {
+  if (kit?.questions && seedKey !== seededKey && !questionsDirty) {
     setSeededKey(seedKey);
     setDraft(kit.questions);
+    setQuestionsDirty(false);
   }
 
-  // Dirty = the draft has diverged from the last-saved questions. Used both
-  // for a visible affordance on Save and to warn before an unsaved
-  // navigation/refresh wipes typed answers and ratings.
-  const isDirty = JSON.stringify(draft) !== JSON.stringify(kit?.questions ?? []);
+  // Same seeding pattern for the caller's own sheet, keyed on its identity
+  // (whose sheet, and whether it's been submitted) so a background refetch
+  // never clobbers answers being typed.
+  const sheetKey = mySheetRead ? `${mySheetRead.user_id}:${mySheetRead.submitted_at}` : "none";
+  const [seededSheetKey, setSeededSheetKey] = useState<string | null>(null);
+  if (sheetKey !== seededSheetKey) {
+    setSeededSheetKey(sheetKey);
+    setSheet(mySheetRead?.sheet ?? EMPTY_SHEET);
+  }
+
+  const setAnswer = (id: string, fields: Partial<{ answer: string | null; rating: Rating | null }>) =>
+    setSheet((s) => {
+      const current = s.answers[id] ?? { answer: null, rating: null };
+      return { ...s, answers: { ...s.answers, [id]: { ...current, ...fields } } };
+    });
+
+  // Dirty = the user has edited the question draft, or the sheet draft has
+  // diverged from what the server last returned. Used both for a visible
+  // affordance on Save and to warn before an unsaved navigation/refresh
+  // wipes typed answers. `questionsDirty` (not a diff against
+  // `kit.questions`) avoids flagging dirty purely because a background
+  // refetch changed the server's list underneath an untouched draft.
+  const isDirty =
+    questionsDirty ||
+    JSON.stringify(sheet) !== JSON.stringify(mySheetRead?.sheet ?? EMPTY_SHEET);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -150,111 +237,156 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     );
   }
 
-  const update = (id: string, patchFields: Partial<KitQuestion>) =>
+  const update = (id: string, patchFields: Partial<KitQuestion>) => {
+    setQuestionsDirty(true);
     setDraft((qs) => qs.map((q) => (q.id === id ? { ...q, ...patchFields } : q)));
+  };
 
-  const unanswered = draft.filter((q) => !q.answer?.trim()).length;
+  const unanswered = draft.filter((q) => !sheet.answers[q.id]?.answer?.trim()).length;
+  const serverQuestionIds = new Set((kit.questions ?? []).map((q) => q.id));
 
-  function saveAnswers() {
-    patch.mutate(draft, {
-      onError: (err) => toast.error(errorMessage(err, "Couldn't save answers")),
-    });
+  function saveAll(onDone?: () => void) {
+    const afterQuestions = () =>
+      canWriteSheet
+        ? saveSheet.mutate(sheet, {
+            onError: (err) => toast.error(errorMessage(err, "Couldn't save answers")),
+            onSuccess: onDone,
+          })
+        : onDone?.();
+    if (questionsDirty && canAppend) {
+      patch.mutate(draft, {
+        onError: (err) => toast.error(errorMessage(err, "Couldn't save questions")),
+        onSuccess: () => {
+          setQuestionsDirty(false);
+          afterQuestions();
+        },
+      });
+    } else {
+      afterQuestions();
+    }
   }
 
-  function onSubmit() {
-    if (unanswered > 0 &&
-        !window.confirm(`${unanswered} question(s) have no answer. Submit anyway?`)) {
-      return;
-    }
-    patch.mutate(draft, {
-      onError: (err) => toast.error(errorMessage(err, "Couldn't save answers")),
-      onSuccess: () => submit.mutate(undefined, {
+  function doSubmit() {
+    setConfirmOpen(false);
+    saveAll(() =>
+      submitSheet.mutate(undefined, {
         onSuccess: () => toast.success("Interview recorded"),
-        onError: (err) =>
-          toast.error(errorMessage(err, "Answers saved, but submit failed — try again")),
-      }),
-    });
+        onError: (err) => toast.error(errorMessage(err, "Answers saved, but submit failed — try again")),
+      }));
+  }
+
+  function onSubmitClick() {
+    if (unanswered > 0) setConfirmOpen(true);
+    else doSubmit();
   }
 
   return (
     <section className="space-y-3">
       <h3 className="text-lg font-semibold">Interview kit</h3>
       <ul className="space-y-3">
-        {draft.map((q, i) => (
-          <li key={q.id} className="border border-border rounded p-2 space-y-2">
-            <div className="flex items-start justify-between gap-2">
-              {canWrite ? (
-                // Questions run to 200+ characters; a single-line input
-                // clipped them so the interviewer couldn't read what to
-                // ask. `field-sizing: content` grows the box to fit (see
-                // jobs-new.tsx for browser support); `rows={1}` keeps a
-                // short question on one line where it isn't supported.
-                <textarea
-                  aria-label={`Question ${i + 1}`}
-                  rows={1}
-                  className="flex-1 resize-none bg-transparent text-sm leading-snug outline-none [field-sizing:content]"
-                  value={q.text}
-                  onChange={(e) => update(q.id, { text: e.target.value })}
-                />
-              ) : (
-                <p className="flex-1 text-sm">{q.text}</p>
-              )}
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {q.source === "baseline" ? "Role" : "For this candidate"}
-              </span>
-              {canWrite && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto px-2 py-1 text-xs"
-                  aria-label={`Remove question ${i + 1}`}
-                  onClick={() => setDraft((qs) => qs.filter((x) => x.id !== q.id))}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-            {canWrite ? (
-              <Textarea
-                placeholder="What they said…"
-                value={q.answer ?? ""}
-                onChange={(e) => update(q.id, { answer: e.target.value })}
-              />
-            ) : (
-              q.answer && <p className="text-xs text-muted-foreground">{q.answer}</p>
-            )}
-            {canWrite && (
-              <div className="flex gap-1">
-                {RATINGS.map((r) => (
+        {draft.map((q, i) => {
+          const mine = sheet.answers[q.id] ?? { answer: null, rating: null };
+          const canEditThisQuestion = canEditQuestions || (canAppend && !serverQuestionIds.has(q.id));
+          return (
+            <li key={q.id} className="border border-border rounded p-2 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                {canEditThisQuestion ? (
+                  // Questions run to 200+ characters; a single-line input
+                  // clipped them so the interviewer couldn't read what to
+                  // ask. `field-sizing: content` grows the box to fit (see
+                  // jobs-new.tsx for browser support); `rows={1}` keeps a
+                  // short question on one line where it isn't supported.
+                  <textarea
+                    aria-label={`Question ${i + 1}`}
+                    rows={1}
+                    className="flex-1 resize-none bg-transparent text-sm leading-snug outline-none [field-sizing:content]"
+                    value={q.text}
+                    onChange={(e) => update(q.id, { text: e.target.value })}
+                  />
+                ) : (
+                  <p className="flex-1 text-sm">{q.text}</p>
+                )}
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {q.source === "baseline" ? "Role" : "For this candidate"}
+                </span>
+                {q.added_by != null && (
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    added by {addedByName(q.added_by)}
+                  </span>
+                )}
+                {canWrite && (
                   <Button
-                    key={r}
-                    type="button"
+                    variant="ghost"
                     size="sm"
-                    variant={q.rating === r ? "default" : "outline"}
-                    className="h-auto px-2 py-1 text-xs capitalize"
-                    aria-label={`Rate question ${i + 1} as ${r}`}
-                    onClick={() => update(q.id, { rating: q.rating === r ? null : r })}
+                    className="h-auto px-2 py-1 text-xs"
+                    aria-label={`Remove question ${i + 1}`}
+                    disabled={frozen}
+                    title={frozen ? "Questions are frozen once a sheet is submitted" : undefined}
+                    onClick={() => {
+                      setQuestionsDirty(true);
+                      setDraft((qs) => qs.filter((x) => x.id !== q.id));
+                    }}
                   >
-                    {r}
+                    Remove
                   </Button>
-                ))}
+                )}
               </div>
-            )}
-          </li>
-        ))}
+              {(q.answer || q.rating) && (
+                <p className="text-xs text-muted-foreground">
+                  <span className="uppercase tracking-wide">Recorded before interviewer sheets</span>
+                  {q.answer && <> — <span>{q.answer}</span></>}
+                  {q.rating && <> (<span>{q.rating}</span>)</>}
+                </p>
+              )}
+              {canWriteSheet ? (
+                <>
+                  <Textarea
+                    placeholder="What they said…"
+                    value={mine.answer ?? ""}
+                    onChange={(e) => setAnswer(q.id, { answer: e.target.value })}
+                  />
+                  <div className="flex gap-1">
+                    {RATINGS.map((r) => (
+                      <Button
+                        key={r}
+                        type="button"
+                        size="sm"
+                        variant={mine.rating === r ? "default" : "outline"}
+                        className="h-auto px-2 py-1 text-xs capitalize"
+                        aria-label={`Rate question ${i + 1} as ${r}`}
+                        onClick={() => setAnswer(q.id, { rating: mine.rating === r ? null : r })}
+                      >
+                        {r}
+                      </Button>
+                    ))}
+                  </div>
+                </>
+              ) : isSubmitted ? (
+                <>
+                  {mine.answer && <p className="text-xs">{mine.answer}</p>}
+                  {mine.rating && <p className="text-xs text-muted-foreground capitalize">{mine.rating}</p>}
+                </>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
-      {canWrite && (
-        <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {canAppend && (
           <Button
             variant="outline"
-            onClick={() =>
+            onClick={() => {
+              setQuestionsDirty(true);
               setDraft((qs) => [...qs, {
                 id: newQuestionId(), text: "", source: "probe",
-                criterion: null, answer: null, rating: null,
-              }])}
+                criterion: null, answer: null, rating: null, added_by: myId,
+              }]);
+            }}
           >
             Add question
           </Button>
+        )}
+        {canAppend && (
           <div className="flex items-center gap-2">
             <Input
               placeholder="about… (optional)"
@@ -271,6 +403,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
                 // backend reads as a null hint — not an empty string.
                 draftQuestion.mutate(hint.trim() || null, {
                   onSuccess: (res) => {
+                    setQuestionsDirty(true);
                     setDraft((qs) => [...qs, {
                       id: newQuestionId(),
                       text: res.question.text,
@@ -278,6 +411,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
                       criterion: res.question.criterion,
                       answer: null,
                       rating: null,
+                      added_by: myId,
                     }]);
                     setHint("");
                   },
@@ -289,17 +423,77 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
               {draftQuestion.isPending ? "Drafting…" : "Draft with AI"}
             </Button>
           </div>
-          <Button
-            variant="outline"
-            onClick={saveAnswers}
-            data-dirty={isDirty}
-            className={isDirty ? "border-amber-400 text-amber-400" : undefined}
-          >
-            Save answers{isDirty && <span aria-hidden="true">*</span>}
-          </Button>
-          <Button onClick={onSubmit}>Submit interview</Button>
+        )}
+        {(canWriteSheet || canAppend) && (
+          <>
+            <Button
+              variant="outline"
+              onClick={() => saveAll()}
+              data-dirty={isDirty}
+              className={isDirty ? "border-amber-400 text-amber-400" : undefined}
+              disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+            >
+              {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}
+            </Button>
+            {canWriteSheet && (
+              <Button
+                onClick={onSubmitClick}
+                disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+              >
+                Submit interview
+              </Button>
+            )}
+          </>
+        )}
+      </div>
+      {canWriteSheet && (
+        <div className="space-y-2 rounded border border-border p-2">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Verdict</p>
+          <div className="flex gap-1">
+            {VERDICTS.map((v) => (
+              <Button
+                key={v.value}
+                type="button"
+                size="sm"
+                variant={sheet.verdict.decision === v.value ? "default" : "outline"}
+                className="h-auto px-2 py-1 text-xs"
+                onClick={() => setSheet((s) => ({
+                  ...s,
+                  verdict: { ...s.verdict, decision: s.verdict.decision === v.value ? null : v.value },
+                }))}
+              >
+                {v.label}
+              </Button>
+            ))}
+          </div>
+          <Textarea
+            aria-label="Verdict note"
+            placeholder="One line on why…"
+            value={sheet.verdict.note ?? ""}
+            onChange={(e) => setSheet((s) => ({ ...s, verdict: { ...s.verdict, note: e.target.value || null } }))}
+          />
         </div>
       )}
+      {canWrite && sheets.length > 1 && <FeedbackTable questions={draft} sheets={sheets} />}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit with unanswered questions?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {unanswered} question(s) have no answer. Submit anyway?
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep editing</Button>
+            <Button
+              onClick={doSubmit}
+              disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+            >
+              Submit anyway
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

@@ -14,7 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from recruiter.api.deps import get_session, require_role
 from recruiter.auth.passwords import hash_password
 from recruiter.models import AuthSession, Role, User
-from recruiter.schemas.user import PasswordSet, UserAdminRead, UserCreate, UserUpdate
+from recruiter.schemas.user import (
+    PasswordSet,
+    UserAdminRead,
+    UserCreate,
+    UserDirectoryRead,
+    UserUpdate,
+)
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -86,6 +92,20 @@ async def create_user(
         user.email, user.id, user.role.value, actor.id,
     )
     return UserAdminRead.model_validate(user)
+
+
+@router.get("/directory", response_model=list[UserDirectoryRead])
+async def user_directory(
+    session: AsyncSession = Depends(get_session),
+    _: User = Depends(require_role(Role.ADMIN, Role.RECRUITER)),
+) -> list[UserDirectoryRead]:
+    """Active users, for assigning interviewers. Recruiter or admin: the
+    picker is a recruiter action, and viewers have no reason to enumerate
+    accounts."""
+    rows = (await session.execute(
+        select(User).where(User.is_active.is_(True)).order_by(User.email)
+    )).scalars().all()
+    return [UserDirectoryRead.model_validate(r) for r in rows]
 
 
 @router.patch("/{user_id}", response_model=UserAdminRead)

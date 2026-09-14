@@ -5,6 +5,10 @@ the route template appears below. A route added later is therefore closed
 to viewers until someone opts it in deliberately, rather than silently
 shipping open. That trade is the point — the surprise moves from
 "shipped open" to "shipped closed", which is the direction worth having.
+
+The interviewer-sheet routes are the second deliberate exception (chat was
+the first): a viewer can be an interviewer, and an interviewer must write
+their own feedback. See docs/superpowers/specs/2026-09-14-multi-interviewer-design.md.
 """
 
 MUTATING_METHODS = frozenset({"POST", "PATCH", "PUT", "DELETE"})
@@ -25,4 +29,18 @@ VIEWER_ALLOWED_ROUTES = frozenset({
     # Anonymous anyway — the guard never sees a user here. Listed so a
     # future refactor that authenticates earlier cannot break login.
     ("POST", "/api/auth/login/password"),
+    # Interviewer sheets. A viewer assigned to a candidate may write exactly
+    # one thing: their own sheet on that candidate. The allow list is per
+    # route, so it cannot express "own sheet only" — each handler in
+    # api/interview.py checks the assignment row itself (404 when
+    # unassigned, 409 when submitted). Allow-listing these WITHOUT that row
+    # check would let any viewer write feedback on any candidate. The kit
+    # PATCH is here because an interviewer may APPEND a question; the
+    # handler refuses every other change from a non-recruiter with 403.
+    ("PATCH", "/api/applications/{application_id}/interview-kit/sheet"),
+    ("POST", "/api/applications/{application_id}/interview-kit/sheet/submit"),
+    ("PATCH", "/api/applications/{application_id}/interview-kit"),
+    # Drafting a question is the same append-only privilege as the kit
+    # PATCH above; the handler refuses an unassigned caller with 403.
+    ("POST", "/api/applications/{application_id}/interview-kit/draft-question"),
 })

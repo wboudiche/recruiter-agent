@@ -186,4 +186,16 @@ describe("CandidateCard retry", () => {
     await userEvent.click(button);
     await waitFor(() => expect(apiMock).toHaveBeenCalledTimes(2));
   });
+
+  it("shows sheet progress while scheduled with interviewers", () => {
+    renderCard(baseApp({ stage: "scheduled", sheets_total: 3, sheets_submitted: 1 }));
+    expect(screen.getByText("1/3 sheets in")).toBeInTheDocument();
+  });
+
+  it("shows no sheet progress without interviewers or after the round", () => {
+    renderCard(baseApp({ stage: "scheduled", sheets_total: 0, sheets_submitted: 0 }));
+    expect(screen.queryByText(/sheets in/)).not.toBeInTheDocument();
+    renderCard(baseApp({ id: 69, stage: "interviewed", sheets_total: 2, sheets_submitted: 2 }));
+    expect(screen.queryByText(/sheets in/)).not.toBeInTheDocument();
+  });
 });
