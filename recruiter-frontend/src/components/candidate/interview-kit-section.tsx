@@ -60,14 +60,25 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // their own sheet's identity (present + not yet submitted), or — for a
   // writer who has never touched this kit — the fact that no one has
   // created a sheet yet, so the server will create theirs on first save.
+  //
+  // For a recruiter/admin, `sheets` is every sheet on the kit (not just
+  // theirs), so `sheets.length === 0` really does mean "no one has a panel
+  // row yet". This mirrors the server: a recruiter/admin with no assignment
+  // row on the application gets one created on first save; an unassigned
+  // recruiter on an application that already has rows gets a 404.
   const mySheetRead = sheets.find((s) => s.user_id === myId) ?? null;
   const canWriteSheet = mySheetRead ? mySheetRead.submitted_at === null : (canWrite && sheets.length === 0);
   const isSubmitted = mySheetRead?.submitted_at != null;
   // Once any interviewer has submitted, the question list freezes for
-  // everyone — no more edits or removals — so every sheet keeps scoring
-  // against the same set of questions.
+  // removal — every sheet keeps scoring against the same set of questions.
+  // Question ids are stable, so renaming an existing question's text stays
+  // allowed after a freeze; only Remove (and regenerate, not a button here)
+  // are refused.
   const frozen = sheets.some((s) => s.submitted_at !== null);
-  const canEditQuestions = canWrite && !frozen;
+  // A recruiter/admin may always reword a question's text; an interviewer
+  // (no `canWrite`) may only edit a question they appended this session
+  // (see `canEditThisQuestion` below) — freezing never affects this.
+  const canEditQuestions = canWrite;
   const canAppend = canWrite || mySheetRead !== null;
 
   // The server is the source of truth; local edits are a draft until saved.

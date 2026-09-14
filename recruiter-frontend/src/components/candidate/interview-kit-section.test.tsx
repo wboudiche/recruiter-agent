@@ -366,10 +366,9 @@ describe("InterviewKitSection", () => {
       sheet: { answers: { b1: { answer: "Done", rating: "weak" } }, verdict: { decision: "no_hire", note: null } },
       submitted_at: "2026-09-14T10:00:00Z" };
     mountWithKit(READY, {}, { sheets: [mine] });
-    // The kit is frozen (a sheet is already submitted), so question 1 is
-    // now read-only text, not an editable field — wait on its text instead
-    // of a display value.
-    await screen.findByText("Why this role?");
+    // Question ids are stable, so renaming stays allowed even once frozen —
+    // the row is still an editable textarea, not read-only text.
+    await screen.findByDisplayValue("Why this role?");
     expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
@@ -377,8 +376,20 @@ describe("InterviewKitSection", () => {
   it("disables removal and regenerate once any sheet is submitted", async () => {
     const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: "2026-09-14T10:00:00Z" };
     mountWithKit(READY, {}, { sheets: [other] });
-    await screen.findByText("Why this role?");
+    await screen.findByDisplayValue("Why this role?");
     expect(screen.getByRole("button", { name: /remove question 1/i })).toBeDisabled();
+    // Freezing only refuses removal (and regenerate) — the question text
+    // itself stays editable for a recruiter/admin.
+    expect(screen.getByLabelText("Question 1")).toBeEnabled();
+  });
+
+  it("locks out a recruiter with no panel row on a kit that already has one", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    mountWithKit(READY, {}, { sheets: [other], me: { id: 1, role: "recruiter" } });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.queryByPlaceholderText(/what they said/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /remove question 1/i })).toBeInTheDocument();
   });
 
   it("shows legacy per-question answers read-only", async () => {
