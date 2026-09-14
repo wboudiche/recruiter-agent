@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -21,6 +21,8 @@ class InterviewAssignment(Base):
     __tablename__ = "interview_assignments"
     __table_args__ = (
         UniqueConstraint("application_id", "user_id", name="uq_interview_assignment_app_user"),
+        Index("ix_interview_assignments_application_id", "application_id"),
+        Index("ix_interview_assignments_user_id", "user_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
