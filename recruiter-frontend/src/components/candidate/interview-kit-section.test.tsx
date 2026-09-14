@@ -16,7 +16,7 @@ afterAll(() => server.close());
 function mountWithKit(
   kit: unknown,
   capture: { body?: any; sheet?: any; submitted?: boolean } = {},
-  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[] } = {},
 ) {
   const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
@@ -38,6 +38,8 @@ function mountWithKit(
     }),
     http.post("http://localhost:8000/api/applications/1/interview-kit/generate", () =>
       HttpResponse.json({ application_id: 1 }, { status: 202 })),
+    http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+      HttpResponse.json(opts.interviewers ?? [])),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const Wrapper = ({ children }: { children: ReactNode }) => (
@@ -221,6 +223,8 @@ describe("InterviewKitSection", () => {
       http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
         HttpResponse.json({ detail: "boom" }, { status: 500 }),
       ),
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json([])),
     );
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -385,11 +389,43 @@ describe("InterviewKitSection", () => {
 
   it("locks out a recruiter with no panel row on a kit that already has one", async () => {
     const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
-    mountWithKit(READY, {}, { sheets: [other], me: { id: 1, role: "recruiter" } });
+    const cap: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, cap, { sheets: [other], me: { id: 1, role: "recruiter" } });
     await screen.findByDisplayValue("Why this role?");
     expect(screen.queryByPlaceholderText(/what they said/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /remove question 1/i })).toBeInTheDocument();
+
+    // No sheet to write, but question edits must still be saveable.
+    await userEvent.click(screen.getByRole("button", { name: /remove question 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save questions/i }));
+
+    await waitFor(() => expect(cap.body).toBeDefined());
+    expect(cap.body.questions).toHaveLength(1);
+    expect(cap.sheet).toBeUndefined();
+  });
+
+  it("lets a submitted interviewer keep saving question edits with no sheet to write", async () => {
+    const mine = {
+      user_id: 5, name: "V", email: "v@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } },
+      submitted_at: "2026-09-14T10:00:00Z",
+    };
+    const cap: { body?: any; sheet?: any } = {};
+    mountWithKit(READY, cap, { sheets: [mine], me: { id: 5, role: "viewer" }, canWrite: false });
+    await screen.findByText("Why this role?");
+
+    expect(screen.getByRole("button", { name: /add question/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /add question/i }));
+    const inputs = screen.getAllByLabelText(/^Question \d+$/i);
+    expect(inputs[inputs.length - 1]).toHaveAccessibleName("Question 3");
+    await userEvent.type(inputs[inputs.length - 1], "One more thing?");
+
+    await userEvent.click(screen.getByRole("button", { name: /save questions/i }));
+
+    await waitFor(() => expect(cap.body).toBeDefined());
+    expect(cap.body.questions).toHaveLength(3);
+    expect(cap.sheet).toBeUndefined();
   });
 
   it("shows legacy per-question answers read-only", async () => {
@@ -398,6 +434,28 @@ describe("InterviewKitSection", () => {
     await screen.findByDisplayValue("Why this role?");
     expect(screen.getByText(/recorded before interviewer sheets/i)).toBeInTheDocument();
     expect(screen.getByText("Old answer")).toBeInTheDocument();
+  });
+
+  it("resolves an added-by id to the interviewer's name", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com", sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 7 }, READY.questions[1]] };
+    mountWithKit(withAddedBy, {}, { sheets: [other] });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by bob/i)).toBeInTheDocument();
+  });
+
+  it("resolves an added-by id via the interviewer roster when no sheet names them yet", async () => {
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 9 }, READY.questions[1]] };
+    mountWithKit(withAddedBy, {}, { interviewers: [{ user_id: 9, name: "Priya", email: "priya@acme.com", submitted_at: null }] });
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by priya/i)).toBeInTheDocument();
+  });
+
+  it("falls back to a generic label when the added-by id resolves to nobody known", async () => {
+    const withAddedBy = { ...READY, questions: [{ ...READY.questions[0], added_by: 42 }, READY.questions[1]] };
+    mountWithKit(withAddedBy);
+    await screen.findByDisplayValue("Why this role?");
+    expect(screen.getByText(/added by another interviewer/i)).toBeInTheDocument();
   });
 
   it("gives an assigned viewer only Add question on the question list", async () => {

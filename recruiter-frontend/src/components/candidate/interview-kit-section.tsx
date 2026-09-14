@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/use-current-user";
+import { useInterviewers } from "@/hooks/use-interviewers";
 import {
   EMPTY_SHEET, type InterviewSheet, type KitQuestion, type Rating, type VerdictDecision,
   useInterviewKit,
@@ -50,6 +51,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   const { kit, sheets, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
     useInterviewKit(applicationId);
   const me = useCurrentUser();
+  const { interviewers } = useInterviewers(applicationId);
   const [draft, setDraft] = useState<KitQuestion[]>([]);
   const [hint, setHint] = useState("");
   const [sheet, setSheet] = useState<InterviewSheet>(EMPTY_SHEET);
@@ -80,6 +82,15 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // (see `canEditThisQuestion` below) — freezing never affects this.
   const canEditQuestions = canWrite;
   const canAppend = canWrite || mySheetRead !== null;
+
+  // "added by" resolves an id to a name for display. `sheets` only covers
+  // people who have saved a sheet; `interviewers` covers everyone assigned
+  // to the panel (visible to every role), so combine both — a name beats an
+  // email, and an id neither list recognizes falls back to a generic label.
+  const nameById = new Map<number, string>();
+  for (const s of sheets) nameById.set(s.user_id, s.name ?? s.email);
+  for (const i of interviewers) if (!nameById.has(i.user_id)) nameById.set(i.user_id, i.name ?? i.email);
+  const addedByName = (id: number) => nameById.get(id) ?? "another interviewer";
 
   // The server is the source of truth; local edits are a draft until saved.
   // Deliberately keyed on `generated_at`/`status`, not on `kit.questions`
@@ -279,7 +290,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
                 </span>
                 {q.added_by != null && (
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    added by {q.added_by}
+                    added by {addedByName(q.added_by)}
                   </span>
                 )}
                 {canWrite && (
@@ -386,7 +397,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
             </Button>
           </div>
         )}
-        {canWriteSheet && (
+        {(canWriteSheet || canAppend) && (
           <>
             <Button
               variant="outline"
@@ -394,9 +405,9 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
               data-dirty={isDirty}
               className={isDirty ? "border-amber-400 text-amber-400" : undefined}
             >
-              Save answers{isDirty && <span aria-hidden="true">*</span>}
+              {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}
             </Button>
-            <Button onClick={onSubmitClick}>Submit interview</Button>
+            {canWriteSheet && <Button onClick={onSubmitClick}>Submit interview</Button>}
           </>
         )}
       </div>
