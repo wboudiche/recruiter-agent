@@ -15,7 +15,7 @@ interface Props {
 }
 
 export function InterviewersPicker({ applicationId, canWrite }: Props) {
-  const { interviewers, setInterviewers } = useInterviewers(applicationId);
+  const { interviewers, isLoading: interviewersLoading, setInterviewers } = useInterviewers(applicationId);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState<number[]>([]);
@@ -37,7 +37,7 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
       <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
         interviewers:
       </span>
-      {interviewers.length === 0 && (
+      {!interviewersLoading && interviewers.length === 0 && (
         <span className="text-sm text-muted-foreground">none</span>
       )}
       {interviewers.map((i) => (
@@ -65,26 +65,32 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <ul className="max-h-72 space-y-1 overflow-y-auto">
-            {visible.map((u) => {
-              const label = u.name ? `${u.name} (${u.email})` : u.email;
-              return (
-                <li key={u.id}>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      aria-label={label}
-                      checked={checked.includes(u.id)}
-                      onChange={(e) =>
-                        setChecked((ids) =>
-                          e.target.checked ? [...ids, u.id] : ids.filter((x) => x !== u.id))}
-                    />
-                    {label}
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
+          {directory.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading users…</p>
+          ) : visible.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No users match.</p>
+          ) : (
+            <ul className="max-h-72 space-y-1 overflow-y-auto">
+              {visible.map((u) => {
+                const label = u.name ? `${u.name} (${u.email})` : u.email;
+                return (
+                  <li key={u.id}>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={label}
+                        checked={checked.includes(u.id)}
+                        onChange={(e) =>
+                          setChecked((ids) =>
+                            e.target.checked ? [...ids, u.id] : ids.filter((x) => x !== u.id))}
+                      />
+                      {label}
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button

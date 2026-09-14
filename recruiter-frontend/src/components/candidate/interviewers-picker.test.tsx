@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -50,5 +50,25 @@ describe("InterviewersPicker", () => {
     await userEvent.click(carol);
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(capture.body).toEqual({ user_ids: [2, 3] }));
+  });
+
+  it("shows a loading state then a no-match state in the assign dialog", async () => {
+    mount(true);
+    server.use(
+      http.get("http://localhost:8000/api/users/directory", async () => {
+        await delay(200);
+        return HttpResponse.json([
+          { id: 2, name: "Bob", email: "bob@acme.com", role: "viewer" },
+          { id: 3, name: null, email: "carol@acme.com", role: "recruiter" },
+        ]);
+      }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /assign/i }));
+    expect(screen.getByText("Loading users…")).toBeInTheDocument();
+    expect(await screen.findByRole("checkbox", { name: /carol@acme.com/ })).toBeInTheDocument();
+    expect(screen.queryByText("Loading users…")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Search users"), "nobody-matches-this");
+    expect(await screen.findByText("No users match.")).toBeInTheDocument();
   });
 });
