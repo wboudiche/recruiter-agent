@@ -1,0 +1,40 @@
+from datetime import datetime
+
+from sqlalchemy import JSON, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from recruiter.models.base import Base
+
+
+def empty_sheet() -> dict:
+    return {"answers": {}, "verdict": {"decision": None, "note": None}}
+
+
+class InterviewAssignment(Base):
+    """One interviewer on one application, with their feedback sheet.
+
+    Questions are shared and live in `applications.interview_kit`; only the
+    answers, ratings and verdict are per person. Each interviewer writes
+    their own row, so two people saving at once never overwrite each other.
+    """
+
+    __tablename__ = "interview_assignments"
+    __table_args__ = (
+        UniqueConstraint("application_id", "user_id", name="uq_interview_assignment_app_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    sheet: Mapped[dict] = mapped_column(JSON, nullable=False, default=empty_sheet)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False,
+    )
