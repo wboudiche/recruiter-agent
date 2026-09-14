@@ -353,6 +353,10 @@ async def patch_application(
             schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
             app_row.interviewed_at = now
+            # The recruiter closed the round by hand (a no-show, say). Stamp
+            # the kit so late sheets know the round is over.
+            if app_row.interview_kit:
+                app_row.interview_kit = {**app_row.interview_kit, "closed_at": now.isoformat()}
         elif new_stage == Stage.OFFER:
             app_row.offer_at = now
         elif new_stage == Stage.HIRED:

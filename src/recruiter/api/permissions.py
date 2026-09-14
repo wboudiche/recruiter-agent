@@ -25,4 +25,11 @@ VIEWER_ALLOWED_ROUTES = frozenset({
     # Anonymous anyway — the guard never sees a user here. Listed so a
     # future refactor that authenticates earlier cannot break login.
     ("POST", "/api/auth/login/password"),
+    # An assigned interviewer is very often a VIEWER — the whole point of
+    # per-interviewer sheets is that panel members without recruiter
+    # rights can record their own feedback. `_own_assignment` (interview.py)
+    # still 404s anyone not on the panel, so this does not open the route
+    # to viewers at large.
+    ("PATCH", "/api/applications/{application_id}/interview-kit/sheet"),
+    ("POST", "/api/applications/{application_id}/interview-kit/sheet/submit"),
 })

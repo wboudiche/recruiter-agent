@@ -9,21 +9,31 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
+from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, Job, Stage
+from recruiter.models import Application, Candidate, InterviewAssignment, Job, Stage, User
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
+from recruiter.pipeline.interview_sheets import (
+    all_submitted,
+    can_edit_questions,
+    prune_answers,
+    visible_sheets,
+)
 from recruiter.schemas.interview import (
     BaselineQuestion,
     GeneratedQuestion,
     InterviewKit,
+    InterviewSheet,
     KitQuestion,
+    SheetRead,
 )
 from recruiter.schemas.job import CriteriaItem
 
@@ -33,22 +43,51 @@ logger = logging.getLogger(__name__)
 
 class InterviewKitRead(BaseModel):
     kit: InterviewKit | None
+    # Filtered per caller — see pipeline/interview_sheets.visible_sheets.
+    sheets: list[SheetRead] = Field(default_factory=list)
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+async def _sheets_for(
+    session: AsyncSession, app_row: Application, user: User,
+) -> list[SheetRead]:
+    rows = visible_sheets(await load_assignments(session, app_row.id), user=user)
+    if not rows:
+        return []
+    users = {u.id: u for u in (await session.execute(
+        select(User).where(User.id.in_([r.user_id for r in rows]))
+    )).scalars().all()}
+    return [
+        SheetRead(
+            user_id=r.user_id, name=users[r.user_id].name, email=users[r.user_id].email,
+            sheet=InterviewSheet.model_validate(r.sheet or {}),
+            submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
+        )
+        for r in rows
+    ]
+
+
+async def _read(session: AsyncSession, app_row: Application, user: User) -> InterviewKitRead:
+    raw = app_row.interview_kit
+    return InterviewKitRead(
+        kit=InterviewKit.model_validate(raw) if raw else None,
+        sheets=await _sheets_for(session, app_row, user),
+    )
+
+
 @router.get("/applications/{application_id}/interview-kit", response_model=InterviewKitRead)
 async def get_kit(
     application_id: int,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ) -> InterviewKitRead:
     app_row = await session.get(Application, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    raw = app_row.interview_kit
-    return InterviewKitRead(kit=InterviewKit.model_validate(raw) if raw else None)
+    return await _read(session, app_row, user)
 
 
 async def run_generate_kit(
@@ -142,38 +181,96 @@ async def patch_kit(
         raise HTTPException(status_code=422, detail="duplicate question ids")
 
     kit = InterviewKit.model_validate(app_row.interview_kit)
-    kit.questions = payload.questions
+    # Legacy per-question answer/rating are read-only: carry over whatever
+    # the stored kit has and never take them from the client.
+    legacy = {q.id: q for q in kit.questions}
+    kit.questions = [
+        q.model_copy(update={
+            "answer": legacy[q.id].answer if q.id in legacy else None,
+            "rating": legacy[q.id].rating if q.id in legacy else None,
+        })
+        for q in payload.questions
+    ]
     app_row.interview_kit = kit.model_dump()
     await session.commit()
     return InterviewKitRead(kit=kit)
 
 
-@router.post("/applications/{application_id}/interview-kit/submit",
-             response_model=InterviewKitRead)
-async def submit_kit(
+async def _own_assignment(
+    session: AsyncSession, app_row: Application, user: User,
+) -> InterviewAssignment:
+    """The caller's row, or 404. A recruiter/admin with no panel at all gets
+    one created on the spot — that is what keeps the single-recruiter flow
+    working with zero setup."""
+    rows = await load_assignments(session, app_row.id)
+    own = next((r for r in rows if r.user_id == user.id), None)
+    if own is not None:
+        return own
+    if not rows and can_edit_questions(user):
+        own = InterviewAssignment(application_id=app_row.id, user_id=user.id)
+        session.add(own)
+        await session.flush()
+        return own
+    raise HTTPException(status_code=404, detail="you are not assigned to this interview")
+
+
+def _require_kit(app_row: Application) -> InterviewKit:
+    if not app_row.interview_kit:
+        raise HTTPException(status_code=404, detail="no interview kit; generate one first")
+    return InterviewKit.model_validate(app_row.interview_kit)
+
+
+@router.patch("/applications/{application_id}/interview-kit/sheet",
+              response_model=InterviewKitRead)
+async def patch_sheet(
     application_id: int,
+    payload: InterviewSheet,
     session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
 ) -> InterviewKitRead:
     app_row = await session.get(Application, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    if not app_row.interview_kit:
-        raise HTTPException(status_code=404, detail="no interview kit; "
-                            "generate one first")
+    kit = _require_kit(app_row)
+    own = await _own_assignment(session, app_row, user)
+    if own.submitted_at is not None:
+        raise HTTPException(status_code=409, detail="sheet already submitted")
+    own.sheet = prune_answers(payload, {q.id for q in kit.questions}).model_dump()
+    await session.commit()
+    return await _read(session, app_row, user)
 
-    kit = InterviewKit.model_validate(app_row.interview_kit)
-    kit.submitted_at = _now()
-    app_row.interview_kit = kit.model_dump()
 
-    # Advance only from SCHEDULED. Already interviewed or beyond means this
-    # is an edit to a past interview, not a new one — re-submitting must not
-    # push the candidate further down the pipeline.
-    if app_row.stage == Stage.SCHEDULED:
+@router.post("/applications/{application_id}/interview-kit/sheet/submit",
+             response_model=InterviewKitRead)
+async def submit_sheet(
+    application_id: int,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(require_user),
+    bus: EventBus = Depends(get_event_bus),
+) -> InterviewKitRead:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
+        raise HTTPException(status_code=404, detail="application not found")
+    kit = _require_kit(app_row)
+    own = await _own_assignment(session, app_row, user)
+    if own.submitted_at is not None:
+        raise HTTPException(status_code=409, detail="sheet already submitted")
+    own.submitted_at = datetime.now(UTC)
+    await session.flush()
+
+    # Advance only from SCHEDULED, and only once every sheet is in. Already
+    # interviewed or beyond means this is a late sheet on a closed round.
+    rows = await load_assignments(session, app_row.id)
+    if app_row.stage == Stage.SCHEDULED and all_submitted(rows):
         app_row.stage = Stage.INTERVIEWED
         app_row.interviewed_at = datetime.now(UTC)
-
+        kit.closed_at = _now()
+        app_row.interview_kit = kit.model_dump()
     await session.commit()
-    return InterviewKitRead(kit=kit)
+    await bus.publish({
+        "type": "interview_kit", "application_id": application_id, "status": kit.status,
+    })
+    return await _read(session, app_row, user)
 
 
 class DraftQuestionRequest(BaseModel):

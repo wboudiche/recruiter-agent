@@ -53,9 +53,10 @@ async def test_submit_advances_scheduled_to_interviewed(
     app_id = await _create_scheduled_app(api_client)
     await _kit_ready(api_client, app_id)
 
-    resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/submit")
+    resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/sheet/submit")
     assert resp.status_code == 200
-    assert resp.json()["kit"]["submitted_at"] is not None
+    assert resp.json()["kit"]["closed_at"] is not None
+    assert resp.json()["sheets"][0]["submitted_at"] is not None
     app = (await api_client.get(f"/api/applications/{app_id}")).json()
     assert app["stage"] == "interviewed"
 
@@ -68,8 +69,10 @@ async def test_submitting_again_does_not_advance_further(
     app_id = await _create_scheduled_app(api_client)
     await _kit_ready(api_client, app_id)
 
-    await api_client.post(f"/api/applications/{app_id}/interview-kit/submit")
-    await api_client.post(f"/api/applications/{app_id}/interview-kit/submit")
+    first = await api_client.post(f"/api/applications/{app_id}/interview-kit/sheet/submit")
+    assert first.status_code == 200
+    second = await api_client.post(f"/api/applications/{app_id}/interview-kit/sheet/submit")
+    assert second.status_code == 409
 
     app = (await api_client.get(f"/api/applications/{app_id}")).json()
     assert app["stage"] == "interviewed"
@@ -95,7 +98,7 @@ async def test_submit_with_unanswered_questions_is_allowed(
         })
 
         resp = await api_client.post(
-            f"/api/applications/{app_id}/interview-kit/submit"
+            f"/api/applications/{app_id}/interview-kit/sheet/submit"
         )
         assert resp.status_code == 200
     finally:

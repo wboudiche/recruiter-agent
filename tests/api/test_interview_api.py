@@ -126,7 +126,7 @@ async def test_viewer_is_refused_generate_but_allowed_get(
 
 
 @pytest.mark.asyncio
-async def test_patch_stores_answers_and_ratings(
+async def test_patch_keeps_questions_but_ignores_legacy_answer_fields(
     api_client: AsyncClient, create_scored_app,
 ) -> None:
     app.dependency_overrides[get_llm] = lambda: FakeLLMClient(
@@ -141,15 +141,16 @@ async def test_patch_stores_answers_and_ratings(
 
         body = {"questions": [
             {"id": "q1", "text": "Describe an incident.", "source": "probe",
-             "answer": "Handled an etcd outage", "rating": "strong"},
+             "answer": "A", "rating": "strong"},
         ]}
         resp = await api_client.patch(
             f"/api/applications/{app_id}/interview-kit", json=body
         )
         assert resp.status_code == 200
         q = resp.json()["kit"]["questions"][0]
-        assert q["answer"] == "Handled an etcd outage"
-        assert q["rating"] == "strong"
+        assert q["text"] == "Describe an incident."
+        assert q["answer"] is None
+        assert q["rating"] is None
     finally:
         app.dependency_overrides.pop(get_llm, None)
 
