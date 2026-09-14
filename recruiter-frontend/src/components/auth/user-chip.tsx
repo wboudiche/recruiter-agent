@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,8 +26,18 @@ export function UserChip() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-sm">
-          {me.data.email}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 text-sm"
+          // Below `sm` the email is the widest thing in the header and
+          // would push the nav off-screen, so the trigger is icon-only
+          // there; the name stays exposed to assistive tech and the
+          // menu still shows who is signed in.
+          aria-label={me.data.email}
+        >
+          <UserRound className="h-4 w-4 sm:hidden" aria-hidden />
+          <span className="hidden sm:inline">{me.data.email}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
