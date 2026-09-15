@@ -6,10 +6,14 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_llm
+from recruiter.api.interview import run_generate_kit
+from recruiter.events import EventBus
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
 from recruiter.models import Application, InterviewAssignment, Role, Stage, User
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
+
+_Q1 = {"id": "q1", "text": "Why?", "source": "probe"}
 
 
 async def _move_to_invited(api_client: AsyncClient, app_id: int) -> None:
@@ -232,5 +236,162 @@ async def test_re_entering_scheduled_does_not_regenerate_once_frozen(
         )).json()["kit"]
         assert kit_after["status"] == "ready", "a frozen kit must not be marked generating"
         assert {q["id"] for q in kit_after["questions"]} == ids_before
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_regeneration_in_flight_does_not_orphan_a_sheet_submitted_meanwhile(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R5: generation is a background task spanning an LLM round trip. If
+    an interviewer submits (freezing the round) while it's in flight, the
+    result computed from stale state must be discarded rather than written
+    over the now-frozen kit — otherwise the submitted sheet's questions
+    would be orphaned by freshly minted ones with different ids."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        interviewer = User(email="panel@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id,
+            submitted_at=datetime.now(UTC),
+        ))
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "generating", "questions": [_Q1]},
+            )
+        )
+        await session.commit()
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine,
+        llm=_fake_llm_with_one_question(), bus=EventBus(),
+    )
+
+    async with SessionLocal() as session:
+        row = await session.get(Application, app_id)
+        kit = row.interview_kit
+    assert kit["status"] == "ready"
+    assert [q["id"] for q in kit["questions"]] == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_generation_failure_keeps_existing_questions(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R7: a failed regeneration must not wipe questions the existing kit
+    already had — only its status/error should change."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "generating", "questions": [_Q1]},
+            )
+        )
+        await session.commit()
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine,
+        llm=FakeLLMClient(structured_responses=[]), bus=EventBus(),
+    )
+
+    async with SessionLocal() as session:
+        row = await session.get(Application, app_id)
+        kit = row.interview_kit
+    assert kit["status"] == "error"
+    assert [q["id"] for q in kit["questions"]] == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_re_entering_scheduled_recovers_a_frozen_errored_kit(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R6(a): a frozen kit (a sheet has been submitted) stuck in "error"
+    must not be blocked forever just because it can never safely
+    regenerate — recover it straight to "ready" with its questions intact
+    instead. No get_llm override here on purpose: if the fix were missing
+    and the SCHEDULED branch tried to enqueue generation anyway, the
+    no-LLM-configured branch would stamp the kit "error" again, which the
+    assertions below would catch."""
+    app_id = await create_scored_app()
+    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+    await _move_to_invited(api_client, app_id)
+
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        interviewer = User(email="panel-a@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id,
+            submitted_at=datetime.now(UTC),
+        ))
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "error", "error": "boom", "questions": [_Q1]},
+            )
+        )
+        await session.commit()
+
+    resp = await api_client.patch(
+        f"/api/applications/{app_id}", json={"stage": "scheduled"},
+    )
+    assert resp.status_code == 200
+
+    kit_after = (await api_client.get(
+        f"/api/applications/{app_id}/interview-kit",
+    )).json()["kit"]
+    assert kit_after["status"] == "ready"
+    assert kit_after["error"] is None
+    assert [q["id"] for q in kit_after["questions"]] == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_re_entering_scheduled_regenerates_a_frozen_but_empty_kit(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R6(b): frozen with an EMPTY question list means there is nothing to
+    orphan, so generation must still run exactly as if the round weren't
+    frozen at all."""
+    app.dependency_overrides[get_llm] = _fake_llm_with_one_question
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        await _move_to_invited(api_client, app_id)
+
+        engine = app.dependency_overrides[get_engine_dep]()
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+        async with SessionLocal() as session:
+            interviewer = User(email="panel-b@acme.com", role=Role.VIEWER, is_active=True)
+            session.add(interviewer)
+            await session.flush()
+            session.add(InterviewAssignment(
+                application_id=app_id, user_id=interviewer.id,
+                submitted_at=datetime.now(UTC),
+            ))
+            await session.execute(
+                update(Application).where(Application.id == app_id).values(
+                    interview_kit={"status": "error", "error": "boom", "questions": []},
+                )
+            )
+            await session.commit()
+
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}", json={"stage": "scheduled"},
+        )
+        assert resp.status_code == 200
+
+        kit_after = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit",
+        )).json()["kit"]
+        assert kit_after["status"] == "ready"
+        assert any(q["source"] == "probe" for q in kit_after["questions"])
     finally:
         app.dependency_overrides.pop(get_llm, None)

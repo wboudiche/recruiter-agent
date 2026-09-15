@@ -80,16 +80,29 @@ export function useInterviewKit(applicationId: number) {
     onSuccess: invalidate,
   });
 
+  // Both PATCH endpoints return the full `{kit, sheets}` shape — the same
+  // shape the GET query caches — so the response can be written straight
+  // into the cache before invalidating. Without this, the cache stays at
+  // its pre-save value until the invalidated refetch lands, and a
+  // render-phase seed (see interview-kit-section.tsx) reading the stale
+  // cache in that window can re-seed the draft from data that predates the
+  // save that just succeeded.
   const patch = useMutation({
     mutationFn: (questions: KitQuestion[]) =>
       api<KitResponse>(path, { method: "PATCH", json: { questions } }),
-    onSuccess: invalidate,
+    onSuccess: (data) => {
+      qc.setQueryData(key, data);
+      invalidate();
+    },
   });
 
   const saveSheet = useMutation({
     mutationFn: (sheet: InterviewSheet) =>
       api<KitResponse>(`${path}/sheet`, { method: "PATCH", json: sheet }),
-    onSuccess: invalidate,
+    onSuccess: (data) => {
+      qc.setQueryData(key, data);
+      invalidate();
+    },
   });
 
   const submitSheet = useMutation({

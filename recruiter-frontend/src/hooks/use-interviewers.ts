@@ -34,7 +34,15 @@ export function useInterviewers(applicationId: number) {
       qc.invalidateQueries({ queryKey: queryKeys.application(applicationId) });
     },
   });
-  return { interviewers: query.data ?? [], isLoading: query.isLoading, setInterviewers };
+  return {
+    interviewers: query.data ?? [],
+    isLoading: query.isLoading,
+    // Distinguish "request failed" from "loaded, zero interviewers" — the
+    // picker must not let Assign open (and Save unassign everyone) off the
+    // back of an empty list that's actually an error.
+    isError: query.isError,
+    setInterviewers,
+  };
 }
 
 /** Only fetched when the picker opens — a recruiter-only endpoint, and
