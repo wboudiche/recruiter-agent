@@ -15,7 +15,9 @@ interface Props {
 }
 
 export function InterviewersPicker({ applicationId, canWrite }: Props) {
-  const { interviewers, isLoading: interviewersLoading, setInterviewers } = useInterviewers(applicationId);
+  const {
+    interviewers, isLoading: interviewersLoading, isError: interviewersError, setInterviewers,
+  } = useInterviewers(applicationId);
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState<number[]>([]);
@@ -35,16 +37,25 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
   // An interviewer already on the panel whose account no longer shows up in
   // the directory (deactivated) would otherwise be un-removable: they'd
   // never appear as a row to untick. Surface them from `interviewers`
-  // itself, not the directory, so they can still be unassigned.
+  // itself, not the directory, so they can still be unassigned. Only do
+  // this once the directory has actually loaded — when it errored,
+  // `directory.data` is `undefined` and every current assignee would
+  // otherwise be misread as "not in the directory" and rendered
+  // "(inactive)".
   const directoryIds = new Set((directory.data ?? []).map((u) => u.id));
-  const inactiveAssigned = interviewers.filter((i) => !directoryIds.has(i.user_id));
+  const inactiveAssigned = directory.data !== undefined
+    ? interviewers.filter((i) => !directoryIds.has(i.user_id))
+    : [];
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
         interviewers:
       </span>
-      {!interviewersLoading && interviewers.length === 0 && (
+      {!interviewersLoading && interviewersError && (
+        <span className="text-sm text-muted-foreground">Couldn't load interviewers</span>
+      )}
+      {!interviewersLoading && !interviewersError && interviewers.length === 0 && (
         <span className="text-sm text-muted-foreground">none</span>
       )}
       {interviewers.map((i) => (
@@ -62,7 +73,7 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
           size="sm"
           className="h-auto px-2 py-1 text-xs"
           onClick={openDialog}
-          disabled={interviewersLoading}
+          disabled={interviewersLoading || interviewersError}
         >
           Assign
         </Button>
@@ -80,6 +91,8 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
           />
           {directory.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading users…</p>
+          ) : directory.isError ? (
+            <p className="text-sm text-muted-foreground">Couldn't load users</p>
           ) : visible.length === 0 && inactiveAssigned.length === 0 ? (
             <p className="text-sm text-muted-foreground">No users match.</p>
           ) : (
@@ -125,7 +138,7 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button
-              disabled={setInterviewers.isPending}
+              disabled={setInterviewers.isPending || directory.isError}
               onClick={() =>
                 setInterviewers.mutate(checked, {
                   onSuccess: () => setOpen(false),

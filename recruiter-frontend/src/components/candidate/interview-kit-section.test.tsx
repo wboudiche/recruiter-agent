@@ -541,6 +541,126 @@ describe("InterviewKitSection", () => {
     expect(patchCalls).toBe(1);
   });
 
+  // R3: after a successful PATCH, the response must land in the cache
+  // immediately — not only after the invalidated refetch completes. Proven
+  // by making the refetch hang forever: only a direct cache write can make
+  // the assertion below observe the new data.
+  it("writes the sheet-save response into the cache immediately, without waiting for a refetch (R3)", async () => {
+    const mine = { user_id: 1, name: "Me", email: "me@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const { qc } = mountWithKit(READY, {}, { sheets: [mine] });
+    await screen.findByDisplayValue("Why this role?");
+
+    const SAVED_SHEETS = [{ ...mine,
+      sheet: { answers: { b1: { answer: "Wants scale", rating: null } }, verdict: { decision: null, note: null } } }];
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit/sheet", () =>
+        HttpResponse.json({ kit: READY, sheets: SAVED_SHEETS })),
+      // Never resolves: if the cache only updated via the invalidated
+      // refetch, this assertion would never see the saved data.
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () => new Promise(() => {})),
+    );
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Wants scale");
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+
+    await waitFor(() => {
+      const cached = qc.getQueryData(queryKeys.interviewKit(1)) as any;
+      expect(cached?.sheets).toEqual(SAVED_SHEETS);
+    });
+  });
+
+  it("writes the question-save response into the cache immediately, without waiting for a refetch (R3)", async () => {
+    const other = { user_id: 7, name: "Bob", email: "bob@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const { qc } = mountWithKit(READY, {}, { sheets: [other], me: { id: 1, role: "recruiter" } });
+    await screen.findByDisplayValue("Why this role?");
+
+    const UPDATED_KIT = { ...READY, questions: [READY.questions[1]] };
+    server.use(
+      http.patch("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: UPDATED_KIT, sheets: [other] })),
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () => new Promise(() => {})),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /remove question 1/i }));
+    await userEvent.click(screen.getByRole("button", { name: /save questions/i }));
+
+    await waitFor(() => {
+      const cached = qc.getQueryData(queryKeys.interviewKit(1)) as any;
+      expect(cached?.kit?.questions).toEqual(UPDATED_KIT.questions);
+    });
+  });
+
+  // R2: a colleague's question edit landing between this draft's seed and
+  // this Save must never be silently overwritten (or 403 forever for a
+  // viewer) by PATCHing the stale draft.
+  it("refuses to PATCH stale question edits when the server list changed underneath, but still saves the sheet (R2)", async () => {
+    const cap: { body?: any; sheet?: any } = {};
+    const { qc } = mountWithKit(READY, cap);
+    await screen.findByDisplayValue("Why this role?");
+
+    const field = await screen.findByLabelText("Question 1");
+    await userEvent.clear(field);
+    await userEvent.type(field, "Why us?");
+
+    const UPDATED = {
+      ...READY,
+      questions: [
+        ...READY.questions,
+        { id: "p2", text: "Added by a colleague", source: "probe", criterion: null, answer: null, rating: null },
+      ],
+    };
+    qc.setQueryData(queryKeys.interviewKit(1), { kit: UPDATED, sheets: [] });
+
+    await userEvent.click(screen.getByRole("button", { name: /save answers/i }));
+
+    expect(await screen.findByText(/questions changed on the server/i)).toBeInTheDocument();
+    await waitFor(() => expect(cap.sheet).toBeDefined());
+    expect(cap.body).toBeUndefined();
+  });
+
+  it("discards local question edits and re-seeds from the server on click (R2)", async () => {
+    const { qc } = mountWithKit(READY);
+    await screen.findByDisplayValue("Why this role?");
+
+    const field = await screen.findByLabelText("Question 1");
+    await userEvent.clear(field);
+    await userEvent.type(field, "Why us?");
+
+    const UPDATED = {
+      ...READY,
+      questions: [
+        ...READY.questions,
+        { id: "p2", text: "Added by a colleague", source: "probe", criterion: null, answer: null, rating: null },
+      ],
+    };
+    qc.setQueryData(queryKeys.interviewKit(1), { kit: UPDATED, sheets: [] });
+
+    const discardButton = await screen.findByRole("button", { name: /discard question edits/i });
+    await userEvent.click(discardButton);
+
+    expect(await screen.findByDisplayValue("Added by a colleague")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save answers/i })).toHaveAttribute("data-dirty", "false");
+  });
+
+  // R9: a refetch that drops a question a dirty sheet has an unsaved answer
+  // for must not re-seed the draft out from under that answer.
+  it("keeps a dirty sheet's row on screen when a refetch drops that question underneath it (R9)", async () => {
+    const mine = { user_id: 1, name: "Me", email: "me@acme.com",
+      sheet: { answers: {}, verdict: { decision: null, note: null } }, submitted_at: null };
+    const { qc } = mountWithKit(READY, {}, { sheets: [mine] });
+    await screen.findByDisplayValue("Why this role?");
+
+    await userEvent.type(screen.getAllByPlaceholderText(/what they said/i)[0], "Good answer");
+
+    const DROPPED = { ...READY, questions: [READY.questions[1]] };
+    qc.setQueryData(queryKeys.interviewKit(1), { kit: DROPPED, sheets: [mine] });
+
+    expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Good answer")).toBeInTheDocument();
+  });
+
   // F3: guard against a double-submit while a save/patch/submit is in flight.
   it("disables Save while a save is in flight, and re-enables once it resolves (F3)", async () => {
     mountWithKit(READY);

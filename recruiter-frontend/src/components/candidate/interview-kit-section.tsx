@@ -125,14 +125,34 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // racing to close it: the mismatched render is discarded and redone with
   // the fresh draft before anything commits, so `isDirty` below can never
   // observe an unseeded draft as dirty.
+  // `generated_at:status` (a regenerate) and the questions digest (an
+  // in-place edit, e.g. a colleague appending a question) are tracked
+  // separately: a regenerate always re-seeds once the draft is clean (as
+  // before), but a digest-only change additionally requires the sheet to be
+  // clean too (see R9 below) — a dirty sheet may hold an unsaved answer for
+  // a question a refetch just dropped, and re-seeding would wipe that row
+  // out from under the answer being typed for it. `seededDigest` also feeds
+  // the staleness check in `saveAll` (R2): it's the digest the current
+  // draft was seeded from, so a mismatch against the live server digest
+  // means the draft was built against a question list that no longer
+  // exists server-side.
   const questionsDigest = (qs: KitQuestion[] | undefined) =>
     (qs ?? []).map((q) => `${q.id}:${q.text}`).join("|");
-  const seedKey = kit ? `${kit.generated_at}:${kit.status}:${questionsDigest(kit.questions)}` : null;
-  const [seededKey, setSeededKey] = useState<string | null>(null);
-  if (kit?.questions && seedKey !== seededKey && !questionsDirty) {
-    setSeededKey(seedKey);
-    setDraft(kit.questions);
-    setQuestionsDirty(false);
+  const serverDigest = kit ? questionsDigest(kit.questions) : null;
+  const genKey = kit ? `${kit.generated_at}:${kit.status}` : null;
+  const sheetDirty = JSON.stringify(sheet) !== JSON.stringify(mySheetRead?.sheet ?? EMPTY_SHEET);
+  const [seededGenKey, setSeededGenKey] = useState<string | null>(null);
+  const [seededDigest, setSeededDigest] = useState<string | null>(null);
+  if (kit?.questions) {
+    const genChanged = genKey !== seededGenKey;
+    const digestChanged = serverDigest !== seededDigest;
+    const shouldReseed = genChanged ? !questionsDirty : (digestChanged && !questionsDirty && !sheetDirty);
+    if (shouldReseed) {
+      setSeededGenKey(genKey);
+      setSeededDigest(serverDigest);
+      setDraft(kit.questions);
+      setQuestionsDirty(false);
+    }
   }
 
   // Same seeding pattern for the caller's own sheet, keyed on its identity
@@ -157,9 +177,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // wipes typed answers. `questionsDirty` (not a diff against
   // `kit.questions`) avoids flagging dirty purely because a background
   // refetch changed the server's list underneath an untouched draft.
-  const isDirty =
-    questionsDirty ||
-    JSON.stringify(sheet) !== JSON.stringify(mySheetRead?.sheet ?? EMPTY_SHEET);
+  const isDirty = questionsDirty || sheetDirty;
 
   useEffect(() => {
     if (!isDirty) return;
@@ -245,6 +263,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   const unanswered = draft.filter((q) => !sheet.answers[q.id]?.answer?.trim()).length;
   const serverQuestionIds = new Set((kit.questions ?? []).map((q) => q.id));
 
+  function discardQuestionEdits() {
+    if (!kit) return;
+    setSeededGenKey(genKey);
+    setSeededDigest(serverDigest);
+    setDraft(kit.questions);
+    setQuestionsDirty(false);
+  }
+
   function saveAll(onDone?: () => void) {
     const afterQuestions = () =>
       canWriteSheet
@@ -253,6 +279,17 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
             onSuccess: onDone,
           })
         : onDone?.();
+    // The draft was built against a question list that no longer matches
+    // the server's (a colleague appended/edited/removed a question since
+    // this draft was seeded). PATCHing it now would either silently drop
+    // their change (recruiter/admin) or 403 forever (a viewer without
+    // write access to the question list) — so refuse the questions PATCH
+    // and surface it, while still saving the sheet, which is independent.
+    if (questionsDirty && serverDigest !== seededDigest) {
+      toast.error("Questions changed on the server — discard your question edits to continue");
+      afterQuestions();
+      return;
+    }
     if (questionsDirty && canAppend) {
       patch.mutate(draft, {
         onError: (err) => toast.error(errorMessage(err, "Couldn't save questions")),
@@ -435,6 +472,15 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
             >
               {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}
             </Button>
+            {questionsDirty && (
+              <Button
+                variant="ghost"
+                onClick={discardQuestionEdits}
+                disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
+              >
+                Discard question edits
+              </Button>
+            )}
             {canWriteSheet && (
               <Button
                 onClick={onSubmitClick}

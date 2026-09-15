@@ -127,4 +127,38 @@ describe("InterviewersPicker", () => {
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
     await waitFor(() => expect(capture.body).toEqual({ user_ids: [2] }));
   });
+
+  // R4: an errored interviewers fetch must not leave Assign enabled — that
+  // would open the dialog seeded from an empty list, and Save would then
+  // unassign everyone.
+  it("disables Assign and shows an error when the interviewers request fails (R4)", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 })),
+      http.get("http://localhost:8000/api/users/directory", () => HttpResponse.json([])),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    render(<Wrapper><InterviewersPicker applicationId={1} canWrite /></Wrapper>);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /assign/i })).toBeDisabled());
+    expect(await screen.findByText(/couldn.t load interviewers/i)).toBeInTheDocument();
+  });
+
+  // R10: an errored directory fetch must not render every current assignee
+  // as "(inactive)", and Save must be disabled rather than able to write an
+  // empty/wrong list.
+  it("shows an error and disables Save when the directory request fails (R10)", async () => {
+    mount(true);
+    server.use(
+      http.get("http://localhost:8000/api/users/directory", () =>
+        HttpResponse.json({ detail: "boom" }, { status: 500 })),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /assign/i }));
+    expect(await screen.findByText(/couldn.t load users/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
+    expect(screen.queryByText(/inactive/i)).not.toBeInTheDocument();
+  });
 });
