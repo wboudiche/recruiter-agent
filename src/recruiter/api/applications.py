@@ -369,10 +369,23 @@ async def patch_application(
             # If a sheet was already submitted (a prior round on this same
             # application), the question list is frozen — see
             # pipeline/interview_sheets.is_frozen. Regenerating would mint
-            # fresh question ids and orphan that submitted sheet's answers,
-            # so leave the kit exactly as it is; its status stays "ready".
-            if is_frozen(await load_assignments(session, app_row.id)):
-                pass
+            # fresh question ids and orphan that submitted sheet's answers.
+            # But that's only a real risk when there's something to
+            # orphan: frozen with an empty question list (nothing was ever
+            # asked) is safe to generate into exactly as if it weren't
+            # frozen at all.
+            existing = app_row.interview_kit or {}
+            existing_questions = existing.get("questions") or []
+            frozen = is_frozen(await load_assignments(session, app_row.id))
+            if frozen and existing_questions:
+                if existing.get("status") != "ready":
+                    # A prior freeze-in-flight (see run_generate_kit) or a
+                    # since-deleted LLM provider can leave the kit stuck in
+                    # "error"/"generating" with no way to ever regenerate
+                    # again. Recover it to "ready" with its questions
+                    # intact rather than leave it stuck forever.
+                    app_row.interview_kit = {**existing, "status": "ready", "error": None}
+                # else: already "ready" — leave the kit exactly as it is.
             else:
                 # Mark the kit pending here, but enqueue the model call for
                 # AFTER the commit below. The transition must be durable
@@ -381,10 +394,9 @@ async def patch_application(
                 # (e.g. a candidate moved back to SCHEDULED after an
                 # interview must not lose recorded answers/ratings) —
                 # mirrors generate_kit's logic.
-                existing = app_row.interview_kit or {}
                 app_row.interview_kit = {
                     **existing, "status": "generating", "error": None,
-                    "questions": existing.get("questions") or [],
+                    "questions": existing_questions,
                 }
                 schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:

@@ -100,6 +100,12 @@ async def run_generate_kit(
         app_row = await session.get(Application, application_id)
         if app_row is None:
             return
+        # Captured before the model call so it reflects the kit as it was
+        # when generation was dispatched — used both to build an error kit
+        # that keeps its questions (below) and, after the model call, to
+        # detect whether there was anything a late freeze could orphan.
+        existing_raw = app_row.interview_kit or {}
+        existing_questions = existing_raw.get("questions") or []
         try:
             job = await session.get(Job, app_row.job_id)
             candidate = await session.get(Candidate, app_row.candidate_id)
@@ -114,8 +120,6 @@ async def run_generate_kit(
             )
             texts = [q.text for q in generated.questions]
             criteria_by_probe = [q.criterion for q in generated.questions]
-            existing_raw = app_row.interview_kit or {}
-            existing_questions = existing_raw.get("questions") or []
             if existing_questions:
                 kit = merge_regenerated(
                     InterviewKit.model_validate(existing_raw), baseline, texts,
@@ -126,7 +130,32 @@ async def run_generate_kit(
                                  criteria_by_probe=criteria_by_probe, now=_now())
         except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
             logger.warning("interview kit generation failed: %s", exc, exc_info=True)
-            kit = InterviewKit(status="error", error=str(exc)[:500])
+            # Keep whatever questions the existing kit had rather than wipe
+            # them: a failed regeneration must not erase recorded
+            # answers/ratings just because the model call blew up.
+            if existing_questions:
+                kit = InterviewKit.model_validate(existing_raw).model_copy(
+                    update={"status": "error", "error": str(exc)[:500]}
+                )
+            else:
+                kit = InterviewKit(status="error", error=str(exc)[:500])
+
+        # Re-check under lock: an interviewer may have submitted their
+        # sheet — freezing the round — while this (an LLM round trip) was
+        # in flight. If so, and there was something to orphan, discard
+        # whatever was just computed, success or error, and restore the
+        # frozen kit to "ready" instead of overwriting it with a result
+        # computed from stale, now-frozen state.
+        await session.refresh(app_row, with_for_update=True)
+        rows = await load_assignments(session, application_id)
+        if is_frozen(rows) and existing_questions:
+            logger.warning(
+                "interview kit regeneration discarded: a sheet was submitted "
+                "during generation for application %s", application_id,
+            )
+            kit = InterviewKit.model_validate(existing_raw).model_copy(
+                update={"status": "ready", "error": None}
+            )
         app_row.interview_kit = kit.model_dump()
         await session.commit()
     await bus.publish({
@@ -148,14 +177,28 @@ async def generate_kit(
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
-    if is_frozen(await load_assignments(session, application_id)):
+    existing = app_row.interview_kit or {}
+    existing_questions = existing.get("questions") or []
+    frozen = is_frozen(await load_assignments(session, application_id))
+    # A freeze only blocks regeneration when there is something it could
+    # orphan. Frozen with an empty question list means nothing has ever
+    # been asked yet, so generation may proceed exactly as if it weren't
+    # frozen at all.
+    if frozen and existing_questions:
+        if existing.get("status") != "ready":
+            # Nothing left to regenerate into — recover the kit that's
+            # stuck in "error"/"generating" straight to "ready" with its
+            # questions intact instead of leaving it stuck forever with no
+            # path back (regeneration can never run again once frozen).
+            app_row.interview_kit = {**existing, "status": "ready", "error": None}
+            await session.commit()
+            return {"application_id": application_id}
         raise HTTPException(
             status_code=409, detail="questions are frozen: a sheet has been submitted",
         )
 
-    existing = app_row.interview_kit or {}
     app_row.interview_kit = {**existing, "status": "generating", "error": None,
-                              "questions": existing.get("questions") or []}
+                              "questions": existing_questions}
     await session.commit()
 
     background_tasks.add_task(

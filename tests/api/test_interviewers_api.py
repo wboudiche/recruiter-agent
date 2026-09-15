@@ -246,3 +246,59 @@ async def test_put_refuses_removing_an_unsubmitted_sheet_with_content(
     r = await api_client.put(f"/api/applications/{app_id}/interviewers", json={"user_ids": []})
     assert r.status_code == 409
     assert "content" in r.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_put_no_change_save_does_not_close_the_round(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R1: a candidate re-entered into SCHEDULED for a second round can
+    still have round-1 assignment rows whose submitted_at is set (frozen
+    but not itself grounds for closing anything). Saving the Assign dialog
+    with the exact same panel must not run close_round_if_complete at all —
+    only removing a row should ever be able to close the round."""
+    app_id = await create_scored_app()
+    a = await _add_user_via_engine("a@acme.com", Role.VIEWER)
+    async with _sessionmaker()() as session:
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                stage=Stage.SCHEDULED,
+                interview_kit={"status": "ready",
+                               "questions": [{"id": "q1", "text": "Why?", "source": "probe"}]},
+            )
+        )
+        session.add(InterviewAssignment(application_id=app_id, user_id=a,
+                                        submitted_at=datetime.now(UTC)))
+        await session.commit()
+
+    resp = await api_client.put(
+        f"/api/applications/{app_id}/interviewers", json={"user_ids": [a]},
+    )
+    assert resp.status_code == 200
+
+    app_read = (await api_client.get(f"/api/applications/{app_id}")).json()
+    assert app_read["stage"] == "scheduled"
+
+
+@pytest.mark.asyncio
+async def test_put_removes_an_inactive_assignees_populated_draft(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """R8: sheet_has_content only blocks removal of an ACTIVE assignee.
+    Once X is deactivated their populated-but-unsubmitted draft must not
+    strand the panel — there is no way for X to come back and submit or
+    clear it themselves."""
+    app_id = await create_scored_app()
+    x = await _add_user_via_engine("x@acme.com", Role.VIEWER)
+    async with _sessionmaker()() as session:
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=x,
+            sheet={"answers": {"q1": {"answer": "Some notes.", "rating": None}},
+                   "verdict": {"decision": None, "note": None}},
+        ))
+        await session.execute(update(User).where(User.id == x).values(is_active=False))
+        await session.commit()
+
+    r = await api_client.put(f"/api/applications/{app_id}/interviewers", json={"user_ids": []})
+    assert r.status_code == 200
+    assert r.json() == []

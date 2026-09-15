@@ -95,6 +95,21 @@ async def put_interviewers(
         if missing:
             raise HTTPException(status_code=422, detail=f"unknown or inactive users: {missing}")
 
+    # sheet_has_content only protects an ACTIVE assignee's draft: once
+    # someone is deactivated they can never come back to submit or clear
+    # it themselves, so a populated-but-unsubmitted row of theirs must not
+    # strand the panel. The submitted-sheet 409 below has no such carve
+    # out — a submitted sheet is never removable, active or not.
+    to_remove = [row for row in existing if row.user_id not in wanted]
+    active_removing: set[int] = set()
+    if to_remove:
+        active_removing = {u.id for u in (await session.execute(
+            select(User).where(
+                User.id.in_([r.user_id for r in to_remove]), User.is_active.is_(True),
+            )
+        )).scalars().all()}
+
+    deleted = False
     for row in existing:
         if row.user_id not in wanted:
             if row.submitted_at is not None:
@@ -102,20 +117,24 @@ async def put_interviewers(
                     status_code=409,
                     detail="cannot remove an interviewer whose sheet is submitted",
                 )
-            if sheet_has_content(row.sheet):
+            if row.user_id in active_removing and sheet_has_content(row.sheet):
                 raise HTTPException(
                     status_code=409,
                     detail="cannot remove an interviewer whose sheet has content",
                 )
             await session.delete(row)
+            deleted = True
     for uid in wanted:
         if uid not in by_user:
             session.add(InterviewAssignment(application_id=application_id, user_id=uid))
 
     # Removing the last unsubmitted interviewer can leave every remaining
     # assignment submitted, which closes the round the same way a late
-    # submit would.
-    stage_changed = await close_round_if_complete(session, app_row)
+    # submit would. Only a removal can do this — a no-op save of the same
+    # panel must never re-evaluate whether the round is complete, or a
+    # candidate re-entered into SCHEDULED whose round-1 rows are still
+    # marked submitted would flip straight back to INTERVIEWED.
+    stage_changed = await close_round_if_complete(session, app_row) if deleted else False
     await session.commit()
     # Same event the kit uses, so any open candidate page refetches its
     # interviewer chips and sheets (see lib/sse.ts).
