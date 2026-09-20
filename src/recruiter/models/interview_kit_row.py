@@ -43,6 +43,10 @@ class InterviewKitRow(Base):
     generated_at: Mapped[str | None] = mapped_column(String)
     generating_since: Mapped[str | None] = mapped_column(String)
     closed_at: Mapped[str | None] = mapped_column(String)
+    # Legacy single-submit timestamp, mirroring InterviewKit.submitted_at in
+    # schemas/interview.py. Kept so the blob's contents survive the move,
+    # even though per-interviewer submission now lives on the sheet.
+    submitted_at: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )

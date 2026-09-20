@@ -34,6 +34,7 @@ def upgrade() -> None:
         sa.Column("generated_at", sa.String(), nullable=True),
         sa.Column("generating_since", sa.String(), nullable=True),
         sa.Column("closed_at", sa.String(), nullable=True),
+        sa.Column("submitted_at", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True),
                   server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True),
@@ -64,7 +65,8 @@ def upgrade() -> None:
     op.execute("""
         INSERT INTO interview_kits (
             application_id, round, track, questions, status, error,
-            generated_at, generating_since, closed_at, created_at, updated_at
+            generated_at, generating_since, closed_at, submitted_at,
+            created_at, updated_at
         )
         SELECT a.id,
                r.round,
@@ -75,6 +77,7 @@ def upgrade() -> None:
                a.interview_kit ->> 'generated_at',
                a.interview_kit ->> 'generating_since',
                a.interview_kit ->> 'closed_at',
+               a.interview_kit ->> 'submitted_at',
                now(), now()
         FROM applications a
         CROSS JOIN LATERAL generate_series(1, a.interview_round) AS r(round)

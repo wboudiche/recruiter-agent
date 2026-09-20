@@ -94,16 +94,20 @@ def test_closed_at_and_status_are_copied_from_the_blob(postgres_container, monke
         "status": "error", "error": "model unavailable", "questions": [],
         "generated_at": "2026-09-20T10:00:00+00:00",
         "closed_at": "2026-09-20T12:00:00+00:00",
+        "submitted_at": "2026-09-20T11:00:00+00:00",
     })
     command.upgrade(cfg, CURRENT)
     with engine.begin() as conn:
         row = conn.execute(sa.text(
-            "SELECT status, error, generated_at, closed_at FROM interview_kits"
+            "SELECT status, error, generated_at, closed_at, submitted_at FROM interview_kits"
         )).mappings().one()
     assert row["status"] == "error"
     assert row["error"] == "model unavailable"
     assert row["generated_at"] == "2026-09-20T10:00:00+00:00"
     assert row["closed_at"] == "2026-09-20T12:00:00+00:00"
+    # Legacy single-submit timestamp: still read by any pre-multi-interviewer
+    # kit, so it must round-trip like every other blob field.
+    assert row["submitted_at"] == "2026-09-20T11:00:00+00:00"
 
 
 def test_downgrade_leaves_the_blob_intact(postgres_container, monkeypatch) -> None:
