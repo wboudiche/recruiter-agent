@@ -178,7 +178,7 @@ async def run_generate_kit(
         # something to orphan, discard whatever was just computed, success
         # or error, and restore the frozen kit to "ready" instead of
         # overwriting it with a result computed from stale, now-frozen state.
-        if is_frozen(rows) and existing_questions:
+        if is_frozen(rows_in_round(rows, app_row.interview_round)) and existing_questions:
             logger.warning(
                 "interview kit regeneration discarded: a sheet was submitted "
                 "during generation for application %s", application_id,
@@ -211,7 +211,9 @@ async def generate_kit(
 
     kit_row = await kit_for(session, app_row)
     existing_questions = kit_row.questions if kit_row else []
-    frozen = is_frozen(await load_assignments(session, application_id))
+    frozen = is_frozen(
+        rows_in_round(await load_assignments(session, application_id), app_row.interview_round)
+    )
     # A freeze only blocks regeneration when there is something it could
     # orphan. Frozen with an empty question list means nothing has ever
     # been asked yet, so generation may proceed exactly as if it weren't
@@ -289,7 +291,9 @@ async def patch_kit(
         if not unchanged:
             raise HTTPException(status_code=403, detail="interviewers may only add questions")
 
-    if is_frozen(rows) and any(qid not in incoming_ids for qid in stored_ids):
+    if is_frozen(rows_in_round(rows, app_row.interview_round)) and any(
+        qid not in incoming_ids for qid in stored_ids
+    ):
         raise HTTPException(
             status_code=409, detail="questions are frozen: a sheet has been submitted",
         )

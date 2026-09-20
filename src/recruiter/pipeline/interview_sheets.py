@@ -23,11 +23,9 @@ def is_frozen(rows: Iterable[InterviewAssignment]) -> bool:
     """Once any sheet is submitted the question list must not lose rows,
     or submitted feedback would silently lose its answers.
 
-    Deliberately spans EVERY round, unlike round completion below: the
-    question list lives once on the application and is shared by all
-    rounds, so round 1's submitted answers are keyed to ids that round 2
-    must not regenerate or remove. Pass every row, not just the live
-    round's.
+    Scoped to ONE kit's rows: callers pass `rows_in_round(...)`. Each round
+    owns its questions now, so a regeneration in round two cannot orphan
+    round one's answers — the reason this once had to span every round.
     """
     return any(r.submitted_at is not None for r in rows)
 

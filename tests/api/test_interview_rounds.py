@@ -144,12 +144,12 @@ async def test_reopening_keeps_the_shared_questions(
 
 
 @pytest.mark.asyncio
-async def test_questions_stay_frozen_into_the_next_round(
+async def test_round_two_questions_are_editable_after_round_one_closed(
     api_client: AsyncClient, create_scored_app,
 ) -> None:
-    """Round 1's submitted answers are keyed to the shared question ids, so
-    the freeze has to outlive the round that caused it. Removing a question
-    in round 2 is still refused."""
+    """Round 1's submitted answers are keyed to round 1's own kit now, so
+    round 1 closing does not freeze round 2's questions. Removing a
+    question in round 2 is allowed."""
     app.dependency_overrides[get_llm] = _fake_llm
     try:
         app_id = await create_scored_app()
@@ -158,14 +158,37 @@ async def test_questions_stay_frozen_into_the_next_round(
 
         kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
         assert len(kit["questions"]) >= 1
-        # Drop one question: legal while nothing is submitted, refused after.
+        # Drop one question: legal while nothing is submitted, and still
+        # legal here because round 2 has nothing submitted of its own.
         resp = await api_client.patch(
             f"/api/applications/{app_id}/interview-kit",
             json={"questions": kit["questions"][1:]},
         )
 
-        assert resp.status_code == 409, resp.text
-        assert "frozen" in resp.json()["detail"]
+        assert resp.status_code == 200, resp.text
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_a_reopened_round_can_regenerate_its_questions(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Round one's answers are keyed to round one's kit, so regenerating
+    round two cannot orphan them. Before kits were rows the freeze had to
+    span every round, which left a reopened round permanently stuck with
+    the questions it inherited."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+
+        assert resp.status_code == 202, resp.text
+        kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+        assert kit["status"] == "ready"
     finally:
         app.dependency_overrides.pop(get_llm, None)
 

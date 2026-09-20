@@ -350,10 +350,11 @@ async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
     set of rows is created for the same panel with empty sheets, so the
     recruiter only touches the panel when round two is a different one.
 
-    The shared question list is deliberately NOT regenerated: the closed
-    round's answers are keyed to its question ids, and `is_frozen` spans
-    every round for exactly that reason. Only `closed_at` is cleared, so
-    the kit reads as open again without losing what was asked.
+    The new round's kit starts as a copy of the closed round's questions
+    rather than a fresh generation: the closed round's answers are keyed
+    to its question ids, and `is_frozen` (scoped to that round) still
+    protects them. The new round's own kit is untouched and free to
+    regenerate.
     """
     previous_round = app_row.interview_round
     panel = rows_in_round(await load_assignments(session, app_row.id), previous_round)
@@ -414,17 +415,18 @@ async def patch_application(
             await _open_next_round(session, app_row)
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
-            # If a sheet was already submitted (a prior round on this same
-            # application), the question list is frozen — see
-            # pipeline/interview_sheets.is_frozen. Regenerating would mint
-            # fresh question ids and orphan that submitted sheet's answers.
-            # But that's only a real risk when there's something to
-            # orphan: frozen with an empty question list (nothing was ever
-            # asked) is safe to generate into exactly as if it weren't
-            # frozen at all.
+            # If a sheet in THIS round was already submitted, the question
+            # list is frozen — see pipeline/interview_sheets.is_frozen.
+            # Regenerating would mint fresh question ids and orphan that
+            # submitted sheet's answers. But that's only a real risk when
+            # there's something to orphan: frozen with an empty question
+            # list (nothing was ever asked) is safe to generate into
+            # exactly as if it weren't frozen at all.
             kit_row = await kit_for(session, app_row)
             existing_questions = kit_row.questions if kit_row else []
-            frozen = is_frozen(await load_assignments(session, app_row.id))
+            frozen = is_frozen(rows_in_round(
+                await load_assignments(session, app_row.id), app_row.interview_round,
+            ))
             if frozen and existing_questions:
                 if kit_row.status != "ready":
                     # A prior freeze-in-flight (see run_generate_kit) or a
