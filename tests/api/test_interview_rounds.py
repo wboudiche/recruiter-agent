@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.main import app
 from recruiter.models import Application, InterviewAssignment, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 from recruiter.llm.client import FakeLLMClient
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
@@ -167,3 +168,80 @@ async def test_questions_stay_frozen_into_the_next_round(
         assert "frozen" in resp.json()["detail"]
     finally:
         app.dependency_overrides.pop(get_llm, None)
+
+
+async def _kit_rows(app_id: int) -> list[InterviewKitRow]:
+    SessionLocal = await _sessionmaker()
+    async with SessionLocal() as session:
+        return list((await session.execute(
+            select(InterviewKitRow)
+            .where(InterviewKitRow.application_id == app_id)
+            .order_by(InterviewKitRow.round)
+        )).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_entering_scheduled_creates_a_kit_row(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        SessionLocal = await _sessionmaker()
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Application).where(Application.id == app_id).values(stage=Stage.INVITED))
+            await session.commit()
+
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        rows = await _kit_rows(app_id)
+        assert [(r.round, r.track) for r in rows] == [(1, "default")]
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_reopening_creates_the_next_rounds_kit_rather_than_mutating_the_first(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Round one's row must survive untouched — its closed_at is the record
+    that the round happened, and its questions anchor round one's answers."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        before = await _kit_rows(app_id)
+        assert len(before) == 1 and before[0].closed_at is not None
+        first_questions = list(before[0].questions)
+
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        rows = await _kit_rows(app_id)
+        assert [r.round for r in rows] == [1, 2]
+        assert rows[0].closed_at is not None, "round one was reopened instead of round two"
+        assert rows[1].closed_at is None
+        assert [q["id"] for q in rows[1].questions] == [q["id"] for q in first_questions]
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_generate_creates_a_kit_when_the_application_has_none(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The "Generate interview kit" button works from a standing start, so
+    generate must create the row rather than 404 on a missing one."""
+    app_id = await create_scored_app()
+    llm = _fake_llm()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        assert resp.status_code == 202, resp.text
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    rows = await _kit_rows(app_id)
+    assert [(r.round, r.track) for r in rows] == [(1, "default")]
+    assert rows[0].questions, "generation produced no questions"

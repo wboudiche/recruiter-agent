@@ -24,6 +24,7 @@ from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
 from recruiter.models.interview_assignment import empty_sheet
 from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed, rows_in_round
+from recruiter.pipeline.kit_store import create_kit, kit_for
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -31,7 +32,6 @@ from recruiter.pipeline.orchestrator import (
 from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
-from recruiter.schemas.interview import InterviewKit
 
 # Authorization model: shared workspace. Any user authenticated via OIDC and
 # accepted by the domain allowlist (`auth.allowlist`) can read and mutate any
@@ -357,6 +357,7 @@ async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
     """
     previous_round = app_row.interview_round
     panel = rows_in_round(await load_assignments(session, app_row.id), previous_round)
+    previous_kit = await kit_for(session, app_row)  # still the old round here
 
     app_row.interview_round = previous_round + 1
     # The round is open again, so the application is no longer interviewed.
@@ -368,8 +369,13 @@ async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
             round=app_row.interview_round,
             sheet=empty_sheet(),
         ))
-    if app_row.interview_kit:
-        app_row.interview_kit = {**app_row.interview_kit, "closed_at": None}
+    if previous_kit is not None:
+        await create_kit(
+            session, app_row,
+            round=app_row.interview_round,
+            questions=list(previous_kit.questions or []),
+            status="ready",
+        )
 
 
 @router.patch("/applications/{application_id}", response_model=ApplicationRead)
@@ -416,17 +422,18 @@ async def patch_application(
             # orphan: frozen with an empty question list (nothing was ever
             # asked) is safe to generate into exactly as if it weren't
             # frozen at all.
-            existing = app_row.interview_kit or {}
-            existing_questions = existing.get("questions") or []
+            kit_row = await kit_for(session, app_row)
+            existing_questions = kit_row.questions if kit_row else []
             frozen = is_frozen(await load_assignments(session, app_row.id))
             if frozen and existing_questions:
-                if existing.get("status") != "ready":
+                if kit_row.status != "ready":
                     # A prior freeze-in-flight (see run_generate_kit) or a
                     # since-deleted LLM provider can leave the kit stuck in
                     # "error"/"generating" with no way to ever regenerate
                     # again. Recover it to "ready" with its questions
                     # intact rather than leave it stuck forever.
-                    app_row.interview_kit = {**existing, "status": "ready", "error": None}
+                    kit_row.status = "ready"
+                    kit_row.error = None
                 # else: already "ready" — leave the kit exactly as it is.
             else:
                 # Mark the kit pending here, but enqueue the model call for
@@ -436,22 +443,23 @@ async def patch_application(
                 # (e.g. a candidate moved back to SCHEDULED after an
                 # interview must not lose recorded answers/ratings) —
                 # mirrors generate_kit's logic.
-                app_row.interview_kit = {
-                    **existing, "status": "generating", "error": None,
-                    "questions": existing_questions,
-                    # Pairs with generate_kit's idempotency check, so a
-                    # manual Generate during this run is a no-op rather
-                    # than a second model call.
-                    "generating_since": now.isoformat(),
-                }
+                if kit_row is None:
+                    kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+                kit_row.status = "generating"
+                kit_row.error = None
+                # Pairs with generate_kit's idempotency check, so a
+                # manual Generate during this run is a no-op rather
+                # than a second model call.
+                kit_row.generating_since = now.isoformat()
                 schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
             # The recruiter closed the round by hand (a no-show, say).
             # Shares mark_interviewed with the all-sheets-in path in
             # submit_sheet so both stamp interviewed_at/closed_at the same
             # way. With no kit yet, there's nothing to stamp closed.
-            if app_row.interview_kit:
-                mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), now)
+            kit_row = await kit_for(session, app_row)
+            if kit_row is not None:
+                mark_interviewed(app_row, kit_row, now)
             else:
                 app_row.interviewed_at = now
         elif new_stage == Stage.OFFER:
@@ -489,11 +497,10 @@ async def patch_application(
             # above is already committed and safe either way; leave the
             # kit in an error state rather than stuck at "generating"
             # forever with no task ever running to resolve it.
-            app_row.interview_kit = {
-                **(app_row.interview_kit or {}),
-                "status": "error",
-                "error": "No LLM provider configured. Set one up in Settings.",
-            }
+            kit_row = await kit_for(session, app_row)
+            if kit_row is not None:
+                kit_row.status = "error"
+                kit_row.error = "No LLM provider configured. Set one up in Settings."
             await session.commit()
             await session.refresh(app_row)
     counts = await _sheet_counts(session, [app_row.id])
