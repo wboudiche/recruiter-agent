@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -10,7 +10,7 @@ from recruiter.api.interview import run_generate_kit
 from recruiter.events import EventBus
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
-from recruiter.models import Application, InterviewAssignment, Role, Stage, User
+from recruiter.models import Application, Candidate, InterviewAssignment, Role, Stage, User
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 _Q1 = {"id": "q1", "text": "Why?", "source": "probe"}
@@ -370,6 +370,99 @@ async def test_regeneration_keeps_a_question_answered_while_it_was_in_flight(
     assert "q1" in [q["id"] for q in kit["questions"]], (
         "an answer typed during generation was orphaned"
     )
+
+
+@pytest.mark.asyncio
+async def test_generation_sees_the_whole_candidate_and_their_enrichment(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Probes used to be generated from `summary` alone while scoring got the
+    full structured candidate — which is why they drifted towards things the
+    CV already answers. Enrichment never reached the generator at all."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        app_row = await session.get(Application, app_id)
+        candidate = await session.get(Candidate, app_row.candidate_id)
+        candidate.skills = ["Kubernetes", "Terraform"]
+        candidate.experience = [{"title": "Staff SRE", "company": "Acme",
+                                 "description": "Owned the cluster migration."}]
+        app_row.enrichment = {"results": [{
+            "source": "github", "profile_url": "https://github.com/x", "confidence": 0.9,
+            "discovered": False, "signals": [],
+            "summary": "Maintains a Terraform provider with 400 stars.",
+        }]}
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    await run_generate_kit(application_id=app_id, engine=engine, llm=llm, bus=EventBus())
+
+    prompt = "\n".join(
+        m.content for call in llm.calls for m in call.get("messages", [])
+    )
+    assert "Kubernetes" in prompt
+    assert "Owned the cluster migration" in prompt
+    assert "Terraform provider with 400 stars" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_second_generate_while_one_is_running_is_a_no_op(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A double-click used to buy a second LLM call whose result merely
+    overwrote the first."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "generating", "questions": [_Q1],
+                               "generating_since": datetime.now(UTC).isoformat()},
+            )
+        )
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        assert resp.status_code == 202
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert llm.calls == [], "a second generation ran while one was already in flight"
+
+
+@pytest.mark.asyncio
+async def test_a_generate_after_a_stale_run_is_allowed(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The escape hatch: a run killed mid-generation must not strand the kit
+    as `generating` with no way back."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={
+                    "status": "generating", "questions": [],
+                    "generating_since": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+                },
+            )
+        )
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert llm.calls, "a stale generation left the kit unable to retry"
 
 
 @pytest.mark.asyncio

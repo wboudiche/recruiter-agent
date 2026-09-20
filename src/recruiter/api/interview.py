@@ -19,8 +19,13 @@ from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, User
-from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
+from recruiter.pipeline.interview_kit import (
+    build_kit,
+    generation_in_flight,
+    merge_regenerated,
+)
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
+from recruiter.pipeline.candidate_profile import profile_text
 from recruiter.pipeline.interview_sheets import (
     answered_question_ids,
     can_edit_questions,
@@ -124,7 +129,7 @@ async def run_generate_kit(
             baseline = [BaselineQuestion.model_validate(b)
                         for b in (job.interview_baseline or [])]
             generated = await generate_probes(
-                profile=candidate.summary or candidate.full_name or "",
+                profile=profile_text(candidate, enrichment=app_row.enrichment),
                 criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
                 score_breakdown=app_row.score_breakdown,
                 baseline=baseline,
@@ -220,8 +225,14 @@ async def generate_kit(
             status_code=409, detail="questions are frozen: a sheet has been submitted",
         )
 
+    # Idempotent: a double-click or a second tab would otherwise buy a second
+    # LLM call whose result just overwrites the first.
+    if generation_in_flight(existing, now=datetime.now(UTC)):
+        return {"application_id": application_id}
+
     app_row.interview_kit = {**existing, "status": "generating", "error": None,
-                              "questions": existing_questions}
+                              "questions": existing_questions,
+                              "generating_since": _now()}
     await session.commit()
 
     background_tasks.add_task(
@@ -438,7 +449,7 @@ async def draft_kit_question(
     ]
     try:
         question = await draft_question(
-            profile=candidate.summary or candidate.full_name or "",
+            profile=profile_text(candidate, enrichment=app_row.enrichment),
             criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
             score_breakdown=app_row.score_breakdown,
             existing_questions=existing,

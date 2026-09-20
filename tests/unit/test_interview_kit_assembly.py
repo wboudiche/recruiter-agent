@@ -1,4 +1,10 @@
-from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
+from datetime import UTC, datetime, timedelta
+
+from recruiter.pipeline.interview_kit import (
+    build_kit,
+    generation_in_flight,
+    merge_regenerated,
+)
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit, KitQuestion
 
 NOW = "2026-09-10T10:00:00+00:00"
@@ -170,3 +176,33 @@ def test_regeneration_keeps_a_baseline_answered_only_in_a_sheet() -> None:
     assert kept.text == "Wording as asked"
     # b2 was never asked, so it still arrives from the job's current baseline.
     assert any(q.id == "b2" for q in merged.questions)
+
+
+NOW_DT = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+
+
+def test_generation_in_flight_while_a_recent_run_is_working() -> None:
+    """A double-click must not buy a second LLM call."""
+    kit = {"status": "generating",
+           "generating_since": (NOW_DT - timedelta(seconds=5)).isoformat()}
+    assert generation_in_flight(kit, now=NOW_DT)
+
+
+def test_generation_not_in_flight_once_a_run_has_gone_stale() -> None:
+    """The escape hatch. A process killed mid-generation leaves the kit
+    marked `generating` forever; without a staleness window the recruiter
+    could never retry and the kit would be stuck with no way out."""
+    kit = {"status": "generating",
+           "generating_since": (NOW_DT - timedelta(minutes=10)).isoformat()}
+    assert not generation_in_flight(kit, now=NOW_DT)
+
+
+def test_generation_not_in_flight_for_a_kit_that_is_not_generating() -> None:
+    assert not generation_in_flight({"status": "ready"}, now=NOW_DT)
+    assert not generation_in_flight(None, now=NOW_DT)
+
+
+def test_a_generating_kit_with_no_timestamp_may_be_retried() -> None:
+    """Kits marked generating before this field existed carry no timestamp.
+    Treating them as in flight would strand them permanently."""
+    assert not generation_in_flight({"status": "generating"}, now=NOW_DT)

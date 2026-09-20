@@ -40,6 +40,9 @@ class InterviewKit(BaseModel):
     status: KitStatus
     error: str | None = None
     generated_at: str | None = None
+    # When the run currently in progress started; see generation_in_flight.
+    # Only set while `status == "generating"`.
+    generating_since: str | None = None
     # Legacy single-submit timestamp; see KitQuestion.answer.
     submitted_at: str | None = None
     # Set when the candidate moves to INTERVIEWED, by the all-sheets-in

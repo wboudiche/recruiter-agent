@@ -18,6 +18,30 @@ interface Props {
   sheets: SheetRead[];
 }
 
+/**
+ * "2 hire · 1 unsure · 1 outstanding" — the shape of the panel's opinion in
+ * one line. Only SUBMITTED sheets are counted: a verdict still in draft is
+ * not a decision, and folding it in would report a split panel as settled.
+ * Everything else — unsubmitted, or submitted with no decision recorded —
+ * is named as outstanding rather than quietly dropped, so the counts always
+ * add up to the panel.
+ */
+function verdictSummary(sheets: SheetRead[]): string | null {
+  const submitted = sheets.filter((s) => s.submitted_at);
+  if (submitted.length === 0) return null;
+
+  const counts: Record<VerdictDecision, number> = { hire: 0, unsure: 0, no_hire: 0 };
+  for (const s of submitted) {
+    if (s.sheet.verdict.decision) counts[s.sheet.verdict.decision] += 1;
+  }
+  const outstanding = sheets.length - (counts.hire + counts.unsure + counts.no_hire);
+
+  const parts = (["hire", "unsure", "no_hire"] as const)
+    .filter((k) => counts[k] > 0)
+    .map((k) => `${counts[k]} ${VERDICT_LABEL[k].toLowerCase()}`);
+  if (outstanding > 0) parts.push(`${outstanding} outstanding`);
+  return parts.join(" · ");
+}
 
 export function FeedbackTable({ questions, sheets }: Props) {
   const [showUnrated, setShowUnrated] = useState(false);
@@ -25,9 +49,16 @@ export function FeedbackTable({ questions, sheets }: Props) {
   const unratedCount = questions.filter((q) => !rated(q)).length;
   const rows = showUnrated ? questions : questions.filter(rated);
 
+  const summary = verdictSummary(sheets);
+
   return (
     <section className="space-y-2">
       <h4 className="text-sm font-semibold">Feedback</h4>
+      {summary && (
+        <p aria-label="Verdict summary" className="text-xs text-muted-foreground">
+          {summary}
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>

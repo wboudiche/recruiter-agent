@@ -32,4 +32,21 @@ describe("FeedbackTable", () => {
     expect(screen.getByRole("row", { name: /How\?/ })).toBeInTheDocument();
   });
 
+  it("tallies the verdicts of submitted sheets and names what is outstanding", () => {
+    // The per-sheet row already shows each verdict; a panel of four is the
+    // case where counting them by eye stops being free. Only SUBMITTED
+    // sheets count — a draft verdict is not a decision yet.
+    render(<FeedbackTable questions={Q} sheets={S} />);
+
+    const summary = screen.getByLabelText("Verdict summary");
+    expect(summary).toHaveTextContent("1 hire");
+    expect(summary).toHaveTextContent("1 outstanding");
+  });
+
+  it("omits the tally until at least one sheet is submitted", () => {
+    const drafts = S.map((s) => ({ ...s, submitted_at: null }));
+    render(<FeedbackTable questions={Q} sheets={drafts} />);
+
+    expect(screen.queryByLabelText("Verdict summary")).not.toBeInTheDocument();
+  });
 });

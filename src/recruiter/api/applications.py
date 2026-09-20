@@ -439,6 +439,10 @@ async def patch_application(
                 app_row.interview_kit = {
                     **existing, "status": "generating", "error": None,
                     "questions": existing_questions,
+                    # Pairs with generate_kit's idempotency check, so a
+                    # manual Generate during this run is a no-op rather
+                    # than a second model call.
+                    "generating_since": now.isoformat(),
                 }
                 schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
