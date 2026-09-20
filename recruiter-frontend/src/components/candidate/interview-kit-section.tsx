@@ -272,6 +272,20 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
 
   const unanswered = draft.filter((q) => !sheet.answers[q.id]?.answer?.trim()).length;
   const serverQuestionIds = new Set((kit.questions ?? []).map((q) => q.id));
+  // Wording is locked once a SUBMITTED sheet has answered or rated the
+  // question: its text is part of the record of what was asked. The server
+  // enforces this (patch_kit 409s), so offering an editable box that fails
+  // on save would only be a worse way to find out. A draft answer locks
+  // nothing — there is no record yet.
+  const recordedQuestionIds = new Set(
+    sheets
+      .filter((s) => s.submitted_at)
+      .flatMap((s) =>
+        Object.entries(s.sheet.answers)
+          .filter(([, a]) => a?.answer || a?.rating)
+          .map(([id]) => id),
+      ),
+  );
 
   function discardQuestionEdits() {
     if (!kit) return;
@@ -346,7 +360,9 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
       <ul className="space-y-3">
         {draft.map((q, i) => {
           const mine = sheet.answers[q.id] ?? { answer: null, rating: null };
-          const canEditThisQuestion = canEditQuestions || (canAppend && !serverQuestionIds.has(q.id));
+          const recorded = recordedQuestionIds.has(q.id);
+          const canEditThisQuestion =
+            !recorded && (canEditQuestions || (canAppend && !serverQuestionIds.has(q.id)));
           return (
             <li key={q.id} className="border border-border rounded p-2 space-y-2">
               <div className="flex items-start justify-between gap-2">

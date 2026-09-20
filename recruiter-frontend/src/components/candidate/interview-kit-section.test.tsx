@@ -126,6 +126,35 @@ describe("InterviewKitSection", () => {
     expect(screen.queryByText(/round 1/i)).not.toBeInTheDocument();
   });
 
+  it("locks the wording of a question answered in a submitted sheet", async () => {
+    // The server 409s on this (see patch_kit); offering an editable box that
+    // fails on save would be a worse way to find out.
+    mountWithKit(READY, {}, {
+      sheets: [{
+        user_id: 1, name: "Ann", email: "ann@acme.com",
+        submitted_at: "2026-09-20T10:00:00Z",
+        sheet: { answers: { b1: { answer: "Because scale.", rating: "strong" } }, verdict: {} },
+      }],
+    });
+
+    // b1 was answered and submitted: read-only. p1 was not: still editable.
+    await waitFor(() => expect(screen.getByText("Why this role?")).toBeInTheDocument());
+    expect(screen.queryByDisplayValue("Why this role?")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Describe an incident.")).toBeInTheDocument();
+  });
+
+  it("leaves wording editable while the answer is still a draft", async () => {
+    mountWithKit(READY, {}, {
+      sheets: [{
+        user_id: 1, name: "Ann", email: "ann@acme.com", submitted_at: null,
+        sheet: { answers: { b1: { answer: "half a thought", rating: null } }, verdict: {} },
+      }],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+  });
+
   it("renders questions with their source badge", async () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
@@ -420,9 +449,10 @@ describe("InterviewKitSection", () => {
       sheet: { answers: { b1: { answer: "Done", rating: "weak" } }, verdict: { decision: "no_hire", note: null } },
       submitted_at: "2026-09-14T10:00:00Z" };
     mountWithKit(READY, {}, { sheets: [mine] });
-    // Question ids are stable, so renaming stays allowed even once frozen —
-    // the row is still an editable textarea, not read-only text.
-    await screen.findByDisplayValue("Why this role?");
+    // b1 carries a submitted answer, so its wording is now part of the
+    // record and renders as read-only text rather than a textarea.
+    await screen.findByText("Why this role?");
+    expect(screen.queryByDisplayValue("Why this role?")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
@@ -432,8 +462,9 @@ describe("InterviewKitSection", () => {
     mountWithKit(READY, {}, { sheets: [other] });
     await screen.findByDisplayValue("Why this role?");
     expect(screen.getByRole("button", { name: /remove question 1/i })).toBeDisabled();
-    // Freezing only refuses removal (and regenerate) — the question text
-    // itself stays editable for a recruiter/admin.
+    // The submitted sheet answered nothing, so no question's wording is part
+    // of the record yet: a recruiter can still fix a typo. Only removal and
+    // regenerate are refused by the freeze itself.
     expect(screen.getByLabelText("Question 1")).toBeEnabled();
   });
 

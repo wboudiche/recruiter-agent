@@ -347,6 +347,10 @@ Order, each step landing green on its own:
   wants to fix a typo after one interview. Renaming stays allowed
   (ids are stable); only removal and regenerate are refused, with a
   tooltip saying why.
+  *(Amended 2026-09-20: renaming stays allowed except for questions
+  answered or rated in a submitted sheet, whose wording is part of the
+  record. The typo case above is unaffected — it concerns questions
+  nobody has answered. See the decisions record.)*
 - **Blind feedback relies on the filter being applied everywhere the kit
   is read** — the GET, the SSE payload, and the agent tool. The SSE
   event carries no sheet data, only a signal to refetch, so the filter

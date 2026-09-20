@@ -19,13 +19,13 @@ from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, User
+from recruiter.pipeline.candidate_profile import profile_text
 from recruiter.pipeline.interview_kit import (
     build_kit,
     generation_in_flight,
     merge_regenerated,
 )
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
-from recruiter.pipeline.candidate_profile import profile_text
 from recruiter.pipeline.interview_sheets import (
     answered_question_ids,
     can_edit_questions,
@@ -284,6 +284,27 @@ async def patch_kit(
     if is_frozen(rows) and any(qid not in incoming_ids for qid in stored_ids):
         raise HTTPException(
             status_code=409, detail="questions are frozen: a sheet has been submitted",
+        )
+
+    # A submitted answer is a record of what was asked and what was said;
+    # rewording the question afterwards changes what that record means,
+    # which matters the moment a hiring decision is questioned. Scoped to
+    # questions someone actually answered or rated in a SUBMITTED sheet, so
+    # an untouched question stays editable and the "fix a typo after one
+    # interview" case the design protected still works. A draft answer locks
+    # nothing: there is no record yet, and the recruiter may be fixing the
+    # very question the interviewer is struggling with.
+    recorded = answered_question_ids(r for r in rows if r.submitted_at is not None)
+    stored_text = {q.id: q.text for q in kit.questions}
+    reworded = [
+        q.id for q in payload.questions
+        if q.id in recorded and q.id in stored_text and q.text != stored_text[q.id]
+    ]
+    if reworded:
+        raise HTTPException(
+            status_code=409,
+            detail="cannot reword a question that has been answered in a submitted sheet: "
+            + ", ".join(reworded),
         )
 
     # Legacy per-question answer/rating are read-only: carry over whatever
