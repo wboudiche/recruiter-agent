@@ -12,7 +12,11 @@ from recruiter.models import Base
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: this module runs in-process whenever
+    # alembic is invoked programmatically (see the migration test), and the
+    # default of True permanently disables every already-created app logger
+    # (e.g. "recruiter.api.users") for the rest of that process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", get_config().database_url)
 

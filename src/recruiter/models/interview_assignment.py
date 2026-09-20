@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -26,8 +26,8 @@ class InterviewAssignment(Base):
 
     __tablename__ = "interview_assignments"
     __table_args__ = (
-        UniqueConstraint("application_id", "user_id", "round",
-                         name="uq_interview_assignment_app_user_round"),
+        UniqueConstraint("application_id", "user_id", "round", "track",
+                         name="uq_interview_assignment_app_user_round_track"),
         Index("ix_interview_assignments_application_id", "application_id"),
         Index("ix_interview_assignments_user_id", "user_id"),
     )
@@ -43,6 +43,11 @@ class InterviewAssignment(Base):
     # `applications.interview_round` for the round currently in progress.
     round: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1",
+    )
+    # Which track within the round. Always "default" until phase 3; part of
+    # the unique constraint below.
+    track: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="default", server_default="default",
     )
     sheet: Mapped[dict] = mapped_column(JSON, nullable=False, default=empty_sheet)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
