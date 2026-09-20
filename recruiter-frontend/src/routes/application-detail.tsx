@@ -130,7 +130,11 @@ export default function ApplicationDetail() {
             />
           </TabsContent>
           <TabsContent value="interview">
-            <InterviewKitSection applicationId={id} canWrite={canWrite} />
+            <InterviewKitSection
+              applicationId={id}
+              canWrite={canWrite}
+              interviewRound={application.data.interview_round}
+            />
           </TabsContent>
         </Tabs>
       </div>

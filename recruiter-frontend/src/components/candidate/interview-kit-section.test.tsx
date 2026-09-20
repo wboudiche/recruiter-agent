@@ -17,7 +17,7 @@ afterAll(() => server.close());
 function mountWithKit(
   kit: unknown,
   capture: { body?: any; sheet?: any; submitted?: boolean } = {},
-  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[] } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number } = {},
 ) {
   const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
@@ -46,7 +46,7 @@ function mountWithKit(
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}<Toaster /></QueryClientProvider>
   );
-  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} /></Wrapper>);
+  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} interviewRound={opts.interviewRound} /></Wrapper>);
   return { ...result, qc };
 }
 
@@ -110,6 +110,20 @@ describe("InterviewKitSection", () => {
     await waitFor(() =>
       expect(screen.getByText("Why this role?")).toBeInTheDocument());
     expect(screen.getByText(/model unavailable/i)).toBeInTheDocument();
+  });
+
+  it("labels the round once an application has been reopened", async () => {
+    // Reopening resets every sheet to empty, which looks identical to a
+    // round that never happened unless the round is named.
+    mountWithKit(READY, {}, { interviewRound: 2 });
+
+    await waitFor(() => expect(screen.getByText(/round 2/i)).toBeInTheDocument());
+  });
+
+  it("does not label the round during the first one", async () => {
+    mountWithKit(READY, {}, { interviewRound: 1 });
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.queryByText(/round 1/i)).not.toBeInTheDocument();
   });
 
   it("renders questions with their source badge", async () => {

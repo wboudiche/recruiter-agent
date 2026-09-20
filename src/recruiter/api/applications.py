@@ -22,7 +22,8 @@ from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
-from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed
+from recruiter.models.interview_assignment import empty_sheet
+from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed, rows_in_round
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -269,6 +270,7 @@ def _to_read(
         hired_at=app_row.hired_at,
         rejected_at=app_row.rejected_at,
         rejection_reason=app_row.rejection_reason,
+        interview_round=app_row.interview_round,
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
@@ -303,6 +305,12 @@ def _validate_transition(current: Stage, target: Stage) -> None:
     """Enforce business rules. Raises HTTPException(409) on illegal transitions."""
     if current == Stage.HIRED:
         raise HTTPException(status_code=409, detail="cannot move from hired")
+    # Reopening for another interview round. Without this, a second
+    # interview could only be reached by rejecting the candidate and
+    # re-inviting them, since SCHEDULED is otherwise entered from INVITED
+    # alone — see the interview-rounds migration.
+    if (current, target) == (Stage.INTERVIEWED, Stage.SCHEDULED):
+        return
     if current in _FORWARD_STAGE_AFTER and target != Stage.REJECTED:
         expected = _FORWARD_STAGE_AFTER[current]
         if target != expected:
@@ -334,6 +342,36 @@ def _validate_transition(current: Stage, target: Stage) -> None:
         raise HTTPException(status_code=409, detail="already rejected")
 
 
+async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
+    """Reopen an interviewed application for another interview round.
+
+    The round that just closed is left exactly as it is — its sheets stay
+    submitted and immutable, the record of that conversation — and a fresh
+    set of rows is created for the same panel with empty sheets, so the
+    recruiter only touches the panel when round two is a different one.
+
+    The shared question list is deliberately NOT regenerated: the closed
+    round's answers are keyed to its question ids, and `is_frozen` spans
+    every round for exactly that reason. Only `closed_at` is cleared, so
+    the kit reads as open again without losing what was asked.
+    """
+    previous_round = app_row.interview_round
+    panel = rows_in_round(await load_assignments(session, app_row.id), previous_round)
+
+    app_row.interview_round = previous_round + 1
+    # The round is open again, so the application is no longer interviewed.
+    app_row.interviewed_at = None
+    for row in panel:
+        session.add(InterviewAssignment(
+            application_id=app_row.id,
+            user_id=row.user_id,
+            round=app_row.interview_round,
+            sheet=empty_sheet(),
+        ))
+    if app_row.interview_kit:
+        app_row.interview_kit = {**app_row.interview_kit, "closed_at": None}
+
+
 @router.patch("/applications/{application_id}", response_model=ApplicationRead)
 async def patch_application(
     application_id: int,
@@ -359,11 +397,15 @@ async def patch_application(
     schedule_kit_generation = False
     if payload.stage is not None:
         new_stage = Stage(payload.stage)
+        previous_stage = app_row.stage
         _validate_transition(app_row.stage, new_stage)
         app_row.stage = new_stage
         now = datetime.now(timezone.utc)
         if new_stage == Stage.VALIDATED:
             app_row.validated_at = now
+        elif new_stage == Stage.SCHEDULED and previous_stage == Stage.INTERVIEWED:
+            app_row.scheduled_at = now
+            await _open_next_round(session, app_row)
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
             # If a sheet was already submitted (a prior round on this same

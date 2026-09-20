@@ -11,13 +11,30 @@ from recruiter.models import Application, InterviewAssignment, Role, Stage, User
 from recruiter.schemas.interview import InterviewKit, InterviewSheet
 
 
+def rows_in_round(
+    rows: Iterable[InterviewAssignment], round_number: int,
+) -> list[InterviewAssignment]:
+    """The assignments belonging to one round, in their existing order."""
+    return [r for r in rows if r.round == round_number]
+
+
 def is_frozen(rows: Iterable[InterviewAssignment]) -> bool:
     """Once any sheet is submitted the question list must not lose rows,
-    or submitted feedback would silently lose its answers."""
+    or submitted feedback would silently lose its answers.
+
+    Deliberately spans EVERY round, unlike round completion below: the
+    question list lives once on the application and is shared by all
+    rounds, so round 1's submitted answers are keyed to ids that round 2
+    must not regenerate or remove. Pass every row, not just the live
+    round's.
+    """
     return any(r.submitted_at is not None for r in rows)
 
 
 def all_submitted(rows: Iterable[InterviewAssignment]) -> bool:
+    """Whether every row given has been submitted. Callers pass ONE round's
+    rows (see `rows_in_round`) — earlier rounds stay submitted forever and
+    would otherwise close the new round the instant it opened."""
     rows = list(rows)
     return bool(rows) and all(r.submitted_at is not None for r in rows)
 
@@ -27,17 +44,26 @@ def can_edit_questions(user: User) -> bool:
 
 
 def visible_sheets(
-    rows: Iterable[InterviewAssignment], *, user: User,
+    rows: Iterable[InterviewAssignment], *, user: User, current_round: int,
 ) -> list[InterviewAssignment]:
     """Blind until submitted: an interviewer sees only their own sheet
     until they submit. Submitting reveals their own sheet plus every OTHER
     sheet that has itself been submitted — drafts stay private to their
     author until submitted, even from someone who has already submitted
     their own. Recruiters and admins always see all; an unassigned viewer
-    sees none."""
+    sees none.
+
+    Recruiters and admins see every round, because earlier rounds are the
+    record of how the candidate reached this one. An interviewer sees only
+    the live round: their round-1 sheet is submitted, so the blind rule
+    would happily hand it back to them, but replaying an earlier round
+    while they judge this one is the anchoring the blind rule exists to
+    prevent.
+    """
     rows = list(rows)
     if can_edit_questions(user):
         return rows
+    rows = rows_in_round(rows, current_round)
     own = next((r for r in rows if r.user_id == user.id), None)
     if own is None:
         return []
@@ -116,7 +142,9 @@ async def close_round_if_complete(session: AsyncSession, app_row: Application) -
 
     if app_row.stage != Stage.SCHEDULED or not app_row.interview_kit:
         return False
-    rows = await load_assignments(session, app_row.id)
+    rows = rows_in_round(
+        await load_assignments(session, app_row.id), app_row.interview_round,
+    )
     if not all_submitted(rows):
         return False
     mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), datetime.now(UTC))

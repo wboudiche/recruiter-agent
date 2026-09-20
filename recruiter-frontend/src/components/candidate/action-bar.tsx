@@ -23,6 +23,7 @@ export function ActionBar({ application, candidateEmail }: Props) {
   const canMarkScheduled = stage === "invited";
   const canMarkInterviewed = stage === "scheduled";
   const canExtendOffer = stage === "interviewed";
+  const canReopenRound = stage === "interviewed";
   const canMarkHired = stage === "offer";
 
   return (
@@ -60,6 +61,16 @@ export function ActionBar({ application, candidateEmail }: Props) {
       {canExtendOffer && (
         <Button size="sm" onClick={m.extendOffer} disabled={m.isPending}>
           Extend offer
+        </Button>
+      )}
+      {canReopenRound && (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={m.reopenRound}
+          disabled={m.isPending}
+        >
+          Another round
         </Button>
       )}
       {canMarkHired && (

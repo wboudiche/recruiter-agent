@@ -27,6 +27,10 @@ const VERDICTS: { value: VerdictDecision; label: string }[] = [
 interface Props {
   applicationId: number;
   canWrite: boolean;
+  /** Which round is in progress. Labelled only past the first, where a
+   *  reset of every sheet is otherwise indistinguishable from a round
+   *  that never happened. */
+  interviewRound?: number;
 }
 
 // Ids minted client-side for newly-added questions. `Date.now()` alone can
@@ -47,7 +51,7 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.detail : fallback;
 }
 
-export function InterviewKitSection({ applicationId, canWrite }: Props) {
+export function InterviewKitSection({ applicationId, canWrite, interviewRound }: Props) {
   const { kit, sheets, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
     useInterviewKit(applicationId);
   const me = useCurrentUser();
@@ -325,7 +329,14 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
 
   return (
     <section className="space-y-3">
-      <h3 className="text-lg font-semibold">Interview kit</h3>
+      <h3 className="text-lg font-semibold">
+        Interview kit
+        {(interviewRound ?? 1) > 1 && (
+          <span className="ml-2 text-xs font-normal uppercase tracking-[0.18em] text-muted-foreground">
+            Round {interviewRound}
+          </span>
+        )}
+      </h3>
       {kit.status === "error" && (
         <p className="text-xs border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2">
           {kit.error ?? "Generation failed."} The questions below are the ones

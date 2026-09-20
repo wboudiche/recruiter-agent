@@ -53,6 +53,24 @@ describe("ActionBar — post-invite stage buttons", () => {
     expect(screen.queryByRole("button", { name: /mark as scheduled/i })).not.toBeInTheDocument();
   });
 
+  it("offers another interview round when interviewed", async () => {
+    // Without this, a second interview means rejecting the candidate and
+    // re-inviting them — see _open_next_round.
+    renderBar(baseApp({ stage: "interviewed" }));
+
+    await userEvent.click(screen.getByRole("button", { name: /another round/i }));
+
+    await waitFor(() => expect(apiMock).toHaveBeenCalled());
+    const [path, opts] = apiMock.mock.calls[0];
+    expect(path).toBe("/api/applications/1");
+    expect(opts).toMatchObject({ method: "PATCH", json: { stage: "scheduled" } });
+  });
+
+  it("does not offer another round before the first one has happened", () => {
+    renderBar(baseApp({ stage: "scheduled" }));
+    expect(screen.queryByRole("button", { name: /another round/i })).not.toBeInTheDocument();
+  });
+
   it("shows only \"Extend offer\" when interviewed", () => {
     renderBar(baseApp({ stage: "interviewed" }));
     expect(screen.getByRole("button", { name: /extend offer/i })).toBeInTheDocument();

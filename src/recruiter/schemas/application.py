@@ -30,6 +30,8 @@ class ApplicationRead(BaseModel):
     hired_at: datetime | None
     rejected_at: datetime | None
     rejection_reason: str | None = None
+    # Which interview round is in progress; 1 unless reopened.
+    interview_round: int = 1
     created_at: datetime
     updated_at: datetime
     awaiting_paste: bool = False

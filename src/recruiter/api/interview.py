@@ -27,6 +27,7 @@ from recruiter.pipeline.interview_sheets import (
     close_round_if_complete,
     is_frozen,
     prune_answers,
+    rows_in_round,
     visible_sheets,
 )
 from recruiter.schemas.interview import (
@@ -56,7 +57,10 @@ def _now() -> str:
 async def _sheets_for(
     session: AsyncSession, app_row: Application, user: User,
 ) -> list[SheetRead]:
-    rows = visible_sheets(await load_assignments(session, app_row.id), user=user)
+    rows = visible_sheets(
+        await load_assignments(session, app_row.id),
+        user=user, current_round=app_row.interview_round,
+    )
     if not rows:
         return []
     users = {u.id: u for u in (await session.execute(
@@ -257,7 +261,7 @@ async def patch_kit(
 
     if not can_edit_questions(user):
         # An assigned interviewer may append, and nothing else.
-        if user.id not in {r.user_id for r in rows}:
+        if user.id not in {r.user_id for r in rows_in_round(rows, app_row.interview_round)}:
             raise HTTPException(status_code=403, detail="not assigned to this interview")
         prefix = payload.questions[:len(stored_ids)]
         unchanged = [q.model_dump(exclude={"added_by", "answer", "rating"}) for q in prefix] == [
@@ -295,12 +299,16 @@ async def _own_assignment(
     """The caller's row, or 404. A recruiter/admin with no panel at all gets
     one created on the spot — that is what keeps the single-recruiter flow
     working with zero setup."""
-    rows = await load_assignments(session, app_row.id)
+    rows = rows_in_round(
+        await load_assignments(session, app_row.id), app_row.interview_round,
+    )
     own = next((r for r in rows if r.user_id == user.id), None)
     if own is not None:
         return own
     if not rows and can_edit_questions(user):
-        own = InterviewAssignment(application_id=app_row.id, user_id=user.id)
+        own = InterviewAssignment(
+            application_id=app_row.id, user_id=user.id, round=app_row.interview_round,
+        )
         session.add(own)
         await session.flush()
         return own
@@ -409,7 +417,9 @@ async def draft_kit_question(
         raise HTTPException(status_code=404, detail="application not found")
 
     if not can_edit_questions(user):
-        rows = await load_assignments(session, application_id)
+        rows = rows_in_round(
+            await load_assignments(session, application_id), app_row.interview_round,
+        )
         if user.id not in {r.user_id for r in rows}:
             raise HTTPException(status_code=403, detail="not assigned to this interview")
 
