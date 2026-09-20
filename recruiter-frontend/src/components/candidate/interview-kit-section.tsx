@@ -232,7 +232,13 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     );
   }
 
-  if (kit.status === "error") {
+  // Only take over the whole section when there is nothing else to show. A
+  // failed regeneration KEEPS the questions it already had (see
+  // run_generate_kit), and sheets may already hold answers against them —
+  // so an error over a populated kit is a banner, not a screen. Retry is
+  // recruiter-only, which made the bare screen a dead end for an
+  // interviewer: no questions, no sheet, no way out.
+  if (kit.status === "error" && kit.questions.length === 0) {
     return (
       <section className="space-y-2">
         <h3 className="text-lg font-semibold">Interview kit</h3>
@@ -320,6 +326,12 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   return (
     <section className="space-y-3">
       <h3 className="text-lg font-semibold">Interview kit</h3>
+      {kit.status === "error" && (
+        <p className="text-xs border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2">
+          {kit.error ?? "Generation failed."} The questions below are the ones
+          already on the kit.
+        </p>
+      )}
       <ul className="space-y-3">
         {draft.map((q, i) => {
           const mine = sheet.answers[q.id] ?? { answer: null, rating: null };

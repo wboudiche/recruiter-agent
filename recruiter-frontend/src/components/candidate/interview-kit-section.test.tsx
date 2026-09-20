@@ -78,6 +78,40 @@ describe("InterviewKitSection", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
+  it("still shows the questions when a kit with questions is in error", async () => {
+    // A failed regeneration keeps the questions it already had (see
+    // run_generate_kit). Rendering only the banner hides a live interview's
+    // questions — and the sheets beneath them — behind a message about a
+    // generation that failed.
+    mountWithKit({ ...READY, status: "error", error: "model unavailable" });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.getByText(/model unavailable/i)).toBeInTheDocument();
+  });
+
+  it("shows an interviewer the questions of an errored kit they cannot retry", async () => {
+    // The Retry button is recruiter-only, so for an interviewer the bare
+    // error screen is a dead end: no questions, no sheet, no way out.
+    mountWithKit(
+      { ...READY, status: "error", error: "model unavailable" },
+      {},
+      {
+        me: { id: 7, role: "viewer" },
+        canWrite: false,
+        sheets: [{ user_id: 7, name: "Panelist", email: "p@acme.com",
+                   sheet: { answers: {}, verdict: {} }, submitted_at: null }],
+        interviewers: [{ user_id: 7, name: "Panelist", email: "p@acme.com", submitted_at: null }],
+      },
+    );
+
+    // An interviewer cannot edit questions, so they render as text rather
+    // than as a textarea — hence getByText, not getByDisplayValue.
+    await waitFor(() =>
+      expect(screen.getByText("Why this role?")).toBeInTheDocument());
+    expect(screen.getByText(/model unavailable/i)).toBeInTheDocument();
+  });
+
   it("renders questions with their source badge", async () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());

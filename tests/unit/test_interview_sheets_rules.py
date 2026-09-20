@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from recruiter.models import InterviewAssignment, Role, User
 from recruiter.pipeline.interview_sheets import (
     all_submitted,
+    answered_question_ids,
     can_edit_questions,
     is_frozen,
     prune_answers,
@@ -58,6 +59,29 @@ def test_assigned_interviewer_sees_all_after_own_submit() -> None:
 def test_unassigned_viewer_sees_no_sheets() -> None:
     rows = [_row(1, True), _row(2, True)]
     assert visible_sheets(rows, user=_user(3, Role.VIEWER)) == []
+
+
+def test_answered_question_ids_unions_every_sheet() -> None:
+    """Feeds merge_regenerated: a question any interviewer has answered or
+    rated must keep its id through a regeneration."""
+    rows = [_row(1, False), _row(2, False)]
+    rows[0].sheet = {"answers": {"q1": {"answer": "yes", "rating": None}}}
+    rows[1].sheet = {"answers": {"q2": {"answer": None, "rating": "weak"}}}
+
+    assert answered_question_ids(rows) == {"q1", "q2"}
+
+
+def test_answered_question_ids_ignores_empty_and_untouched_answers() -> None:
+    """The client posts a row per rendered question, so blank answers are the
+    normal case — counting them would pin every question forever."""
+    rows = [_row(1, False)]
+    rows[0].sheet = {"answers": {
+        "blank": {"answer": "", "rating": None},
+        "untouched": {"answer": None, "rating": None},
+        "real": {"answer": "something", "rating": None},
+    }}
+
+    assert answered_question_ids(rows) == {"real"}
 
 
 def test_prune_drops_answers_for_questions_no_longer_in_kit() -> None:

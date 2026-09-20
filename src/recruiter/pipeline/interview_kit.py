@@ -4,6 +4,7 @@ Pure functions: no database, no LLM. The two rules that matter most in the
 feature live here, so they can be tested without either.
 """
 import uuid
+from collections.abc import Collection
 
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit, KitQuestion
 
@@ -49,6 +50,7 @@ def merge_regenerated(
     *,
     criteria_by_probe: list[str | None],
     now: str,
+    answered_ids: Collection[str] = (),
 ) -> InterviewKit:
     """Regenerate, keeping every question that already has an answer or a
     rating.
@@ -61,17 +63,29 @@ def merge_regenerated(
     replaced: baseline ones re-snapshot from the job's current baseline,
     probes are regenerated.
 
+    A question counts as answered two ways. `q.answer`/`q.rating` are the
+    LEGACY per-question fields, only ever set on kits recorded before
+    answers moved onto per-interviewer sheets. `answered_ids` carries the
+    current equivalent: the ids any interviewer's sheet has answered or
+    rated, which the caller reads off the assignment rows. Without the
+    second, this function preserves nothing at all on a modern kit —
+    regenerating would mint fresh probe ids and orphan every draft answer
+    keyed to the old ones.
+
     Questions maintain baseline-then-probe ordering within each group:
     answered baselines, unanswered baselines, answered probes, fresh probes.
     """
+    answered = set(answered_ids)
+
+    def _is_answered(q: KitQuestion) -> bool:
+        return q.answer is not None or q.rating is not None or q.id in answered
+
     # Separate answered/rated from untouched questions
     answered_baseline = [
-        q for q in existing.questions
-        if (q.answer is not None or q.rating is not None) and q.source == "baseline"
+        q for q in existing.questions if _is_answered(q) and q.source == "baseline"
     ]
     answered_probe = [
-        q for q in existing.questions
-        if (q.answer is not None or q.rating is not None) and q.source == "probe"
+        q for q in existing.questions if _is_answered(q) and q.source == "probe"
     ]
     answered_baseline_ids = {q.id for q in answered_baseline}
 

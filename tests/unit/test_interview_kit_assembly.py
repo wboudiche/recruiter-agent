@@ -133,3 +133,40 @@ def test_regeneration_maintains_baseline_then_probe_ordering() -> None:
     # Verify answered probe is present and fresh probe is there
     assert "Answered probe" in texts
     assert "Fresh probe" in texts
+
+
+def test_regeneration_keeps_a_probe_answered_only_in_a_sheet() -> None:
+    """Answers live on interviewer sheets now, not on the question. A probe
+    someone has already answered must survive regeneration WITH ITS ID — a
+    fresh id orphans their answer, which is keyed by question id."""
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="p-old1", text="Old probe", source="probe"),
+    ])
+
+    merged = merge_regenerated(
+        existing, _baseline(), ["Fresh probe"],
+        criteria_by_probe=[None], now=NOW, answered_ids={"p-old1"},
+    )
+
+    kept = next(q for q in merged.questions if q.id == "p-old1")
+    assert kept.text == "Old probe"
+    assert "Fresh probe" in [q.text for q in merged.questions]
+
+
+def test_regeneration_keeps_a_baseline_answered_only_in_a_sheet() -> None:
+    """Same guarantee for baselines: answered ones keep their recorded
+    wording rather than being re-snapshotted from the job underneath a
+    recorded answer."""
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="b1", text="Wording as asked", source="baseline"),
+    ])
+
+    merged = merge_regenerated(
+        existing, _baseline(), [],
+        criteria_by_probe=[], now=NOW, answered_ids={"b1"},
+    )
+
+    kept = next(q for q in merged.questions if q.id == "b1")
+    assert kept.text == "Wording as asked"
+    # b2 was never asked, so it still arrives from the job's current baseline.
+    assert any(q.id == "b2" for q in merged.questions)

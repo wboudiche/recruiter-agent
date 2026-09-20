@@ -22,6 +22,7 @@ from recruiter.models import Application, Candidate, InterviewAssignment, Job, U
 from recruiter.pipeline.interview_kit import build_kit, merge_regenerated
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
 from recruiter.pipeline.interview_sheets import (
+    answered_question_ids,
     can_edit_questions,
     close_round_if_complete,
     is_frozen,
@@ -106,6 +107,13 @@ async def run_generate_kit(
         # detect whether there was anything a late freeze could orphan.
         existing_raw = app_row.interview_kit or {}
         existing_questions = existing_raw.get("questions") or []
+        # The model call is the only thing inside the try: assembling the
+        # kit is deferred until after the lock below, so it can be built
+        # from a panel snapshot that is not already stale.
+        baseline: list[BaselineQuestion] = []
+        texts: list[str] = []
+        criteria_by_probe: list[str | None] = []
+        failure: str | None = None
         try:
             job = await session.get(Job, app_row.job_id)
             candidate = await session.get(Candidate, app_row.candidate_id)
@@ -120,34 +128,45 @@ async def run_generate_kit(
             )
             texts = [q.text for q in generated.questions]
             criteria_by_probe = [q.criterion for q in generated.questions]
-            if existing_questions:
-                kit = merge_regenerated(
-                    InterviewKit.model_validate(existing_raw), baseline, texts,
-                    criteria_by_probe=criteria_by_probe, now=_now(),
-                )
-            else:
-                kit = build_kit(baseline, texts,
-                                 criteria_by_probe=criteria_by_probe, now=_now())
         except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
             logger.warning("interview kit generation failed: %s", exc, exc_info=True)
+            failure = str(exc)[:500]
+
+        # Read the panel ONCE, under the row lock, after the model call —
+        # both things that can change across an LLM round trip are then
+        # decided from the same snapshot. `is_frozen` covers a sheet
+        # SUBMITTED meanwhile; `answered_question_ids` covers answers TYPED
+        # meanwhile, which the freeze does not, because it only begins at
+        # the first submit.
+        await session.refresh(app_row, with_for_update=True)
+        rows = await load_assignments(session, application_id)
+
+        if failure is not None:
             # Keep whatever questions the existing kit had rather than wipe
             # them: a failed regeneration must not erase recorded
             # answers/ratings just because the model call blew up.
-            if existing_questions:
-                kit = InterviewKit.model_validate(existing_raw).model_copy(
-                    update={"status": "error", "error": str(exc)[:500]}
+            kit = (
+                InterviewKit.model_validate(existing_raw).model_copy(
+                    update={"status": "error", "error": failure}
                 )
-            else:
-                kit = InterviewKit(status="error", error=str(exc)[:500])
+                if existing_questions
+                else InterviewKit(status="error", error=failure)
+            )
+        elif existing_questions:
+            kit = merge_regenerated(
+                InterviewKit.model_validate(existing_raw), baseline, texts,
+                criteria_by_probe=criteria_by_probe, now=_now(),
+                answered_ids=answered_question_ids(rows),
+            )
+        else:
+            kit = build_kit(baseline, texts,
+                             criteria_by_probe=criteria_by_probe, now=_now())
 
-        # Re-check under lock: an interviewer may have submitted their
-        # sheet — freezing the round — while this (an LLM round trip) was
-        # in flight. If so, and there was something to orphan, discard
-        # whatever was just computed, success or error, and restore the
-        # frozen kit to "ready" instead of overwriting it with a result
-        # computed from stale, now-frozen state.
-        await session.refresh(app_row, with_for_update=True)
-        rows = await load_assignments(session, application_id)
+        # An interviewer may have submitted their sheet — freezing the
+        # round — while the model call was in flight. If so, and there was
+        # something to orphan, discard whatever was just computed, success
+        # or error, and restore the frozen kit to "ready" instead of
+        # overwriting it with a result computed from stale, now-frozen state.
         if is_frozen(rows) and existing_questions:
             logger.warning(
                 "interview kit regeneration discarded: a sheet was submitted "

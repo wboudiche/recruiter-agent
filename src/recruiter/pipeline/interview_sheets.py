@@ -46,6 +46,24 @@ def visible_sheets(
     return [r for r in rows if r.user_id == own.user_id or r.submitted_at is not None]
 
 
+def answered_question_ids(rows: Iterable[InterviewAssignment]) -> set[str]:
+    """Every question id any interviewer has answered or rated.
+
+    Fed to `merge_regenerated` so a regeneration keeps those questions with
+    their ids intact. A sheet's answers are keyed by question id, so a
+    regenerated probe with a fresh id silently orphans whatever was typed
+    against the old one. The truthiness test matches `sheet_has_content`:
+    the client posts a row per rendered question, so blank and untouched
+    answers are the normal case and must not count.
+    """
+    out: set[str] = set()
+    for row in rows:
+        for qid, answer in ((row.sheet or {}).get("answers") or {}).items():
+            if (answer or {}).get("answer") or (answer or {}).get("rating"):
+                out.add(qid)
+    return out
+
+
 def prune_answers(sheet: InterviewSheet, question_ids: set[str]) -> InterviewSheet:
     """Drop answers for questions no longer in the kit. Dropping rather than
     rejecting means a recruiter removing a question while an interviewer is

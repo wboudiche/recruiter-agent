@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_llm
@@ -277,6 +277,99 @@ async def test_regeneration_in_flight_does_not_orphan_a_sheet_submitted_meanwhil
         kit = row.interview_kit
     assert kit["status"] == "ready"
     assert [q["id"] for q in kit["questions"]] == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_regeneration_keeps_a_question_an_unsubmitted_sheet_answered(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The freeze only starts at the FIRST submit. Before that, an
+    interviewer can have draft answers saved while a recruiter regenerates
+    — and a fresh probe id would orphan them, silently, because the next
+    sheet save prunes answers whose question is no longer in the kit."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        interviewer = User(email="drafter@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id,
+            sheet={"answers": {"q1": {"answer": "half-typed", "rating": None}}},
+            submitted_at=None,   # NOT submitted: the kit is not frozen
+        ))
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "generating", "questions": [_Q1]},
+            )
+        )
+        await session.commit()
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine,
+        llm=_fake_llm_with_one_question(), bus=EventBus(),
+    )
+
+    async with SessionLocal() as session:
+        kit = (await session.get(Application, app_id)).interview_kit
+    assert kit["status"] == "ready"
+    assert "q1" in [q["id"] for q in kit["questions"]], (
+        "the answered question was regenerated away, orphaning the draft answer"
+    )
+    # The regeneration still did its job alongside the preserved question.
+    assert len(kit["questions"]) > 1
+
+
+@pytest.mark.asyncio
+async def test_regeneration_keeps_a_question_answered_while_it_was_in_flight(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The narrow version of the case above: the answer is typed DURING the
+    model call. Deciding from a panel read taken before the round trip would
+    still drop the question, so the answered set is read under the same lock
+    as the freeze check, after generation."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        interviewer = User(email="midflight@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id, sheet={}, submitted_at=None,
+        ))
+        await session.execute(
+            update(Application).where(Application.id == app_id).values(
+                interview_kit={"status": "generating", "questions": [_Q1]},
+            )
+        )
+        await session.commit()
+
+    class _AnswersMidCall:
+        """Writes an answer from another session while the model 'thinks'."""
+
+        async def chat_structured(self, *a: object, **kw: object) -> GeneratedQuestions:
+            async with SessionLocal() as other:
+                row = (await other.execute(
+                    select(InterviewAssignment).where(
+                        InterviewAssignment.application_id == app_id)
+                )).scalars().one()
+                row.sheet = {"answers": {"q1": {"answer": "typed just now", "rating": None}}}
+                await other.commit()
+            return GeneratedQuestions(questions=[
+                GeneratedQuestion(text="A freshly generated probe.", criterion="reliability"),
+            ])
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine, llm=_AnswersMidCall(), bus=EventBus(),
+    )
+
+    async with SessionLocal() as session:
+        kit = (await session.get(Application, app_id)).interview_kit
+    assert "q1" in [q["id"] for q in kit["questions"]], (
+        "an answer typed during generation was orphaned"
+    )
 
 
 @pytest.mark.asyncio
