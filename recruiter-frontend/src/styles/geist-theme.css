@@ -1,58 +1,15 @@
-/* Editorial cinematic theme — oxblood ground, cream type, amber accent.
-   Scoped under .geist-theme so AppShell wiring stays stable. Fonts are
+/* Editorial cinematic theme — structure, typography and chrome.
+   Scoped under .geist-theme so AppShell wiring stays stable. The colour
+   tokens it consumes live in theme-palettes.css and are swapped by the
+   theme class on <html>; nothing here hard-codes a colour. Fonts are
    loaded from Google Fonts in index.html (Fraunces variable + Manrope). */
 
-/* ----- Palette ----- */
 .geist-theme {
-  /* Raw editorial colors (HSL triplets for shadcn-compatible vars) */
-  --ed-bg-deep: 8 12% 5%;            /* #0b0808 — near-black warmth */
-  --ed-bg: 8 14% 8%;                 /* slightly lifted off pure black */
-  --ed-wine: 350 52% 16%;            /* #3a1218 — oxblood */
-  --ed-cream: 36 56% 92%;            /* #f5ede0 — primary fg */
-  --ed-cream-dim: 36 18% 73%;        /* #c9bfae — muted fg */
-  --ed-amber: 41 47% 58%;            /* #c8a961 — accent */
-  --ed-amber-dim: 41 47% 58%;        /* same hue, used at low alpha */
-  --ed-hairline: 36 56% 92%;         /* cream at low alpha → border */
-
-  /* Stage / status palette (kept distinct so pipelines still read clearly) */
-  --stage-extracting: 38 92% 50%;
-  --stage-enriching:  271 81% 56%;
-  --stage-scored:     217 91% 60%;
-  --stage-validated:  142 71% 45%;
-  --stage-invited:    199 89% 48%;
-  --stage-scheduled:  173 80% 40%;
-  --stage-interviewed: 258 85% 66%;
-  --stage-offer:      300 65% 60%;
-  --stage-hired:      84 55% 45%;
-  --stage-rejected:   0 84% 60%;
-  --stage-sourced:    36 18% 73%;
-
-  /* shadcn tokens mapped onto the editorial palette */
-  --background: var(--ed-bg);
-  --foreground: var(--ed-cream);
-  --card: var(--ed-bg-deep);
-  --card-foreground: var(--ed-cream);
-  --popover: var(--ed-bg-deep);
-  --popover-foreground: var(--ed-cream);
-  --primary: var(--ed-cream);
-  --primary-foreground: var(--ed-bg-deep);
-  --secondary: 350 35% 12%;
-  --secondary-foreground: var(--ed-cream);
-  --muted: 8 14% 12%;
-  --muted-foreground: var(--ed-cream-dim);
-  --accent: var(--ed-amber);
-  --accent-foreground: var(--ed-bg-deep);
-  --destructive: 8 70% 50%;
-  --destructive-foreground: var(--ed-cream);
-  --border: 36 30% 25%;              /* low-chroma cream hairline */
-  --input: 36 30% 25%;
-  --ring: var(--ed-amber);
-  --radius: 0;                        /* hard editorial edges — no rounded corners */
-
   font-family: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
   font-feature-settings: "ss01";
   font-weight: 300;
   letter-spacing: 0.005em;
+  font-variant-numeric: tabular-nums;
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
   position: relative;
@@ -82,6 +39,27 @@
   opacity: 0.08;
   mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.7 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* On parchment the same gradients read as smudges at full strength, and the
+   grain turns to visible speckle — so both are pulled back rather than
+   dropped. The construction stays identical, which keeps the two themes
+   recognisably the same surface. */
+html.light .geist-theme::before {
+  background:
+    radial-gradient(70% 80% at 12% 8%,  hsl(var(--ed-amber) / 0.06) 0%, transparent 55%),
+    radial-gradient(80% 70% at 92% 96%, hsl(var(--ed-wine)  / 0.10) 0%, transparent 60%),
+    linear-gradient(160deg, hsl(var(--ed-bg-deep)) 0%, hsl(var(--ed-bg)) 50%, hsl(var(--ed-bg-deep)) 100%);
+}
+
+html.light .geist-theme::after {
+  /* The dark-mode grain is WHITE noise under `overlay`, which is inert on a
+     near-white ground — screen-blending white onto parchment changes nothing.
+     Light mode therefore needs its own BLACK noise under `multiply` to get
+     the same tooth. Same turbulence, inverted colour matrix. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.7 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.045;
+  mix-blend-mode: multiply;
 }
 
 /* ----- Typography: serif display, sans body ----- */
@@ -117,11 +95,6 @@
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: hsl(var(--ed-amber));
-}
-
-/* Tabular numerics across all scoring/score contexts */
-.geist-theme {
-  font-variant-numeric: tabular-nums;
 }
 
 /* ----- Inputs / textareas / selects: hairline focus ring ----- */

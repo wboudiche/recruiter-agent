@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
+import { useTheme } from "@/hooks/use-theme";
 import { useSSE } from "@/lib/sse";
 import IndexRedirect from "@/routes/index";
 import JobsList from "@/routes/jobs-list";
@@ -18,6 +19,13 @@ interface AppProps {
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
 });
+
+/* Sonner renders into a portal outside .geist-theme, so it picks its own
+   palette rather than inheriting ours — it has to be told which one. */
+function ThemedToaster() {
+  const { theme } = useTheme();
+  return <Toaster richColors closeButton theme={theme} />;
+}
 
 function SSEMounter() {
   useSSE();
@@ -43,7 +51,7 @@ export default function App({ noBrowserRouter = false }: AppProps = {}) {
     <QueryClientProvider client={queryClient}>
       <SSEMounter />
       {noBrowserRouter ? tree : <BrowserRouter>{tree}</BrowserRouter>}
-      <Toaster richColors closeButton theme="dark" />
+      <ThemedToaster />
     </QueryClientProvider>
   );
 }

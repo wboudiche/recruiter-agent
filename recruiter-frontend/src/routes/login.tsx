@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { api, ApiError } from "@/lib/api";
 
 interface AuthMethods {
@@ -21,17 +22,22 @@ function safeNextPath(value: string): string {
   return value;
 }
 
-// Editorial cinematic styling — kept in-file so the aesthetic doesn't bleed
-// into the rest of the app, which uses the conservative shadcn palette.
+// Editorial cinematic styling — the layout and motion are kept in-file so the
+// aesthetic doesn't bleed into the rest of the app. The COLOURS, though, come
+// from theme-palettes.css via <html>, so this page follows the theme toggle
+// like every other route. (It used to redeclare --ed-* as hex on :root, which
+// both froze it to dark and leaked those names app-wide.)
+//
+// The shared tokens are bare HSL triplets, not colours, so they need hsl()
+// wrapping at each use. These local aliases do it once.
 const STYLE = `
-:root {
-  --ed-bg: #0b0808;
-  --ed-wine: #3a1218;
-  --ed-cream: #f5ede0;
-  --ed-cream-dim: #c9bfae;
-  --ed-amber: #c8a961;
-  --ed-amber-dim: rgba(200, 169, 97, 0.35);
-  --ed-hairline: rgba(245, 237, 224, 0.14);
+.ed-page, .ed-loading {
+  --ink: hsl(var(--ed-cream));
+  --ink-dim: hsl(var(--ed-cream-dim));
+  --gold: hsl(var(--ed-amber));
+  --gold-dim: hsl(var(--ed-amber) / 0.35);
+  --hairline: hsl(var(--ed-cream) / 0.14);
+  --ground: hsl(var(--ed-bg));
 }
 
 .ed-page {
@@ -39,7 +45,7 @@ const STYLE = `
   width: 100%;
   position: relative;
   overflow: hidden;
-  color: var(--ed-cream);
+  color: var(--ink);
   font-family: "Manrope", "Helvetica Neue", system-ui, sans-serif;
   font-weight: 300;
   letter-spacing: 0.005em;
@@ -61,9 +67,9 @@ const STYLE = `
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(60% 80% at 18% 18%, rgba(200, 169, 97, 0.18) 0%, transparent 60%),
-    radial-gradient(80% 60% at 82% 90%, rgba(58, 18, 24, 0.85) 0%, transparent 70%),
-    linear-gradient(135deg, rgba(11, 8, 8, 0.92) 0%, rgba(11, 8, 8, 0.6) 45%, rgba(11, 8, 8, 0.95) 100%);
+    radial-gradient(60% 80% at 18% 18%, hsl(var(--ed-amber) / 0.18) 0%, transparent 60%),
+    radial-gradient(80% 60% at 82% 90%, hsl(var(--ed-wine) / 0.85) 0%, transparent 70%),
+    linear-gradient(135deg, hsl(var(--ed-bg-deep) / 0.92) 0%, hsl(var(--ed-bg-deep) / 0.6) 45%, hsl(var(--ed-bg-deep) / 0.95) 100%);
   z-index: -2;
 }
 
@@ -90,7 +96,7 @@ const STYLE = `
 
 .ed-hairline-top, .ed-hairline-bot {
   height: 1px;
-  background: linear-gradient(to right, transparent, var(--ed-hairline) 12%, var(--ed-hairline) 88%, transparent);
+  background: linear-gradient(to right, transparent, var(--hairline) 12%, var(--hairline) 88%, transparent);
 }
 
 .ed-topbar, .ed-botbar {
@@ -101,7 +107,7 @@ const STYLE = `
   font-size: 11px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
 }
 
 .ed-wordmark {
@@ -111,10 +117,10 @@ const STYLE = `
   font-size: 18px;
   letter-spacing: 0;
   text-transform: none;
-  color: var(--ed-cream);
+  color: var(--ink);
 }
 .ed-wordmark .dot {
-  color: var(--ed-amber);
+  color: var(--gold);
   margin: 0 6px;
 }
 
@@ -135,7 +141,7 @@ const STYLE = `
   font-size: 11px;
   letter-spacing: 0.32em;
   text-transform: uppercase;
-  color: var(--ed-amber);
+  color: var(--gold);
   margin-bottom: 18px;
   display: inline-flex;
   align-items: center;
@@ -145,7 +151,7 @@ const STYLE = `
   content: "";
   width: 28px;
   height: 1px;
-  background: var(--ed-amber);
+  background: var(--gold);
   display: inline-block;
 }
 
@@ -159,15 +165,15 @@ const STYLE = `
   font-size: clamp(56px, 8vw, 112px);
   line-height: 0.92;
   letter-spacing: -0.035em;
-  color: var(--ed-cream);
+  color: var(--ink);
   margin: 0;
 }
 .ed-headline .accent {
-  color: var(--ed-amber);
+  color: var(--gold);
   font-style: italic;
 }
 .ed-headline .stroke {
-  -webkit-text-stroke: 1.5px var(--ed-cream);
+  -webkit-text-stroke: 1.5px var(--ink);
   color: transparent;
   font-style: italic;
 }
@@ -177,7 +183,7 @@ const STYLE = `
   max-width: 460px;
   font-size: 14px;
   line-height: 1.5;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
   font-weight: 300;
 }
 
@@ -189,7 +195,7 @@ const STYLE = `
   font-size: 10px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
 }
 .ed-meta strong {
   display: block;
@@ -199,7 +205,7 @@ const STYLE = `
   font-size: 20px;
   letter-spacing: 0;
   text-transform: none;
-  color: var(--ed-cream);
+  color: var(--ink);
   margin-top: 4px;
 }
 
@@ -213,27 +219,27 @@ const STYLE = `
 .ed-card {
   position: relative;
   padding: 28px 32px;
-  background: linear-gradient(180deg, rgba(11, 8, 8, 0.55) 0%, rgba(11, 8, 8, 0.75) 100%);
-  border: 1px solid var(--ed-amber-dim);
+  background: linear-gradient(180deg, hsl(var(--ed-bg-deep) / 0.55) 0%, hsl(var(--ed-bg-deep) / 0.75) 100%);
+  border: 1px solid var(--gold-dim);
   backdrop-filter: blur(14px) saturate(120%);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
   box-shadow:
-    0 30px 80px -30px rgba(0, 0, 0, 0.7),
-    inset 0 1px 0 rgba(245, 237, 224, 0.06);
+    0 30px 80px -30px hsl(var(--ed-shadow) / var(--ed-shadow-strength)),
+    inset 0 1px 0 hsl(var(--ed-cream) / 0.06);
 }
 .ed-card::before {
   content: "";
   position: absolute;
   top: -1px; left: -1px; right: -1px;
   height: 1px;
-  background: linear-gradient(to right, transparent, var(--ed-amber), transparent);
+  background: linear-gradient(to right, transparent, var(--gold), transparent);
 }
 
 .ed-card-label {
   font-size: 10px;
   letter-spacing: 0.36em;
   text-transform: uppercase;
-  color: var(--ed-amber);
+  color: var(--gold);
   margin-bottom: 8px;
 }
 .ed-card-title {
@@ -254,15 +260,15 @@ const STYLE = `
   font-size: 10px;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
   margin-bottom: 8px;
 }
 .ed-input {
   width: 100%;
   background: transparent;
   border: none;
-  border-bottom: 1px solid rgba(245, 237, 224, 0.2);
-  color: var(--ed-cream);
+  border-bottom: 1px solid hsl(var(--ed-cream) / 0.2);
+  color: var(--ink);
   font-family: "Manrope", sans-serif;
   font-size: 15px;
   font-weight: 300;
@@ -272,28 +278,73 @@ const STYLE = `
   transition: border-color 200ms ease;
 }
 .ed-input:focus {
-  border-bottom-color: var(--ed-amber);
+  border-bottom-color: var(--gold);
 }
 .ed-input::placeholder {
-  color: rgba(245, 237, 224, 0.3);
+  color: hsl(var(--ed-cream) / 0.3);
   font-style: italic;
+}
+
+/* ----- Light mode -----
+   The photo and its tint were built to sit under a near-black wash. On
+   parchment the same layers turn the page muddy, so the photo drops back and
+   the tint inverts into a light wash. Structure is untouched. */
+html.light .ed-bg-photo {
+  opacity: 0.16;
+  filter: grayscale(0.55) contrast(1.02);
+}
+
+html.light .ed-bg-tint {
+  background:
+    radial-gradient(60% 80% at 18% 18%, hsl(var(--ed-amber) / 0.10) 0%, transparent 60%),
+    radial-gradient(80% 60% at 82% 90%, hsl(var(--ed-wine) / 0.14) 0%, transparent 70%),
+    linear-gradient(135deg, hsl(var(--ed-bg-deep) / 0.94) 0%, hsl(var(--ed-bg) / 0.86) 45%, hsl(var(--ed-bg-deep) / 0.96) 100%);
+}
+
+html.light .ed-grain {
+  /* White noise under 'overlay' is inert on a light ground — see the same
+     swap in geist-theme.css. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.7 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply;
+  opacity: 0.05;
+}
+
+.ed-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ed-theme-toggle button {
+  height: 26px;
+  width: 26px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  transition: border-color 200ms ease, color 200ms ease;
+}
+.ed-theme-toggle button:hover {
+  border-color: var(--gold);
+  background: transparent;
 }
 
 .ed-error {
   font-family: "Fraunces", serif;
   font-style: italic;
   font-size: 13px;
-  color: var(--ed-amber);
+  color: var(--gold);
   margin: -6px 0 18px;
   padding-left: 14px;
-  border-left: 1px solid var(--ed-amber);
+  border-left: 1px solid var(--gold);
 }
 
 .ed-submit {
   width: 100%;
   padding: 13px 24px;
-  background: var(--ed-cream);
-  color: var(--ed-bg);
+  background: var(--ink);
+  color: var(--ground);
   border: none;
   font-family: "Manrope", sans-serif;
   font-size: 11px;
@@ -307,7 +358,7 @@ const STYLE = `
   transition: background 200ms ease, color 200ms ease, letter-spacing 250ms ease;
 }
 .ed-submit:hover:not(:disabled) {
-  background: var(--ed-amber);
+  background: var(--gold);
   letter-spacing: 0.38em;
 }
 .ed-submit:disabled {
@@ -328,7 +379,7 @@ const STYLE = `
   align-items: center;
   gap: 14px;
   margin: 18px 0 12px;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
   font-size: 10px;
   letter-spacing: 0.4em;
   text-transform: uppercase;
@@ -337,15 +388,15 @@ const STYLE = `
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--ed-hairline);
+  background: var(--hairline);
 }
 
 .ed-sso {
   width: 100%;
   padding: 11px 24px;
   background: transparent;
-  color: var(--ed-cream);
-  border: 1px solid var(--ed-hairline);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
   font-family: "Manrope", sans-serif;
   font-size: 11px;
   font-weight: 500;
@@ -355,8 +406,8 @@ const STYLE = `
   transition: border-color 200ms ease, color 200ms ease;
 }
 .ed-sso:hover {
-  border-color: var(--ed-amber);
-  color: var(--ed-amber);
+  border-color: var(--gold);
+  color: var(--gold);
 }
 
 .ed-fineprint {
@@ -364,11 +415,11 @@ const STYLE = `
   font-family: "Fraunces", serif;
   font-style: italic;
   font-size: 11px;
-  color: var(--ed-cream-dim);
+  color: var(--ink-dim);
   line-height: 1.5;
 }
 .ed-fineprint .num {
-  color: var(--ed-amber);
+  color: var(--gold);
   font-style: normal;
   font-family: "Manrope", sans-serif;
   letter-spacing: 0.16em;
@@ -392,8 +443,8 @@ const STYLE = `
   font-family: "Fraunces", serif;
   font-style: italic;
   font-size: 18px;
-  color: var(--ed-cream-dim);
-  background: var(--ed-bg);
+  color: var(--ink-dim);
+  background: var(--ground);
 }
 
 @media (max-width: 820px) {
@@ -485,7 +536,12 @@ export default function Login() {
                   Agent
                 </span>
               </span>
-              <span>Issue №01 · MMXXVI</span>
+              <span className="ed-topbar-right">
+                <span>Issue №01 · MMXXVI</span>
+                <span className="ed-theme-toggle">
+                  <ThemeToggle />
+                </span>
+              </span>
             </div>
             <div className="ed-hairline-top" />
           </div>
