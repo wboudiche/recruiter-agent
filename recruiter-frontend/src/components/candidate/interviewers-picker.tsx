@@ -64,7 +64,7 @@ export function InterviewersPicker({ applicationId, canWrite }: Props) {
           className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs"
         >
           {i.name ?? i.email}
-          {i.submitted_at && <span aria-label="submitted" className="text-emerald-400">✓</span>}
+          {i.submitted_at && <span aria-label="submitted" className="text-success">✓</span>}
         </span>
       ))}
       {canWrite && (

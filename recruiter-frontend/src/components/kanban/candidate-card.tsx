@@ -101,7 +101,7 @@ export function CandidateCard({
     <Card
       ref={setNodeRef}
       style={style}
-      className={`${compact ? "p-1.5" : "p-3"} ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""} ${awaitingPaste ? "border-yellow-500 border-2" : ""}${selected ? " ring-2 ring-primary/50" : ""}`}
+      className={`${compact ? "p-1.5" : "p-3"} ${isDragging ? "opacity-50" : ""} ${isDraggable ? "cursor-grab" : ""} ${awaitingPaste ? "border-warning-line border-2" : ""}${selected ? " ring-2 ring-primary/50" : ""}`}
       {...(isDraggable ? listeners : {})}
       {...(isDraggable ? attributes : {})}
     >
@@ -130,7 +130,7 @@ export function CandidateCard({
         {!compact && awaitingPaste && (
           <Badge
             variant="outline"
-            className="border-yellow-500 text-yellow-700 bg-yellow-50"
+            className="border-warning-line text-warning bg-warning-soft"
           >
             Needs profile
           </Badge>

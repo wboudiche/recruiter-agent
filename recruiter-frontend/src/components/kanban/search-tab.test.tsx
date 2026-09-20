@@ -88,8 +88,9 @@ describe("SearchTab", () => {
   });
 
   it("gives the error banner a readable text colour", async () => {
-    // bg-yellow-50 is near-white; with no text colour the copy inherits the
-    // theme's cream foreground and lands at ~1.05:1 contrast — invisible.
+    // With no text colour the copy inherits --foreground, which is cream in
+    // dark and ink in light, and vanishes against a fixed wash. The warning
+    // trio pairs text with its own background so both themes hold.
     server.use(
       http.post("http://localhost:8000/api/sourcing/search", () =>
         HttpResponse.json({
@@ -107,8 +108,8 @@ describe("SearchTab", () => {
     fireEvent.click(screen.getByRole("button", { name: /^search$/i }));
 
     const banner = (await screen.findByText(/every engine blocked/i)).closest("div")!;
-    expect(banner.className).toMatch(/bg-yellow-50/);
-    expect(banner.className).toMatch(/text-yellow-\d{3}/);
+    expect(banner.className).toMatch(/bg-warning-soft/);
+    expect(banner.className).toMatch(/text-warning/);
   });
 
   it("renders 'No results found' empty state when both arrays are empty", async () => {

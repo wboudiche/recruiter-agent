@@ -4,9 +4,9 @@ import { Button } from "@/components/ui/button";
 import type { KitQuestion, Rating, SheetRead, VerdictDecision } from "@/hooks/use-interview-kit";
 
 const RATING_CLASS: Record<Rating, string> = {
-  strong: "border-emerald-500/60 text-emerald-300",
-  adequate: "border-amber-500/60 text-amber-300",
-  weak: "border-red-500/60 text-red-300",
+  strong: "border-success-line text-success",
+  adequate: "border-warning-line text-warning",
+  weak: "border-danger-line text-danger",
 };
 
 const VERDICT_LABEL: Record<VerdictDecision, string> = {
@@ -17,6 +17,7 @@ interface Props {
   questions: KitQuestion[];
   sheets: SheetRead[];
 }
+
 
 export function FeedbackTable({ questions, sheets }: Props) {
   const [showUnrated, setShowUnrated] = useState(false);

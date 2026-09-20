@@ -199,7 +199,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
     return (
       <section className="space-y-2">
         <h3 className="text-lg font-semibold">Interview kit</h3>
-        <p className="text-xs border border-red-400 bg-red-50 text-red-900 rounded p-2">
+        <p className="text-xs border border-danger-line bg-danger-soft text-danger rounded p-2">
           Couldn't load the interview kit.
         </p>
         <Button variant="outline" onClick={() => refetch()}>Retry</Button>
@@ -246,7 +246,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
     return (
       <section className="space-y-2">
         <h3 className="text-lg font-semibold">Interview kit</h3>
-        <p className="text-xs border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2">
+        <p className="text-xs border border-warning-line bg-warning-soft text-warning rounded p-2">
           {kit.error ?? "Generation failed."}
         </p>
         {canWrite && (
@@ -338,7 +338,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
         )}
       </h3>
       {kit.status === "error" && (
-        <p className="text-xs border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2">
+        <p className="text-xs border border-warning-line bg-warning-soft text-warning rounded p-2">
           {kit.error ?? "Generation failed."} The questions below are the ones
           already on the kit.
         </p>
@@ -490,7 +490,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
               variant="outline"
               onClick={() => saveAll()}
               data-dirty={isDirty}
-              className={isDirty ? "border-amber-400 text-amber-400" : undefined}
+              className={isDirty ? "border-warning-line text-warning" : undefined}
               disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
             >
               {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}

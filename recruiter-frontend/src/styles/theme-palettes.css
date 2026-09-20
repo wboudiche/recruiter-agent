@@ -71,6 +71,20 @@ html.dark {
   /* Modal scrim. */
   --ed-scrim: 0 0% 0%;
   --ed-scrim-strength: 0.8;
+
+  /* Status colours for banners, pills and inline notices. Each is a trio:
+     the type colour, the wash it sits on, and its hairline. Components use
+     these instead of raw Tailwind palette steps, which are fixed to one
+     ground and go unreadable on the other. */
+  --warning: 38 92% 62%;
+  --warning-soft: 38 55% 13%;
+  --warning-line: 38 65% 34%;
+  --danger: 0 84% 68%;
+  --danger-soft: 0 55% 13%;
+  --danger-line: 0 65% 36%;
+  --success: 152 58% 56%;
+  --success-soft: 152 45% 11%;
+  --success-line: 152 45% 30%;
 }
 
 /* ----- Light: warm parchment ground, oxblood ink, darkened amber -----
@@ -131,4 +145,17 @@ html.light {
      not as focus. Still dims enough to push the page behind the dialog. */
   --ed-scrim: 24 18% 30%;
   --ed-scrim-strength: 0.42;
+
+  /* Status trio on parchment: the type colours are darkened to clear AA on
+     their own wash, and the washes are tinted just far enough off the
+     ground to read as a panel rather than a stain. */
+  --warning: 35 95% 26%;
+  --warning-soft: 44 70% 89%;
+  --warning-line: 40 55% 62%;
+  --danger: 0 72% 38%;
+  --danger-soft: 8 70% 93%;
+  --danger-line: 6 50% 70%;
+  --success: 152 70% 22%;
+  --success-soft: 150 40% 90%;
+  --success-line: 150 35% 64%;
 }

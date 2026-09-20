@@ -31,4 +31,5 @@ describe("FeedbackTable", () => {
     await userEvent.click(screen.getByRole("button", { name: /show 1 unrated/i }));
     expect(screen.getByRole("row", { name: /How\?/ })).toBeInTheDocument();
   });
+
 });

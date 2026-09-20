@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -42,5 +42,32 @@ describe("theme palettes", () => {
       expect(src, file).not.toMatch(/bg-black\//);
       expect(src, file).toMatch(/--ed-scrim/);
     }
+  });
+
+  it("never uses a raw palette colour that only works in one theme", () => {
+    // A bare `text-red-600` is a fixed colour: tuned for one ground, wrong on
+    // the other. Either use a semantic token (text-danger, bg-warning-soft),
+    // which flips with the palette, or pair the class with a `dark:` variant
+    // on the same line so both grounds are covered explicitly.
+    const RAW = /\b(?:bg|text|border)-(?:yellow|red|green|blue|amber|emerald|rose|orange|sky|violet|purple)-\d{2,3}\b/;
+    const offenders: string[] = [];
+
+    function walk(dir: string) {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry);
+        if (statSync(full).isDirectory()) {
+          walk(full);
+        } else if (entry.endsWith(".tsx") && !entry.includes(".test.")) {
+          readFileSync(full, "utf8").split("\n").forEach((line, i) => {
+            if (RAW.test(line) && !line.includes("dark:")) {
+              offenders.push(`${full}:${i + 1}`);
+            }
+          });
+        }
+      }
+    }
+    walk(join(__dirname, ".."));
+
+    expect(offenders).toEqual([]);
   });
 });
