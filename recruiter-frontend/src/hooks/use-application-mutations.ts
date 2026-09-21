@@ -15,6 +15,7 @@ interface PatchPayload {
     | "hired";
   notes?: string;
   rejection_reason?: string;
+  interview_template_id?: number | null;
 }
 
 export function useApplicationMutations(applicationId: number, jobId?: number) {
@@ -52,12 +53,20 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
         rejection_reason: reason || "",
       }),
     unreject: () => patch.mutate({ stage: "scored" }),
-    markScheduled: () => patch.mutate({ stage: "scheduled" }),
+    // `undefined` omits interview_template_id so the server applies the
+    // job's default; a number or null is sent as an explicit choice.
+    markScheduled: (templateId?: number | null) =>
+      patch.mutate(templateId === undefined
+        ? { stage: "scheduled" }
+        : { stage: "scheduled", interview_template_id: templateId }),
     markInterviewed: () => patch.mutate({ stage: "interviewed" }),
     // Reopen an interviewed candidate for another round. Same PATCH as
     // markScheduled: the server distinguishes the two by the stage it is
     // leaving, and only bumps the round when leaving `interviewed`.
-    reopenRound: () => patch.mutate({ stage: "scheduled" }),
+    reopenRound: (templateId?: number | null) =>
+      patch.mutate(templateId === undefined
+        ? { stage: "scheduled" }
+        : { stage: "scheduled", interview_template_id: templateId }),
     extendOffer: () => patch.mutate({ stage: "offer" }),
     markHired: () => patch.mutate({ stage: "hired" }),
     isPending: patch.isPending,

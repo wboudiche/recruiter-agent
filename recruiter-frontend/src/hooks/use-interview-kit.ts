@@ -62,6 +62,7 @@ export interface InterviewKit {
 interface KitResponse {
   kit: InterviewKit | null;
   sheets: SheetRead[];
+  template_name?: string | null;
 }
 
 export function useInterviewKit(applicationId: number) {
@@ -134,6 +135,7 @@ export function useInterviewKit(applicationId: number) {
     draftQuestion,
     kit: query.data?.kit ?? null,
     sheets: query.data?.sheets ?? [],
+    templateName: query.data?.template_name ?? null,
     isLoading: query.isLoading,
     // A fetch failure (e.g. a 500) must be distinguishable from "no kit
     // exists yet" — collapsing both to `kit: null` makes a real error

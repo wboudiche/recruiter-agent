@@ -52,7 +52,7 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function InterviewKitSection({ applicationId, canWrite, interviewRound }: Props) {
-  const { kit, sheets, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
+  const { kit, sheets, templateName, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
     useInterviewKit(applicationId);
   const me = useCurrentUser();
   const { interviewers } = useInterviewers(applicationId);
@@ -367,13 +367,20 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
     else doSubmit();
   }
 
+  // "Round 2 · RH screen". The round is labelled only past the first, as
+  // before; the template whenever the kit was built from one.
+  const headerLabel = [
+    (interviewRound ?? 1) > 1 ? `Round ${interviewRound}` : null,
+    templateName,
+  ].filter(Boolean).join(" · ");
+
   return (
     <section className="space-y-3">
       <h3 className="text-lg font-semibold">
         Interview kit
-        {(interviewRound ?? 1) > 1 && (
+        {headerLabel && (
           <span className="ml-2 text-xs font-normal uppercase tracking-[0.18em] text-muted-foreground">
-            Round {interviewRound}
+            {headerLabel}
           </span>
         )}
       </h3>

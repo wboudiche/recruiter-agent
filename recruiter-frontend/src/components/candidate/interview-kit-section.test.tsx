@@ -17,14 +17,14 @@ afterAll(() => server.close());
 function mountWithKit(
   kit: unknown,
   capture: { body?: any; sheet?: any; submitted?: boolean } = {},
-  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number; templateName?: string } = {},
 ) {
   const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
     http.get("http://localhost:8000/api/auth/me", () =>
       HttpResponse.json({ id: me.id, email: "me@acme.com", name: "Me", picture: null, role: me.role })),
     http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
-      HttpResponse.json({ kit, sheets: opts.sheets ?? [] })),
+      HttpResponse.json({ kit, sheets: opts.sheets ?? [], template_name: opts.templateName ?? null })),
     http.patch("http://localhost:8000/api/applications/1/interview-kit", async ({ request }) => {
       capture.body = await request.json();
       return HttpResponse.json({ kit, sheets: opts.sheets ?? [] });
@@ -118,6 +118,16 @@ describe("InterviewKitSection", () => {
     mountWithKit(READY, {}, { interviewRound: 2 });
 
     await waitFor(() => expect(screen.getByText(/round 2/i)).toBeInTheDocument());
+  });
+
+  it("names the template the round was built from", async () => {
+    mountWithKit(
+      { status: "ready", questions: [{ id: "q1", text: "Why us?", source: "baseline",
+                                       answer: null, rating: null }] },
+      {},
+      { interviewRound: 2, templateName: "RH screen" },
+    );
+    expect(await screen.findByText("Round 2 · RH screen")).toBeInTheDocument();
   });
 
   it("does not label the round during the first one", async () => {
