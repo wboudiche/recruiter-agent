@@ -16,6 +16,7 @@ from recruiter.config import get_config
 PREVIOUS = "b8f3d1a20c47"   # the rounds migration
 CURRENT = "c1a7e05b3f92"    # migration A
 LATEST = "d4b8c1f60a37"     # migration B: drops applications.interview_kit
+TEMPLATES = "e6f2a9c4b1d3"  # migration C: interview templates
 
 
 def _alembic(monkeypatch, sync_dsn: str) -> Config:
@@ -185,3 +186,78 @@ def test_dropping_the_blob_and_rebuilding_it(postgres_container, monkeypatch) ->
     # inside `questions`, not just the seven top-level kit fields.
     assert blob["questions"][0]["answer"] == "legacy"
     assert blob["questions"][0]["rating"] == "strong"
+
+
+def test_templates_migration_is_additive_and_reversible(postgres_container,
+                                                        monkeypatch) -> None:
+    """Existing kits must come through with no template — the "nothing
+    changes until someone creates a template" guarantee — and the
+    downgrade must leave them intact."""
+    sync_dsn = postgres_container.get_connection_url()
+    engine = sa.create_engine(sync_dsn)
+    with engine.begin() as conn:
+        conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+
+    cfg = _alembic(monkeypatch, sync_dsn)
+    command.upgrade(cfg, LATEST)
+    with engine.begin() as conn:
+        conn.execute(sa.text(
+            "INSERT INTO jobs (title, description, criteria, status, created_at,"
+            " updated_at) VALUES ('J','d','[]','open',now(),now())"))
+        conn.execute(sa.text(
+            "INSERT INTO candidates (source_type, full_name, skills, experience,"
+            " education, links, created_at, updated_at)"
+            " VALUES ('paste','C','[]','[]','[]','[]',now(),now())"))
+        conn.execute(sa.text(
+            "INSERT INTO applications (job_id, candidate_id, stage,"
+            " interview_round, created_at, updated_at)"
+            " SELECT (SELECT id FROM jobs LIMIT 1),"
+            " (SELECT id FROM candidates LIMIT 1),"
+            " 'scheduled', 1, now(), now()"))
+        conn.execute(sa.text(
+            "INSERT INTO interview_kits (application_id, round, track,"
+            " questions, status, created_at, updated_at)"
+            " SELECT id, 1, 'default',"
+            " '[{\"id\":\"b1\",\"text\":\"Why?\",\"source\":\"baseline\"}]',"
+            " 'ready', now(), now() FROM applications LIMIT 1"))
+
+    command.upgrade(cfg, TEMPLATES)
+    with engine.begin() as conn:
+        kit = conn.execute(sa.text(
+            "SELECT template_id, template_name, template_snapshot, questions"
+            " FROM interview_kits")).mappings().one()
+        job_default = conn.execute(sa.text(
+            "SELECT default_interview_template_id FROM jobs")).scalar_one()
+        # The partial unique index: two ACTIVE templates may not share a
+        # name, but an archived one does not block the name.
+        conn.execute(sa.text(
+            "INSERT INTO interview_templates (name, questions)"
+            " VALUES ('RH screen', '[]')"))
+        conn.execute(sa.text(
+            "UPDATE interview_templates SET is_active = false"
+            " WHERE name = 'RH screen'"))
+        conn.execute(sa.text(
+            "INSERT INTO interview_templates (name, questions)"
+            " VALUES ('RH screen', '[]')"))
+
+    assert (kit["template_id"], kit["template_name"],
+            kit["template_snapshot"]) == (None, None, None)
+    assert kit["questions"][0]["id"] == "b1"
+    assert job_default is None
+
+    command.downgrade(cfg, LATEST)
+    with engine.begin() as conn:
+        tables = conn.execute(sa.text(
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_schema='public'")).scalars().all()
+        kit_count = conn.execute(sa.text(
+            "SELECT count(*) FROM interview_kits")).scalar_one()
+    assert "interview_templates" not in tables
+    assert kit_count == 1, "downgrading the templates migration lost a kit"
+
+    # And back up again: the downgrade must leave nothing behind that
+    # blocks re-applying the migration.
+    command.upgrade(cfg, TEMPLATES)
+    with engine.begin() as conn:
+        assert conn.execute(sa.text(
+            "SELECT count(*) FROM interview_templates")).scalar_one() == 0

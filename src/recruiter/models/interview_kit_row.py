@@ -47,6 +47,18 @@ class InterviewKitRow(Base):
     # schemas/interview.py. Kept so the blob's contents survive the move,
     # even though per-interviewer submission now lives on the sheet.
     submitted_at: Mapped[str | None] = mapped_column(String)
+    # Which template this kit was built from, if any. NULL for kits that
+    # predate templates and for rounds started with "No template" — both
+    # behave exactly as kits always have.
+    template_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("interview_templates.id", ondelete="SET NULL"),
+    )
+    # A copy of the name at creation, so "Round 2 · RH screen" stays
+    # readable after the template is renamed or archived.
+    template_name: Mapped[str | None] = mapped_column(String(128))
+    # TemplateSnapshot as a dict. Regeneration reads this, never the live
+    # template.
+    template_snapshot: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False,
     )
