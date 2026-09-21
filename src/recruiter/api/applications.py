@@ -371,11 +371,16 @@ async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
             sheet=empty_sheet(),
         ))
     if previous_kit is not None:
+        # Carry the previous kit's status and error forward rather than
+        # forcing "ready": a round stuck in "error" must stay visibly
+        # broken on reopen too, or the recruiter sees an empty ready kit
+        # with the failure hidden instead of a reason to regenerate it.
         await create_kit(
             session, app_row,
             round=app_row.interview_round,
             questions=list(previous_kit.questions or []),
-            status="ready",
+            status=previous_kit.status,
+            error=previous_kit.error,
         )
 
 

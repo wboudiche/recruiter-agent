@@ -115,7 +115,11 @@ async def run_generate_kit(
         # when generation was dispatched — used both to build an error kit
         # that keeps its questions (below) and, after the model call, to
         # detect whether there was anything a late freeze could orphan.
+        # `dispatch_round` does the same job for a round BUMP: SCHEDULED →
+        # INTERVIEWED → SCHEDULED is a legal one-click round trip, and
+        # `kit_row` above is only correct for the round as it stood here.
         kit_row = await kit_for(session, app_row)
+        dispatch_round = app_row.interview_round
         existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
         # The model call is the only thing inside the try: assembling the
@@ -150,6 +154,23 @@ async def run_generate_kit(
         # meanwhile, which the freeze does not, because it only begins at
         # the first submit.
         await session.refresh(app_row, with_for_update=True)
+        # The round can move while the model call above is in flight — see
+        # `dispatch_round` above. `kit_row` was resolved for the round as
+        # it stood at dispatch; if the round has since moved, that row now
+        # belongs to a DIFFERENT round — possibly closed history — and
+        # writing to it would silently reopen and rewrite it. The freeze
+        # guard below only inspects the CURRENT round's rows, which are
+        # empty right after a reopen, so it cannot catch this on its own.
+        # Re-resolve against the current round and abandon the write
+        # entirely if it moved, rather than create or overwrite anything.
+        kit_row = await kit_for(session, app_row)
+        if app_row.interview_round != dispatch_round:
+            logger.warning(
+                "interview kit generation abandoned: round moved from %s to %s "
+                "during generation for application %s",
+                dispatch_round, app_row.interview_round, application_id,
+            )
+            return
         rows = await load_assignments(session, application_id)
 
         if failure is not None:
@@ -167,7 +188,7 @@ async def run_generate_kit(
             kit = merge_regenerated(
                 InterviewKit.model_validate(existing_raw), baseline, texts,
                 criteria_by_probe=criteria_by_probe, now=_now(),
-                answered_ids=answered_question_ids(rows),
+                answered_ids=answered_question_ids(rows_in_round(rows, app_row.interview_round)),
             )
         else:
             kit = build_kit(baseline, texts,
@@ -305,8 +326,13 @@ async def patch_kit(
     # an untouched question stays editable and the "fix a typo after one
     # interview" case the design protected still works. A draft answer locks
     # nothing: there is no record yet, and the recruiter may be fixing the
-    # very question the interviewer is struggling with.
-    recorded = answered_question_ids(r for r in rows if r.submitted_at is not None)
+    # very question the interviewer is struggling with. Also scoped to the
+    # CURRENT round, like `is_frozen` above: each round owns its own kit
+    # and question ids now, so a question answered in an earlier, closed
+    # round cannot lock a same-id question in this one.
+    recorded = answered_question_ids(
+        r for r in rows_in_round(rows, app_row.interview_round) if r.submitted_at is not None
+    )
     stored_text = {q.id: q.text for q in kit.questions}
     reworded = [
         q.id for q in payload.questions

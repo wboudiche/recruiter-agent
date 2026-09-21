@@ -136,12 +136,28 @@ def test_downgrade_leaves_the_blob_intact(postgres_container, monkeypatch) -> No
 
 
 def test_dropping_the_blob_and_rebuilding_it(postgres_container, monkeypatch) -> None:
+    """Migration B's downgrade rebuilds the blob with `json_build_object`
+    against the `interview_kits` table. That rebuild only ever runs on an
+    empty database unless a row exists to rebuild from — seed one here so
+    the data path actually executes, and check every field it copies."""
     sync_dsn = postgres_container.get_connection_url()
     engine = sa.create_engine(sync_dsn)
     with engine.begin() as conn:
         conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
 
     cfg = _alembic(monkeypatch, sync_dsn)
+    command.upgrade(cfg, PREVIOUS)
+    _seed_application(engine, interview_round=1, blob={
+        "status": "error",
+        "error": "model unavailable",
+        "generated_at": "2026-09-20T10:00:00+00:00",
+        "generating_since": "2026-09-20T09:55:00+00:00",
+        "submitted_at": "2026-09-20T11:00:00+00:00",
+        "closed_at": "2026-09-20T12:00:00+00:00",
+        "questions": [{"id": "q1", "text": "Why?", "source": "probe",
+                       "answer": "legacy", "rating": "strong"}],
+    })
+
     command.upgrade(cfg, LATEST)
     with engine.begin() as conn:
         cols = conn.execute(sa.text(
@@ -154,4 +170,18 @@ def test_dropping_the_blob_and_rebuilding_it(postgres_container, monkeypatch) ->
         cols = conn.execute(sa.text(
             "SELECT column_name FROM information_schema.columns"
             " WHERE table_name='applications'")).scalars().all()
+        blob = conn.execute(sa.text(
+            "SELECT interview_kit FROM applications")).scalars().one()
+
     assert "interview_kit" in cols
+    assert blob["status"] == "error"
+    assert blob["error"] == "model unavailable"
+    assert blob["generated_at"] == "2026-09-20T10:00:00+00:00"
+    assert blob["generating_since"] == "2026-09-20T09:55:00+00:00"
+    assert blob["submitted_at"] == "2026-09-20T11:00:00+00:00"
+    assert blob["closed_at"] == "2026-09-20T12:00:00+00:00"
+    assert blob["questions"][0]["id"] == "q1"
+    # Legacy per-question answer/rating must survive the round trip nested
+    # inside `questions`, not just the seven top-level kit fields.
+    assert blob["questions"][0]["answer"] == "legacy"
+    assert blob["questions"][0]["rating"] == "strong"

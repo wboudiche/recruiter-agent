@@ -40,10 +40,11 @@ async def create_kit(
     track: str = DEFAULT_TRACK,
     questions: list[dict] | None = None,
     status: str = "ready",
+    error: str | None = None,
 ) -> InterviewKitRow:
     row = InterviewKitRow(
         application_id=app_row.id, round=round, track=track,
-        questions=questions or [], status=status,
+        questions=questions or [], status=status, error=error,
     )
     session.add(row)
     await session.flush()

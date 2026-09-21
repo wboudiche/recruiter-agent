@@ -17,21 +17,6 @@ from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 _Q1 = {"id": "q1", "text": "Why?", "source": "probe"}
 
 
-async def _seed_kit(engine: AsyncEngine, app_id: int, **fields: object) -> None:
-    """Insert the round-1 default-track kit row directly, the same way
-    these tests used to seed `applications.interview_kit` before kit
-    storage moved to the `interview_kits` table (see kit_store)."""
-    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
-    async with SessionLocal() as session:
-        session.add(InterviewKitRow(
-            application_id=app_id, round=1, track="default",
-            status=fields.pop("status", "ready"),
-            questions=fields.pop("questions", []),
-            **fields,
-        ))
-        await session.commit()
-
-
 async def _read_kit(engine: AsyncEngine, app_id: int) -> InterviewKitRow:
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
     async with SessionLocal() as session:
