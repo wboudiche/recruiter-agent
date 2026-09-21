@@ -13,9 +13,11 @@ def empty_sheet() -> dict:
 class InterviewAssignment(Base):
     """One interviewer on one application, with their feedback sheet.
 
-    Questions are shared and live in `applications.interview_kit`; only the
-    answers, ratings and verdict are per person. Each interviewer writes
-    their own row, so two people saving at once never overwrite each other.
+    Questions are shared and live in `interview_kits`, one row per
+    `(application_id, round, track)`; this assignment's sheet is matched to
+    its kit by that triple. Only the answers, ratings and verdict are per
+    person. Each interviewer writes their own row, so two people saving at
+    once never overwrite each other.
 
     One row per interviewer PER ROUND. Reopening an application for a
     second interview creates a fresh set of rows at the next `round`,

@@ -39,7 +39,6 @@ class Application(Base):
     score_breakdown: Mapped[list[dict] | None] = mapped_column(JSON)
     score_rationale: Mapped[str | None] = mapped_column(String)
     enrichment: Mapped[dict | None] = mapped_column(JSON)
-    interview_kit: Mapped[dict | None] = mapped_column(JSON)
     # The round currently in progress. Bumped when a recruiter reopens an
     # interviewed application for another round; interview_assignments.round
     # is matched against it. Not derived from max(assignment.round): a fresh

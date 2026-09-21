@@ -15,6 +15,7 @@ from recruiter.config import get_config
 
 PREVIOUS = "b8f3d1a20c47"   # the rounds migration
 CURRENT = "c1a7e05b3f92"    # migration A
+LATEST = "d4b8c1f60a37"     # migration B: drops applications.interview_kit
 
 
 def _alembic(monkeypatch, sync_dsn: str) -> Config:
@@ -132,3 +133,25 @@ def test_downgrade_leaves_the_blob_intact(postgres_container, monkeypatch) -> No
     assert "interview_kits" not in tables
     assert "track" not in cols
     assert "applications" in tables
+
+
+def test_dropping_the_blob_and_rebuilding_it(postgres_container, monkeypatch) -> None:
+    sync_dsn = postgres_container.get_connection_url()
+    engine = sa.create_engine(sync_dsn)
+    with engine.begin() as conn:
+        conn.execute(sa.text("DROP SCHEMA public CASCADE; CREATE SCHEMA public;"))
+
+    cfg = _alembic(monkeypatch, sync_dsn)
+    command.upgrade(cfg, LATEST)
+    with engine.begin() as conn:
+        cols = conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns"
+            " WHERE table_name='applications'")).scalars().all()
+    assert "interview_kit" not in cols
+
+    command.downgrade(cfg, CURRENT)
+    with engine.begin() as conn:
+        cols = conn.execute(sa.text(
+            "SELECT column_name FROM information_schema.columns"
+            " WHERE table_name='applications'")).scalars().all()
+    assert "interview_kit" in cols
