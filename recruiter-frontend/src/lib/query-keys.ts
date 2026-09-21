@@ -11,4 +11,6 @@ export const queryKeys = {
   settings: () => ["settings"] as const,
   currentUser: () => ["auth", "me"] as const,
   users: () => ["users"] as const,
+  interviewTemplates: (includeArchived: boolean) =>
+    ["interview-templates", includeArchived] as const,
 };
