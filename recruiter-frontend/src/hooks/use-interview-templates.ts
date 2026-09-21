@@ -15,8 +15,6 @@ export interface InterviewTemplate {
   is_active: boolean;
 }
 
-export type InterviewTemplateInput = Omit<InterviewTemplate, "id" | "is_active">;
-
 export function useInterviewTemplates(includeArchived = false) {
   return useQuery({
     queryKey: queryKeys.interviewTemplates(includeArchived),

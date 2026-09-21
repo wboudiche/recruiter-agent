@@ -58,7 +58,7 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
       {
         id: template?.id,
         body: {
-          name,
+          name: name.trim(),
           description: description || null,
           probe_mode: probeMode,
           include_job_questions: includeJobQuestions,

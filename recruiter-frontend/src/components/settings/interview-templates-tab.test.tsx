@@ -50,6 +50,16 @@ describe("InterviewTemplatesTab", () => {
     expect(capture.body.include_job_questions).toBe(true);
   });
 
+  it("trims a name typed with trailing spaces before saving", async () => {
+    const capture: { body?: any } = {};
+    mount([], capture);
+    await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
+    await userEvent.type(screen.getByLabelText(/^name$/i), "RH screen  ");
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(capture.body?.name).toBe("RH screen"));
+  });
+
   it("edits a template", async () => {
     const capture: { body?: any; path?: string } = {};
     mount([RH], capture);
