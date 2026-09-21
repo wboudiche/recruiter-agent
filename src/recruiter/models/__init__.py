@@ -4,6 +4,7 @@ from recruiter.models.candidate import Candidate, SourceType
 from recruiter.models.chat_message import ChatMessage, MessageRole
 from recruiter.models.event_log import EventLog
 from recruiter.models.interview_assignment import InterviewAssignment
+from recruiter.models.interview_kit_row import InterviewKitRow
 from recruiter.models.job import Job, JobStatus
 from recruiter.models.notification import (
     Notification,
@@ -24,6 +25,7 @@ __all__ = [
     "ChatMessage",
     "EventLog",
     "InterviewAssignment",
+    "InterviewKitRow",
     "Job",
     "JobStatus",
     "MessageRole",

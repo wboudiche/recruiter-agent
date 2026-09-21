@@ -7,6 +7,7 @@ from recruiter.auth.passwords import hash_password
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 
 PW = "pw-12345678"
 Q1 = {"id": "q1", "text": "Why?", "source": "probe"}
@@ -46,9 +47,13 @@ async def _seed(session: AsyncSession) -> int:
     cand = Candidate(source_type="paste", full_name="Marie", email="m@example.com")
     session.add(cand)
     await session.flush()
-    app_row = Application(job_id=job.id, candidate_id=cand.id, stage=Stage.SCHEDULED, score=80,
-                          interview_kit={"status": "ready", "questions": [Q1, Q2]})
+    app_row = Application(job_id=job.id, candidate_id=cand.id, stage=Stage.SCHEDULED, score=80)
     session.add(app_row)
+    await session.flush()
+    session.add(InterviewKitRow(
+        application_id=app_row.id, round=1, track="default",
+        status="ready", questions=[Q1, Q2],
+    ))
     await session.commit()
     return app_row.id
 

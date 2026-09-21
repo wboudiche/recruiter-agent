@@ -18,7 +18,7 @@ from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, InterviewAssignment, Job, User
+from recruiter.models import Application, Candidate, InterviewAssignment, InterviewKitRow, Job, User
 from recruiter.pipeline.candidate_profile import profile_text
 from recruiter.pipeline.interview_kit import (
     build_kit,
@@ -35,6 +35,7 @@ from recruiter.pipeline.interview_sheets import (
     rows_in_round,
     visible_sheets,
 )
+from recruiter.pipeline.kit_store import apply_content, content_of, create_kit, kit_for
 from recruiter.schemas.interview import (
     BaselineQuestion,
     GeneratedQuestion,
@@ -83,9 +84,9 @@ async def _sheets_for(
 
 
 async def _read(session: AsyncSession, app_row: Application, user: User) -> InterviewKitRead:
-    raw = app_row.interview_kit
+    row = await kit_for(session, app_row)
     return InterviewKitRead(
-        kit=InterviewKit.model_validate(raw) if raw else None,
+        kit=content_of(row) if row else None,
         sheets=await _sheets_for(session, app_row, user),
     )
 
@@ -115,7 +116,12 @@ async def run_generate_kit(
         # when generation was dispatched — used both to build an error kit
         # that keeps its questions (below) and, after the model call, to
         # detect whether there was anything a late freeze could orphan.
-        existing_raw = app_row.interview_kit or {}
+        # `dispatch_round` does the same job for a round BUMP: SCHEDULED →
+        # INTERVIEWED → SCHEDULED is a legal one-click round trip, and
+        # `kit_row` above is only correct for the round as it stood here.
+        kit_row = await kit_for(session, app_row)
+        dispatch_round = app_row.interview_round
+        existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
         # The model call is the only thing inside the try: assembling the
         # kit is deferred until after the lock below, so it can be built
@@ -149,6 +155,23 @@ async def run_generate_kit(
         # meanwhile, which the freeze does not, because it only begins at
         # the first submit.
         await session.refresh(app_row, with_for_update=True)
+        # The round can move while the model call above is in flight — see
+        # `dispatch_round` above. `kit_row` was resolved for the round as
+        # it stood at dispatch; if the round has since moved, that row now
+        # belongs to a DIFFERENT round — possibly closed history — and
+        # writing to it would silently reopen and rewrite it. The freeze
+        # guard below only inspects the CURRENT round's rows, which are
+        # empty right after a reopen, so it cannot catch this on its own.
+        # Re-resolve against the current round and abandon the write
+        # entirely if it moved, rather than create or overwrite anything.
+        kit_row = await kit_for(session, app_row)
+        if app_row.interview_round != dispatch_round:
+            logger.warning(
+                "interview kit generation abandoned: round moved from %s to %s "
+                "during generation for application %s",
+                dispatch_round, app_row.interview_round, application_id,
+            )
+            return
         rows = await load_assignments(session, application_id)
 
         if failure is not None:
@@ -166,7 +189,7 @@ async def run_generate_kit(
             kit = merge_regenerated(
                 InterviewKit.model_validate(existing_raw), baseline, texts,
                 criteria_by_probe=criteria_by_probe, now=_now(),
-                answered_ids=answered_question_ids(rows),
+                answered_ids=answered_question_ids(rows_in_round(rows, app_row.interview_round)),
             )
         else:
             kit = build_kit(baseline, texts,
@@ -177,7 +200,7 @@ async def run_generate_kit(
         # something to orphan, discard whatever was just computed, success
         # or error, and restore the frozen kit to "ready" instead of
         # overwriting it with a result computed from stale, now-frozen state.
-        if is_frozen(rows) and existing_questions:
+        if is_frozen(rows_in_round(rows, app_row.interview_round)) and existing_questions:
             logger.warning(
                 "interview kit regeneration discarded: a sheet was submitted "
                 "during generation for application %s", application_id,
@@ -185,7 +208,9 @@ async def run_generate_kit(
             kit = InterviewKit.model_validate(existing_raw).model_copy(
                 update={"status": "ready", "error": None}
             )
-        app_row.interview_kit = kit.model_dump()
+        if kit_row is None:
+            kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+        apply_content(kit_row, kit)
         await session.commit()
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": kit.status,
@@ -206,20 +231,23 @@ async def generate_kit(
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
-    existing = app_row.interview_kit or {}
-    existing_questions = existing.get("questions") or []
-    frozen = is_frozen(await load_assignments(session, application_id))
+    kit_row = await kit_for(session, app_row)
+    existing_questions = kit_row.questions if kit_row else []
+    frozen = is_frozen(
+        rows_in_round(await load_assignments(session, application_id), app_row.interview_round)
+    )
     # A freeze only blocks regeneration when there is something it could
     # orphan. Frozen with an empty question list means nothing has ever
     # been asked yet, so generation may proceed exactly as if it weren't
     # frozen at all.
     if frozen and existing_questions:
-        if existing.get("status") != "ready":
+        if kit_row.status != "ready":
             # Nothing left to regenerate into — recover the kit that's
             # stuck in "error"/"generating" straight to "ready" with its
             # questions intact instead of leaving it stuck forever with no
             # path back (regeneration can never run again once frozen).
-            app_row.interview_kit = {**existing, "status": "ready", "error": None}
+            kit_row.status = "ready"
+            kit_row.error = None
             await session.commit()
             return {"application_id": application_id}
         raise HTTPException(
@@ -228,12 +256,18 @@ async def generate_kit(
 
     # Idempotent: a double-click or a second tab would otherwise buy a second
     # LLM call whose result just overwrites the first.
-    if generation_in_flight(existing, now=datetime.now(UTC)):
+    existing_for_flight = (
+        {"status": kit_row.status, "generating_since": kit_row.generating_since}
+        if kit_row else None
+    )
+    if generation_in_flight(existing_for_flight, now=datetime.now(UTC)):
         return {"application_id": application_id}
 
-    app_row.interview_kit = {**existing, "status": "generating", "error": None,
-                              "questions": existing_questions,
-                              "generating_since": _now()}
+    if kit_row is None:
+        kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+    kit_row.status = "generating"
+    kit_row.error = None
+    kit_row.generating_since = _now()
     await session.commit()
 
     background_tasks.add_task(
@@ -257,16 +291,13 @@ async def patch_kit(
     app_row = await session.get(Application, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    if not app_row.interview_kit:
-        raise HTTPException(
-            status_code=404, detail="no interview kit; generate one first"
-        )
+    kit_row = await kit_for(session, app_row)
+    kit = _require_kit(kit_row)
 
     ids = [q.id for q in payload.questions]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=422, detail="duplicate question ids")
 
-    kit = InterviewKit.model_validate(app_row.interview_kit)
     rows = await load_assignments(session, application_id)
     stored_ids = [q.id for q in kit.questions]
     incoming_ids = [q.id for q in payload.questions]
@@ -282,7 +313,9 @@ async def patch_kit(
         if not unchanged:
             raise HTTPException(status_code=403, detail="interviewers may only add questions")
 
-    if is_frozen(rows) and any(qid not in incoming_ids for qid in stored_ids):
+    if is_frozen(rows_in_round(rows, app_row.interview_round)) and any(
+        qid not in incoming_ids for qid in stored_ids
+    ):
         raise HTTPException(
             status_code=409, detail="questions are frozen: a sheet has been submitted",
         )
@@ -294,8 +327,13 @@ async def patch_kit(
     # an untouched question stays editable and the "fix a typo after one
     # interview" case the design protected still works. A draft answer locks
     # nothing: there is no record yet, and the recruiter may be fixing the
-    # very question the interviewer is struggling with.
-    recorded = answered_question_ids(r for r in rows if r.submitted_at is not None)
+    # very question the interviewer is struggling with. Also scoped to the
+    # CURRENT round, like `is_frozen` above: each round owns its own kit
+    # and question ids now, so a question answered in an earlier, closed
+    # round cannot lock a same-id question in this one.
+    recorded = answered_question_ids(
+        r for r in rows_in_round(rows, app_row.interview_round) if r.submitted_at is not None
+    )
     stored_text = {q.id: q.text for q in kit.questions}
     reworded = [
         q.id for q in payload.questions
@@ -321,7 +359,7 @@ async def patch_kit(
         })
         for q in payload.questions
     ]
-    app_row.interview_kit = kit.model_dump()
+    apply_content(kit_row, kit)
     await session.commit()
     return await _read(session, app_row, user)
 
@@ -348,10 +386,10 @@ async def _own_assignment(
     raise HTTPException(status_code=404, detail="you are not assigned to this interview")
 
 
-def _require_kit(app_row: Application) -> InterviewKit:
-    if not app_row.interview_kit:
+def _require_kit(kit_row: InterviewKitRow | None) -> InterviewKit:
+    if kit_row is None:
         raise HTTPException(status_code=404, detail="no interview kit; generate one first")
-    return InterviewKit.model_validate(app_row.interview_kit)
+    return content_of(kit_row)
 
 
 @router.patch("/applications/{application_id}/interview-kit/sheet",
@@ -369,7 +407,7 @@ async def patch_sheet(
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    kit = _require_kit(app_row)
+    kit = _require_kit(await kit_for(session, app_row))
     own = await _own_assignment(session, app_row, user)
     if own.submitted_at is not None:
         raise HTTPException(status_code=409, detail="sheet already submitted")
@@ -393,7 +431,7 @@ async def submit_sheet(
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    kit = _require_kit(app_row)
+    kit = _require_kit(await kit_for(session, app_row))
     own = await _own_assignment(session, app_row, user)
     if own.submitted_at is not None:
         raise HTTPException(status_code=409, detail="sheet already submitted")
@@ -464,9 +502,10 @@ async def draft_kit_question(
 
     job = await session.get(Job, app_row.job_id)
     candidate = await session.get(Candidate, app_row.candidate_id)
+    kit_row = await kit_for(session, app_row)
     existing = [
         q.get("text", "")
-        for q in ((app_row.interview_kit or {}).get("questions") or [])
+        for q in (kit_row.questions if kit_row else [])
         if q.get("text")
     ]
     try:

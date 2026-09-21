@@ -141,12 +141,12 @@ def test_rows_in_round_selects_only_that_round() -> None:
     assert rows_in_round(rows, 1) == [rows[0]]
 
 
-def test_the_question_freeze_spans_every_round() -> None:
-    """The kit's question list is SHARED across rounds, so round 1's
-    submitted answers are keyed to ids round 2 must not regenerate away.
-    The freeze is therefore global, unlike round completion."""
+def test_the_question_freeze_is_scoped_to_one_round() -> None:
+    """Each round owns its questions now, so round one's submitted sheet
+    does not freeze round two. Callers pass one round's rows."""
     rows = [_row(1, True, 1), _row(2, False, 2)]
-    assert is_frozen(rows)
+    assert is_frozen(rows_in_round(rows, 1))
+    assert not is_frozen(rows_in_round(rows, 2))
 
 
 def test_round_completion_ignores_earlier_rounds() -> None:

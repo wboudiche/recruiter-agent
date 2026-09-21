@@ -13,8 +13,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_llm
+from recruiter.api.interview import run_generate_kit
+from recruiter.events import EventBus
 from recruiter.main import app
 from recruiter.models import Application, InterviewAssignment, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 from recruiter.llm.client import FakeLLMClient
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
@@ -144,12 +147,12 @@ async def test_reopening_keeps_the_shared_questions(
 
 
 @pytest.mark.asyncio
-async def test_questions_stay_frozen_into_the_next_round(
+async def test_round_two_questions_are_editable_after_round_one_closed(
     api_client: AsyncClient, create_scored_app,
 ) -> None:
-    """Round 1's submitted answers are keyed to the shared question ids, so
-    the freeze has to outlive the round that caused it. Removing a question
-    in round 2 is still refused."""
+    """Round 1's submitted answers are keyed to round 1's own kit now, so
+    round 1 closing does not freeze round 2's questions. Removing a
+    question in round 2 is allowed."""
     app.dependency_overrides[get_llm] = _fake_llm
     try:
         app_id = await create_scored_app()
@@ -158,14 +161,236 @@ async def test_questions_stay_frozen_into_the_next_round(
 
         kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
         assert len(kit["questions"]) >= 1
-        # Drop one question: legal while nothing is submitted, refused after.
+        # Drop one question: legal while nothing is submitted, and still
+        # legal here because round 2 has nothing submitted of its own.
         resp = await api_client.patch(
             f"/api/applications/{app_id}/interview-kit",
             json={"questions": kit["questions"][1:]},
         )
 
-        assert resp.status_code == 409, resp.text
-        assert "frozen" in resp.json()["detail"]
+        assert resp.status_code == 200, resp.text
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_a_reopened_round_can_regenerate_its_questions(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Round one's answers are keyed to round one's kit, so regenerating
+    round two cannot orphan them. Before kits were rows the freeze had to
+    span every round, which left a reopened round permanently stuck with
+    the questions it inherited."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+
+        assert resp.status_code == 202, resp.text
+        kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+        assert kit["status"] == "ready"
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+async def _kit_rows(app_id: int) -> list[InterviewKitRow]:
+    SessionLocal = await _sessionmaker()
+    async with SessionLocal() as session:
+        return list((await session.execute(
+            select(InterviewKitRow)
+            .where(InterviewKitRow.application_id == app_id)
+            .order_by(InterviewKitRow.round)
+        )).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_entering_scheduled_creates_a_kit_row(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        SessionLocal = await _sessionmaker()
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Application).where(Application.id == app_id).values(stage=Stage.INVITED))
+            await session.commit()
+
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        rows = await _kit_rows(app_id)
+        assert [(r.round, r.track) for r in rows] == [(1, "default")]
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_reopening_creates_the_next_rounds_kit_rather_than_mutating_the_first(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Round one's row must survive untouched — its closed_at is the record
+    that the round happened, and its questions anchor round one's answers."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        before = await _kit_rows(app_id)
+        assert len(before) == 1 and before[0].closed_at is not None
+        first_questions = list(before[0].questions)
+
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        rows = await _kit_rows(app_id)
+        assert [r.round for r in rows] == [1, 2]
+        assert rows[0].closed_at is not None, "round one was reopened instead of round two"
+        assert rows[1].closed_at is None
+        assert [q["id"] for q in rows[1].questions] == [q["id"] for q in first_questions]
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_generate_creates_a_kit_when_the_application_has_none(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The "Generate interview kit" button works from a standing start, so
+    generate must create the row rather than 404 on a missing one."""
+    app_id = await create_scored_app()
+    llm = _fake_llm()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        assert resp.status_code == 202, resp.text
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    rows = await _kit_rows(app_id)
+    assert [(r.round, r.track) for r in rows] == [(1, "default")]
+    assert rows[0].questions, "generation produced no questions"
+
+
+@pytest.mark.asyncio
+async def test_round_bump_during_generation_does_not_write_the_old_rounds_row(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """SCHEDULED -> INTERVIEWED -> SCHEDULED is a legal one-click round
+    trip. If a recruiter does that while round one's regeneration is still
+    waiting on the model, `run_generate_kit` must not write onto round
+    one's now-closed row: the freeze guard only inspects the CURRENT
+    round's rows, which are empty right after the bump, so it cannot catch
+    this on its own — the fix re-resolves the kit row after the lock and
+    abandons the write if the round moved."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    closed_at = datetime.now(UTC).isoformat()
+    async with SessionLocal() as session:
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+            closed_at=closed_at,
+        ))
+        await session.commit()
+
+    class _BumpsRoundMidCall:
+        """Closes and reopens the round from another session while the
+        model 'thinks', simulating a recruiter's one-click round trip
+        landing in the middle of a model call."""
+
+        async def chat_structured(self, *a: object, **kw: object) -> GeneratedQuestions:
+            async with SessionLocal() as other:
+                app_row = await other.get(Application, app_id)
+                app_row.interview_round = 2
+                other.add(InterviewKitRow(
+                    application_id=app_id, round=2, track="default",
+                    status="ready", questions=[],
+                ))
+                await other.commit()
+            return GeneratedQuestions(questions=[
+                GeneratedQuestion(text="A freshly generated probe.", criterion="reliability"),
+            ])
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine, llm=_BumpsRoundMidCall(), bus=EventBus(),
+    )
+
+    async with SessionLocal() as session:
+        round_one = (await session.execute(
+            select(InterviewKitRow).where(
+                InterviewKitRow.application_id == app_id, InterviewKitRow.round == 1,
+            )
+        )).scalar_one()
+
+    assert round_one.closed_at == closed_at, "generation reopened a closed round"
+    assert [q["id"] for q in round_one.questions] == ["q1"], (
+        "generation rewrote a historical round's questions"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_question_answered_in_round_one_can_be_reworded_in_round_two(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The reword guard on PATCH /interview-kit (interview.py's "cannot
+    reword a question that has been answered in a submitted sheet") must
+    be scoped to the CURRENT round, like the freeze check right next to
+    it. Unscoped, a question answered in round one's SUBMITTED sheet stays
+    locked in round two forever — even though round two copies its
+    question ids onto its OWN row, so editing round two can never orphan
+    round one's answers."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+        SessionLocal = await _sessionmaker()
+        async with SessionLocal() as session:
+            await session.execute(
+                update(Application).where(Application.id == app_id).values(stage=Stage.INVITED)
+            )
+            await session.commit()
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+        qid = kit["questions"][0]["id"]
+
+        async with SessionLocal() as session:
+            interviewer = User(email="reword@acme.com", role=Role.VIEWER, is_active=True)
+            session.add(interviewer)
+            await session.flush()
+            session.add(InterviewAssignment(
+                application_id=app_id, user_id=interviewer.id, round=1, track="default",
+                sheet={"answers": {qid: {"answer": "said a thing", "rating": "strong"}},
+                       "verdict": {"decision": "unsure", "note": None}},
+                submitted_at=datetime.now(UTC),
+            ))
+            await session.commit()
+
+        # Manual stage moves, mirroring _interviewed_with_panel: closes
+        # round one, then reopens round two, which copies round one's
+        # question ids (including `qid`) onto its own row.
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        round_two = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+        assert round_two["questions"][0]["id"] == qid, "round two lost round one's question id"
+
+        reworded = [
+            {**round_two["questions"][0], "text": "Reworded after round one closed."},
+            *round_two["questions"][1:],
+        ]
+        resp = await api_client.patch(
+            f"/api/applications/{app_id}/interview-kit", json={"questions": reworded},
+        )
+
+        assert resp.status_code == 200, resp.text
+        after = (await api_client.get(
+            f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+        assert after["questions"][0]["text"] == "Reworded after round one closed."
     finally:
         app.dependency_overrides.pop(get_llm, None)
 

@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.models import Application, InterviewAssignment, Role, Stage, User
-from recruiter.schemas.interview import InterviewKit, InterviewSheet
+from recruiter.models.interview_kit_row import InterviewKitRow
+from recruiter.schemas.interview import InterviewSheet
 
 
 def rows_in_round(
@@ -22,11 +23,9 @@ def is_frozen(rows: Iterable[InterviewAssignment]) -> bool:
     """Once any sheet is submitted the question list must not lose rows,
     or submitted feedback would silently lose its answers.
 
-    Deliberately spans EVERY round, unlike round completion below: the
-    question list lives once on the application and is shared by all
-    rounds, so round 1's submitted answers are keyed to ids that round 2
-    must not regenerate or remove. Pass every row, not just the live
-    round's.
+    Scoped to ONE kit's rows: callers pass `rows_in_round(...)`. Each round
+    owns its questions now, so a regeneration in round two cannot orphan
+    round one's answers — the reason this once had to span every round.
     """
     return any(r.submitted_at is not None for r in rows)
 
@@ -112,15 +111,16 @@ def sheet_has_content(sheet: dict) -> bool:
     return bool(verdict.get("decision") or verdict.get("note"))
 
 
-def mark_interviewed(app_row: Application, kit: InterviewKit, now: datetime) -> None:
+def mark_interviewed(
+    app_row: Application, kit_row: InterviewKitRow, now: datetime,
+) -> None:
     """Close the round: move the application to INTERVIEWED and stamp the
     kit's closed_at. Shared by the automatic all-sheets-in rule
     (close_round_if_complete) and the recruiter's manual override in
     patch_application, so both paths stamp the same fields the same way."""
     app_row.stage = Stage.INTERVIEWED
     app_row.interviewed_at = now
-    kit.closed_at = now.isoformat()
-    app_row.interview_kit = kit.model_dump()
+    kit_row.closed_at = now.isoformat()
 
 
 async def close_round_if_complete(session: AsyncSession, app_row: Application) -> bool:
@@ -139,13 +139,17 @@ async def close_round_if_complete(session: AsyncSession, app_row: Application) -
     top-level import in both directions would be a cycle.
     """
     from recruiter.api.interviewers import load_assignments
+    from recruiter.pipeline.kit_store import kit_for
 
-    if app_row.stage != Stage.SCHEDULED or not app_row.interview_kit:
+    if app_row.stage != Stage.SCHEDULED:
+        return False
+    kit_row = await kit_for(session, app_row)
+    if kit_row is None:
         return False
     rows = rows_in_round(
         await load_assignments(session, app_row.id), app_row.interview_round,
     )
     if not all_submitted(rows):
         return False
-    mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), datetime.now(UTC))
+    mark_interviewed(app_row, kit_row, datetime.now(UTC))
     return True
