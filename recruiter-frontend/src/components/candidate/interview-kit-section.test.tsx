@@ -155,6 +155,30 @@ describe("InterviewKitSection", () => {
       expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
   });
 
+  it("gives a recruiter their LIVE round's sheet, not their round-1 one", async () => {
+    // A recruiter sees every round's sheets, oldest first. Matching on
+    // user_id alone finds the round-1 row, shows it as already submitted,
+    // and leaves no way to record round-2 feedback — which also means the
+    // round can never close.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 1, name: "Me", email: "me@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: { b1: { answer: "round one answer", rating: "strong" } },
+                   verdict: { decision: "hire", note: null } } },
+        { user_id: 1, name: "Me", email: "me@acme.com", round: 2, submitted_at: null,
+          sheet: { answers: {}, verdict: { decision: null, note: null } } },
+      ],
+    });
+
+    // Round 2's sheet is unsubmitted, so the sheet editor must be writable
+    // and must NOT be pre-filled with round 1's answer.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /submit interview/i })).toBeInTheDocument());
+    expect(screen.queryByDisplayValue("round one answer")).not.toBeInTheDocument();
+  });
+
   it("renders questions with their source badge", async () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());

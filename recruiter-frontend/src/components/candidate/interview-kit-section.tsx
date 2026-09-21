@@ -80,7 +80,12 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
   // row yet". This mirrors the server: a recruiter/admin with no assignment
   // row on the application gets one created on first save; an unassigned
   // recruiter on an application that already has rows gets a 404.
-  const mySheetRead = sheets.find((s) => s.user_id === myId) ?? null;
+  // Match on round as well as user: a recruiter sees EVERY round's sheets,
+  // oldest first, so `user_id` alone finds their round-1 row — which reads
+  // as already submitted and leaves no way to record this round's feedback.
+  const liveRound = interviewRound ?? 1;
+  const mySheetRead =
+    sheets.find((s) => s.user_id === myId && (s.round ?? 1) === liveRound) ?? null;
   const canWriteSheet = mySheetRead ? mySheetRead.submitted_at === null : (canWrite && sheets.length === 0);
   const isSubmitted = mySheetRead?.submitted_at != null;
   // Once any interviewer has submitted, the question list freezes for
@@ -559,7 +564,12 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
           />
         </div>
       )}
-      {canWrite && sheets.length > 1 && <FeedbackTable questions={draft} sheets={sheets} />}
+      {/* Count THIS round's sheets: after a reopen the raw list holds every
+          round, so the side-by-side table would appear for a single
+          interviewer purely because an earlier round had two. */}
+      {canWrite && sheets.filter((s) => (s.round ?? 1) === liveRound).length > 1 && (
+        <FeedbackTable questions={draft} sheets={sheets} interviewRound={liveRound} />
+      )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>

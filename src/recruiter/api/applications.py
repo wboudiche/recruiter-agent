@@ -41,16 +41,29 @@ from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
 
-async def _load_application(session: AsyncSession, application_id: int) -> Application | None:
+async def _load_application(
+    session: AsyncSession, application_id: int, *, for_update: bool = False,
+) -> Application | None:
     """Load an application with the candidate eager-loaded so awaiting_paste
-    can be computed without a follow-up query."""
-    return (
-        await session.execute(
-            select(Application)
-            .where(Application.id == application_id)
-            .options(selectinload(Application.candidate))
-        )
-    ).scalar_one_or_none()
+    can be computed without a follow-up query.
+
+    `for_update` row-locks it. Mutating callers need it: reopening a round
+    read-modify-writes `interview_round` and then inserts a row per
+    panellist at the new round, so two concurrent reopens would both read
+    the old round and collide on the assignment unique constraint. The
+    other round mutations (submit_sheet, patch_sheet, put_interviewers)
+    already lock for the same reason.
+    """
+    stmt = (
+        select(Application)
+        .where(Application.id == application_id)
+        .options(selectinload(Application.candidate))
+    )
+    if for_update:
+        # Only the applications row; the eager-loaded candidate is a
+        # separate SELECT that must not be locked with it.
+        stmt = stmt.with_for_update(of=Application)
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationRead)
@@ -209,7 +222,13 @@ async def _latest_errors(
 async def _sheet_counts(
     session: AsyncSession, application_ids: list[int]
 ) -> dict[int, tuple[int, int]]:
-    """application id → (assigned, submitted). One query for the board."""
+    """application id → (assigned, submitted) for the LIVE round only.
+
+    Joined to `applications.interview_round` rather than counting every row:
+    a reopened two-person panel keeps its round-1 rows submitted forever, so
+    counting across rounds makes the board badge read 2/4 — as if half the
+    new round were already in — when nothing in it has been submitted.
+    """
     if not application_ids:
         return {}
     rows = (await session.execute(
@@ -218,7 +237,11 @@ async def _sheet_counts(
             func.count(InterviewAssignment.id),
             func.count(InterviewAssignment.submitted_at),
         )
-        .where(InterviewAssignment.application_id.in_(application_ids))
+        .join(Application, Application.id == InterviewAssignment.application_id)
+        .where(
+            InterviewAssignment.application_id.in_(application_ids),
+            InterviewAssignment.round == Application.interview_round,
+        )
         .group_by(InterviewAssignment.application_id)
     )).all()
     return {app_id: (total, submitted) for app_id, total, submitted in rows}
@@ -399,7 +422,7 @@ async def patch_application(
     llm: LLMClient | None = Depends(get_llm_or_none),
     bus: EventBus = Depends(get_event_bus),
 ) -> ApplicationRead:
-    app_row = await _load_application(session, application_id)
+    app_row = await _load_application(session, application_id, for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 

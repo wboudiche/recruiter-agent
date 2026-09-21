@@ -86,3 +86,7 @@ class SheetRead(BaseModel):
     email: str
     sheet: InterviewSheet
     submitted_at: str | None
+    # Which round this sheet belongs to. A recruiter is shown every round's
+    # sheets, so without this the client cannot tell one person's round-1
+    # sheet from their round-2 one and will match on user_id alone.
+    round: int = 1

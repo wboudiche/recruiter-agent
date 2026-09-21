@@ -23,6 +23,10 @@ export interface SheetRead {
   email: string;
   sheet: InterviewSheet;
   submitted_at: string | null;
+  /** Which round this sheet belongs to. A recruiter is shown every round's
+   *  sheets, so user_id alone does not identify one. Optional for safety
+   *  against an older server; treat a missing value as round 1. */
+  round?: number;
 }
 
 // Frozen: this object is a shared default handed out to every caller with

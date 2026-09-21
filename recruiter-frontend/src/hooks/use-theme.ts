@@ -72,11 +72,22 @@ function subscribe(onStoreChange: () => void): () => void {
   listeners.add(onStoreChange);
   // An unset preference tracks the OS live; `resolveTheme` keeps ignoring
   // the query once an explicit choice is stored, so this stays harmless.
+  //
+  // The handler REPAINTS before notifying. `applyTheme` is otherwise only
+  // reached through `setTheme`, i.e. an explicit toggle — so an OS change
+  // would move every consumer's reported theme while <html> kept its old
+  // class: the icon and the toasts would flip and the page would not. The
+  // next toggle click would then look like a no-op, because `resolveTheme`
+  // already returns the theme the user is trying to switch to.
   const query = window.matchMedia(LIGHT_QUERY);
-  query.addEventListener("change", onStoreChange);
+  const onOsChange = () => {
+    applyTheme(resolveTheme());
+    onStoreChange();
+  };
+  query.addEventListener("change", onOsChange);
   return () => {
     listeners.delete(onStoreChange);
-    query.removeEventListener("change", onStoreChange);
+    query.removeEventListener("change", onOsChange);
   };
 }
 

@@ -4,6 +4,7 @@ Before rounds existed, `scheduled` was reachable only from `invited`, so
 a second interview meant driving the candidate through REJECTED and
 re-sending an invitation. See the migration for the full story.
 """
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -390,5 +391,99 @@ async def test_a_question_answered_in_round_one_can_be_reworded_in_round_two(
         after = (await api_client.get(
             f"/api/applications/{app_id}/interview-kit")).json()["kit"]
         assert after["questions"][0]["text"] == "Reworded after round one closed."
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_sheets_carry_their_round_so_the_ui_can_find_the_live_one(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A recruiter sees every round's sheets, oldest first. Without a round on
+    each one the UI cannot tell them apart, picks the round-1 row, and shows
+    the recruiter their own already-submitted sheet with no way to record
+    round-2 feedback — which also means the round can never close."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        body = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+        rounds = sorted({s["round"] for s in body["sheets"]})
+
+        assert rounds == [1, 2], f"sheets do not identify their round: {body['sheets']}"
+        live = [s for s in body["sheets"] if s["round"] == 2]
+        assert live and all(s["submitted_at"] is None for s in live), (
+            "round 2's sheets should be fresh and unsubmitted"
+        )
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_the_board_badge_counts_only_the_live_round(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The kanban card shows "n/m sheets in". Counting every round makes a
+    reopened two-person panel read 2/4 — as if half the round were already
+    done — when round two has had nothing submitted at all."""
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+        job_id = (await api_client.get(f"/api/applications/{app_id}")).json()["job_id"]
+        await api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"})
+
+        board = (await api_client.get(f"/api/jobs/{job_id}/applications")).json()
+        card = next(a for a in board if a["id"] == app_id)
+
+        assert (card["sheets_total"], card["sheets_submitted"]) == (2, 0), (
+            f"board badge counts earlier rounds: "
+            f"{card['sheets_submitted']}/{card['sheets_total']}"
+        )
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_two_simultaneous_reopens_do_not_collide(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Reopening read-modify-writes `interview_round` and then inserts a row
+    per panellist at the new round. Without a row lock two concurrent
+    reopens both read round 1, both insert (app, user, 2), and the second
+    hits uq_interview_assignment_app_user_round_track as an unhandled 500.
+    Every other round mutation already locks for exactly this reason.
+    """
+    app.dependency_overrides[get_llm] = _fake_llm
+    try:
+        app_id = await create_scored_app()
+        await _interviewed_with_panel(api_client, app_id)
+
+        first, second = await asyncio.gather(
+            api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"}),
+            api_client.patch(f"/api/applications/{app_id}", json={"stage": "scheduled"}),
+            return_exceptions=True,
+        )
+
+        codes = sorted(
+            r.status_code for r in (first, second) if not isinstance(r, BaseException)
+        )
+        assert all(not isinstance(r, BaseException) for r in (first, second)), (
+            f"a concurrent reopen raised: {first!r} {second!r}"
+        )
+        # One reopen succeeds; the other either also succeeds (idempotent
+        # from INTERVIEWED) or is refused cleanly — never a 500.
+        assert all(c < 500 for c in codes), f"concurrent reopen returned {codes}"
+
+        SessionLocal = await _sessionmaker()
+        async with SessionLocal() as session:
+            rows = (await session.execute(
+                select(InterviewAssignment).where(
+                    InterviewAssignment.application_id == app_id)
+            )).scalars().all()
+        seen = [(r.user_id, r.round) for r in rows]
+        assert len(seen) == len(set(seen)), f"duplicate assignment rows: {seen}"
     finally:
         app.dependency_overrides.pop(get_llm, None)
