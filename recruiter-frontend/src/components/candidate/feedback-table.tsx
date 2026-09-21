@@ -16,6 +16,11 @@ const VERDICT_LABEL: Record<VerdictDecision, string> = {
 interface Props {
   questions: KitQuestion[];
   sheets: SheetRead[];
+  /** The round in progress. Sheets from earlier rounds are filtered out:
+   *  the same interviewer holds one per round after a reopen, which would
+   *  otherwise collide React keys on user_id and make the verdict tally
+   *  count the whole history instead of this round. */
+  interviewRound?: number;
 }
 
 /**
@@ -43,8 +48,10 @@ function verdictSummary(sheets: SheetRead[]): string | null {
   return parts.join(" · ");
 }
 
-export function FeedbackTable({ questions, sheets }: Props) {
+export function FeedbackTable({ questions, sheets, interviewRound }: Props) {
   const [showUnrated, setShowUnrated] = useState(false);
+  const liveRound = interviewRound ?? 1;
+  sheets = sheets.filter((s) => (s.round ?? 1) === liveRound);
   const rated = (q: KitQuestion) => sheets.some((s) => s.sheet.answers[q.id]?.rating);
   const unratedCount = questions.filter((q) => !rated(q)).length;
   const rows = showUnrated ? questions : questions.filter(rated);

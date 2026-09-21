@@ -155,6 +155,11 @@ describe("useTheme and the OS preference", () => {
     act(() => media.flipTo(true));
 
     expect(result.current.theme).toBe("light");
+    // The hook value alone is not the feature: `applyTheme` is what paints
+    // <html>, and asserting only `result.current.theme` is exactly how a
+    // hook that reports light over a still-dark page passes its own test.
+    expect(document.documentElement.classList.contains("light")).toBe(true);
+    expect(document.documentElement.style.colorScheme).toBe("light");
   });
 
   it("ignores the OS once the user has picked a theme", () => {

@@ -49,4 +49,29 @@ describe("FeedbackTable", () => {
 
     expect(screen.queryByLabelText("Verdict summary")).not.toBeInTheDocument();
   });
+
+  it("shows only the live round's sheets, so a reopened panel is not double-counted", () => {
+    // After a reopen the same person holds a round-1 and a round-2 sheet.
+    // Rendering both collides React keys on user_id and makes the tally read
+    // the whole history instead of this round.
+    const sheets = [
+      { user_id: 1, name: "Ann", email: "ann@acme.com", round: 1,
+        submitted_at: "2026-09-14T10:00:00Z",
+        sheet: { answers: {}, verdict: { decision: "hire" as const, note: null } } },
+      { user_id: 2, name: "Bob", email: "bob@acme.com", round: 1,
+        submitted_at: "2026-09-14T10:00:00Z",
+        sheet: { answers: {}, verdict: { decision: "hire" as const, note: null } } },
+      { user_id: 1, name: "Ann", email: "ann@acme.com", round: 2, submitted_at: null,
+        sheet: { answers: {}, verdict: { decision: null, note: null } } },
+      { user_id: 2, name: "Bob", email: "bob@acme.com", round: 2, submitted_at: null,
+        sheet: { answers: {}, verdict: { decision: null, note: null } } },
+    ];
+
+    render(<FeedbackTable questions={Q} sheets={sheets} interviewRound={2} />);
+
+    // One column per interviewer, not two.
+    expect(screen.getAllByRole("columnheader", { name: /Ann/ })).toHaveLength(1);
+    // No tally yet: round 2 has nothing submitted.
+    expect(screen.queryByLabelText("Verdict summary")).not.toBeInTheDocument();
+  });
 });

@@ -76,6 +76,7 @@ async def _sheets_for(
             user_id=r.user_id, name=users[r.user_id].name, email=users[r.user_id].email,
             sheet=InterviewSheet.model_validate(r.sheet or {}),
             submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
+            round=r.round,
         )
         for r in rows
     ]
