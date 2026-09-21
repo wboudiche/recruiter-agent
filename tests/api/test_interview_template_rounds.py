@@ -153,8 +153,9 @@ async def test_editing_a_template_does_not_change_a_kit_built_from_it(
     app_id = await _invited(api_client, create_scored_app)
     await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
 
-    await api_client.patch(f"/api/interview-templates/{tid}",
-                           json={"name": "Renamed", "questions": [{"id": "z9", "text": "New"}]})
+    r = await api_client.patch(f"/api/interview-templates/{tid}",
+                               json={"name": "Renamed", "questions": [{"id": "z9", "text": "New"}]})
+    assert r.status_code == 200, r.text
     # Regenerate: must rebuild from the snapshot, not the edited template.
     app.dependency_overrides[get_llm] = _llm
     try:
@@ -166,6 +167,71 @@ async def test_editing_a_template_does_not_change_a_kit_built_from_it(
     body = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
     assert [q["id"] for q in body["kit"]["questions"]] == [f"t{tid}-m1"]
     assert body["template_name"] == "RH screen", "regeneration wiped the template name"
+
+
+async def _reject_and_reinvite(api_client: AsyncClient, app_id: int) -> None:
+    """Move a SCHEDULED application back to INVITED in the SAME round (no
+    interview happens, so no round bump): reject, unreject to scored,
+    validate, then set INVITED directly in the DB — the same path
+    `_invited` uses, since there is no PATCH that reaches INVITED itself
+    (see `_validate_transition`: INVITED is a `_REQUIRED_PREDECESSOR`
+    target reached only from the pipeline, never a stage PATCH)."""
+    for stage in ("rejected", "scored", "validated"):
+        r = await api_client.patch(f"/api/applications/{app_id}", json={"stage": stage})
+        assert r.status_code == 200, r.text
+    async with (await _db())() as s:
+        await s.execute(update(Application).where(Application.id == app_id)
+                        .values(stage=Stage.INVITED))
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_same_round_rescheduling_with_the_same_template_keeps_its_snapshot(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A round re-entered with the SAME template — no round bump, no sheet
+    submitted — must not re-read the live template. Only a genuinely
+    different template choice restamps the kit; otherwise editing a
+    template between two "Mark as scheduled" clicks in the same round
+    would silently rewrite the kit already built for it, contradicting
+    decision 6 (a kit snapshots its template at creation)."""
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+    before = (await _kits(app_id))[0]
+
+    r = await api_client.patch(f"/api/interview-templates/{tid}",
+                               json={"questions": [{"id": "m2", "text": "Changed"}]})
+    assert r.status_code == 200, r.text
+    await _reject_and_reinvite(api_client, app_id)
+
+    r = await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+    assert r.status_code == 200, r.text
+
+    after = (await _kits(app_id))[0]
+    assert after.template_snapshot == before.template_snapshot
+    assert [q["id"] for q in after.questions] == [f"t{tid}-m1"], (
+        "same-template rescheduling re-read the live (edited) template")
+
+
+@pytest.mark.asyncio
+async def test_same_round_rescheduling_with_a_different_template_restamps(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    tid2 = await _template("Technical", probe_mode="none", include=False,
+                           questions=[{"id": "k8s", "text": "Clusters?"}])
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+    await _reject_and_reinvite(api_client, app_id)
+
+    r = await _schedule(api_client, app_id, _llm(), interview_template_id=tid2)
+    assert r.status_code == 200, r.text
+
+    after = (await _kits(app_id))[0]
+    assert after.template_id == tid2
+    assert [q["id"] for q in after.questions] == [f"t{tid2}-k8s"], (
+        "same-round rescheduling with a different template did not restamp")
 
 
 async def _interview_and_close(api_client: AsyncClient, app_id: int) -> None:
@@ -181,11 +247,37 @@ async def test_reopening_with_the_same_template_copies_the_kit_forward(
     await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
     await _interview_and_close(api_client, app_id)
 
+    # Prove the reopened round copies round 1's ACTUAL kit forward rather
+    # than re-seeding from the (same) template id: edit the template
+    # between rounds and hand-add a question to round 1's kit. If reopening
+    # ever re-read the live template instead of copying the snapshot, both
+    # the rename and the edited question list would leak into round 2, and
+    # the hand-added question — never part of any template — would vanish.
+    r = await api_client.patch(f"/api/interview-templates/{tid}",
+                               json={"name": "Renamed",
+                                     "questions": [{"id": "newq", "text": "New"}]})
+    assert r.status_code == 200, r.text
+
+    existing = (await api_client.get(
+        f"/api/applications/{app_id}/interview-kit")).json()["kit"]["questions"]
+    r = await api_client.patch(f"/api/applications/{app_id}/interview-kit", json={
+        "questions": existing + [
+            {"id": "hand1", "text": "Hand-added", "source": "baseline",
+             "answer": None, "rating": None},
+        ],
+    })
+    assert r.status_code == 200, r.text
+
     await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
 
     r1, r2 = await _kits(app_id)
+    assert "hand1" in [q["id"] for q in r2.questions]
     assert r2.template_id == tid and r2.template_snapshot == r1.template_snapshot
     assert [q["id"] for q in r2.questions] == [q["id"] for q in r1.questions]
+    assert r2.template_name == "RH screen", (
+        "reopen must copy round 1's template_name, not the live (renamed) template")
+    assert not any(q["id"] == f"t{tid}-newq" for q in r2.questions), (
+        "reopen re-read the live (edited) template instead of copying round 1's snapshot")
 
 
 @pytest.mark.asyncio

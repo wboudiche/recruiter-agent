@@ -416,6 +416,7 @@ async def _open_next_round(
     previous_kit = await kit_for(session, app_row)  # still the old round here
 
     app_row.interview_round = previous_round + 1
+    # The round is open again, so the application is no longer interviewed.
     app_row.interviewed_at = None
     for row in panel:
         session.add(InterviewAssignment(
@@ -425,6 +426,10 @@ async def _open_next_round(
 
     chosen_id = template.id if template is not None else None
     if previous_kit is not None and previous_kit.template_id == chosen_id:
+        # Carry the previous kit's status and error forward rather than
+        # forcing "ready": a round stuck in "error" must stay visibly
+        # broken on reopen too, or the recruiter sees an empty ready kit
+        # with the failure hidden instead of a reason to regenerate it.
         await create_kit(
             session, app_row, round=app_row.interview_round,
             questions=list(previous_kit.questions or []),
@@ -527,10 +532,15 @@ async def patch_application(
                         session, app_row, round=app_row.interview_round,
                         **template_fields(round_template),
                     )
-                else:
-                    # Same round re-entered with an unfrozen kit: the
-                    # regeneration below rebuilds its questions, so build
-                    # them from the template chosen now.
+                elif kit_row.template_id != (round_template.id if round_template else None):
+                    # Same round re-entered with an unfrozen kit, but a
+                    # DIFFERENT template was chosen this time: rebuild from
+                    # the new template's snapshot. When the template is
+                    # unchanged, leave the existing snapshot/name alone —
+                    # re-reading the live template here would rewrite the
+                    # kit's snapshot even though nothing about the round
+                    # changed, undermining decision 6 (a kit snapshots its
+                    # template at creation and never re-reads the live one).
                     for column, value in template_fields(round_template).items():
                         setattr(kit_row, column, value)
                 kit_row.status = "generating"

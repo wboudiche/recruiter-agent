@@ -133,9 +133,6 @@ async def run_generate_kit(
         # `kit_row` above is only correct for the round as it stood here.
         kit_row = await kit_for(session, app_row)
         dispatch_round = app_row.interview_round
-        # Built from what the kit was created with, never the live template:
-        # editing a template must not rewrite a round already under way.
-        snapshot = snapshot_from_row(kit_row)
         existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
         # The model call is the only thing inside the try: assembling the
@@ -146,6 +143,12 @@ async def run_generate_kit(
         criteria_by_probe: list[str | None] = []
         failure: str | None = None
         try:
+            # Built from what the kit was created with, never the live
+            # template: editing a template must not rewrite a round
+            # already under way. Parsed inside the try so a malformed
+            # stored snapshot becomes an error kit rather than an
+            # exception escaping this "never raises" background task.
+            snapshot = snapshot_from_row(kit_row)
             job = await session.get(Job, app_row.job_id)
             candidate = await session.get(Candidate, app_row.candidate_id)
             job_baseline = [BaselineQuestion.model_validate(b)
