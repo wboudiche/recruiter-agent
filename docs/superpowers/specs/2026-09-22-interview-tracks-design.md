@@ -131,8 +131,10 @@ Pure functions in `pipeline/interview_sheets.py` and
 
 `GET /api/applications/{id}/interview-kit` returns:
 
-- `tracks: [{track, template_name, kit}]` — every track of the live
-  round the caller may see (decision 3), in creation order;
+- `tracks: [{track, template_id, template_name, kit}]` — every track of
+  the live round the caller may see (decision 3), in creation order.
+  Someone on no track of the live round (an unassigned viewer) sees
+  every track, as before tracks existed;
 - `sheets` — unchanged flat list; `SheetRead` gains `track` beside
   `round`;
 - `kit` and `template_name` — kept for compatibility: the caller's own
@@ -154,7 +156,9 @@ other stage → 422. Duplicates are collapsed.
   template must be active (422 otherwise); 409 if that track already
   exists. Creates the kit (status
   `generating`) and dispatches its generation. Returns the kit read.
-- `DELETE /api/applications/{id}/interview-tracks/{track}` — 409 if any
+- `DELETE /api/applications/{id}/interview-tracks/{track}` — only while
+  the application is *scheduled* (409 otherwise, so a closed round's
+  record never changes); 409 if any
   sheet on the track is submitted or has content, or if it is the
   round's last track; otherwise deletes the kit and its (empty)
   assignments, then re-checks round completion (decision 8). Returns the
@@ -197,8 +201,17 @@ probes gets its own "No LLM provider configured" error kit.
 ticked template: its track frozen → keep its questions, recovering a
 stuck `error`/`generating` kit to `ready`; not frozen → regenerate,
 keeping answered questions, as today; absent → create and generate.
-Existing tracks not ticked are removed if nobody on them has written
-anything, and kept otherwise.
+Existing tracks not ticked are removed, with their empty panel rows, if
+nobody on them has written anything, and kept otherwise.
+
+**Interviewers picked before the round had a kit.** Assigning a panel
+before scheduling puts the rows on `default`. Whenever a round's tracks
+are created or reconciled, panel rows on a track that has no kit join the
+round's first track, so interviewers picked early are not stranded; the
+recruiter can then move them per track.
+
+**A round that never had a kit, reopened with no template,** keeps the
+pre-track behaviour: the panel carries over and no kit is made.
 
 **Another round.** For each ticked template: the previous round had a
 track with that template (matched by `template_id`, with no-template
@@ -240,8 +253,10 @@ submit — runs under the application row lock that phase 1 uses.
   as today. Several: one line per track ("Technical: Alice, Bob · RH
   screen: Carol"), each editable; a person already on another track is
   shown disabled with "on RH screen".
-- **Feedback table:** grouped by round, then track, with the verdict
-  tally per track.
+- **Feedback table:** one per track, inside that track's view, showing
+  the live round's sheets on that track with its own verdict tally. (The
+  table has only ever shown the live round; earlier rounds stay in the
+  API's `sheets` for recruiters, as today.)
 - **Structure:** `interview-kit-section.tsx` (622 lines) is split: a
   per-track `TrackKitView` (questions + own sheet + feedback) and the
   section itself (tabs, add/remove track).
