@@ -1,0 +1,236 @@
+"""Templates chosen at round start, snapshotted into the round's kit."""
+import pytest
+from httpx import AsyncClient
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from recruiter.api.candidates import get_engine_dep, get_llm
+from recruiter.llm.client import FakeLLMClient
+from recruiter.main import app
+from recruiter.models import Application, InterviewKitRow, InterviewTemplate, Job, Stage
+from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
+
+RH = [{"id": "m1", "text": "What draws you to us?"}]
+
+
+def _llm() -> FakeLLMClient:
+    return FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[
+        GeneratedQuestion(text="A generated probe.", criterion="x"),
+    ])])
+
+
+async def _db():
+    return async_sessionmaker(app.dependency_overrides[get_engine_dep](), expire_on_commit=False)
+
+
+async def _template(name: str, *, probe_mode: str, include: bool, questions=RH,
+                    active: bool = True) -> int:
+    async with (await _db())() as s:
+        t = InterviewTemplate(name=name, questions=questions, probe_mode=probe_mode,
+                              include_job_questions=include, is_active=active)
+        s.add(t)
+        await s.commit()
+        return t.id
+
+
+async def _invited(api_client: AsyncClient, create_scored_app, *, baseline=None) -> int:
+    app_id = await create_scored_app()
+    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "validated"})
+    async with (await _db())() as s:
+        await s.execute(update(Application).where(Application.id == app_id)
+                        .values(stage=Stage.INVITED))
+        if baseline is not None:
+            job_id = (await s.get(Application, app_id)).job_id
+            await s.execute(update(Job).where(Job.id == job_id)
+                            .values(interview_baseline=baseline))
+        await s.commit()
+    return app_id
+
+
+async def _kits(app_id: int) -> list[InterviewKitRow]:
+    async with (await _db())() as s:
+        return list((await s.execute(select(InterviewKitRow)
+                     .where(InterviewKitRow.application_id == app_id)
+                     .order_by(InterviewKitRow.round))).scalars().all())
+
+
+async def _schedule(api_client, app_id, llm, **extra):
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        return await api_client.patch(f"/api/applications/{app_id}",
+                                      json={"stage": "scheduled", **extra})
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+
+@pytest.mark.asyncio
+async def test_an_rh_template_builds_a_curated_kit_with_no_llm_call(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app,
+                            baseline=[{"id": "b1", "text": "Job question"}])
+    llm = _llm()
+
+    r = await _schedule(api_client, app_id, llm, interview_template_id=tid)
+
+    assert r.status_code == 200, r.text
+    assert llm.calls == [], "probe_mode none must not call the model"
+    body = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+    assert body["template_name"] == "RH screen"
+    assert body["kit"]["status"] == "ready"
+    assert [q["id"] for q in body["kit"]["questions"]] == [f"t{tid}-m1"]
+
+
+@pytest.mark.asyncio
+async def test_a_technical_template_puts_its_questions_before_the_jobs_and_adds_probes(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("Technical", probe_mode="score_gaps", include=True)
+    app_id = await _invited(api_client, create_scored_app,
+                            baseline=[{"id": "b1", "text": "Job question"}])
+    llm = _llm()
+
+    await _schedule(api_client, app_id, llm, interview_template_id=tid)
+
+    kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+    assert [q["text"] for q in kit["questions"]] == [
+        "What draws you to us?", "Job question", "A generated probe."]
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_absent_uses_the_job_default_and_null_uses_none(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    first = await _invited(api_client, create_scored_app)
+    job_id = (await api_client.get(f"/api/applications/{first}")).json()["job_id"]
+    await api_client.patch(f"/api/jobs/{job_id}", json={"default_interview_template_id": tid})
+
+    await _schedule(api_client, first, _llm())
+    assert (await _kits(first))[0].template_id == tid
+
+    second = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, second, _llm(), interview_template_id=None)
+    assert (await _kits(second))[0].template_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_archived_template_is_refused(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("Old", probe_mode="none", include=False, active=False)
+    app_id = await _invited(api_client, create_scored_app)
+    r = await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_template_with_any_other_stage_is_refused(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    app_id = await create_scored_app()
+    r = await api_client.patch(f"/api/applications/{app_id}",
+                               json={"stage": "validated", "interview_template_id": None})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_editing_a_template_does_not_change_a_kit_built_from_it(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+
+    await api_client.patch(f"/api/interview-templates/{tid}",
+                           json={"name": "Renamed", "questions": [{"id": "z9", "text": "New"}]})
+    # Regenerate: must rebuild from the snapshot, not the edited template.
+    app.dependency_overrides[get_llm] = _llm
+    try:
+        r = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        assert r.status_code == 202, r.text
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    body = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+    assert [q["id"] for q in body["kit"]["questions"]] == [f"t{tid}-m1"]
+    assert body["template_name"] == "RH screen", "regeneration wiped the template name"
+
+
+async def _interview_and_close(api_client: AsyncClient, app_id: int) -> None:
+    await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
+
+
+@pytest.mark.asyncio
+async def test_reopening_with_the_same_template_copies_the_kit_forward(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+    await _interview_and_close(api_client, app_id)
+
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tid)
+
+    r1, r2 = await _kits(app_id)
+    assert r2.template_id == tid and r2.template_snapshot == r1.template_snapshot
+    assert [q["id"] for q in r2.questions] == [q["id"] for q in r1.questions]
+
+
+@pytest.mark.asyncio
+async def test_reopening_with_a_different_template_seeds_fresh(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tech = await _template("Technical", probe_mode="none", include=False,
+                           questions=[{"id": "k8s", "text": "Clusters?"}])
+    rh = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), interview_template_id=tech)
+    await _interview_and_close(api_client, app_id)
+
+    await _schedule(api_client, app_id, _llm(), interview_template_id=rh)
+
+    r1, r2 = await _kits(app_id)
+    assert r2.template_id == rh
+    assert [q["id"] for q in r2.questions] == [f"t{rh}-m1"], (
+        "the RH round inherited the technical round's questions")
+
+
+@pytest.mark.asyncio
+async def test_with_no_templates_scheduling_is_unchanged(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The guarantee that makes this phase safe to ship."""
+    app_id = await _invited(api_client, create_scored_app,
+                            baseline=[{"id": "b1", "text": "Job question"}])
+    llm = _llm()
+
+    await _schedule(api_client, app_id, llm)
+
+    body = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()
+    assert body["template_name"] is None
+    assert [q["id"] for q in body["kit"]["questions"]][0] == "b1"
+    assert len(llm.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_template_without_probes_needs_no_llm_provider(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """With no provider configured, scheduling fails a kit with "No LLM
+    provider configured". A template that generates nothing must not be
+    failed for want of a model it never calls. No get_llm override here:
+    the fresh test database has no settings row, so get_llm_or_none
+    resolves to None exactly as it does in an unconfigured install."""
+    tid = await _template("RH screen", probe_mode="none", include=False)
+    app_id = await _invited(api_client, create_scored_app)
+
+    r = await api_client.patch(f"/api/applications/{app_id}",
+                               json={"stage": "scheduled", "interview_template_id": tid})
+
+    assert r.status_code == 200, r.text
+    kit = (await api_client.get(f"/api/applications/{app_id}/interview-kit")).json()["kit"]
+    assert kit["status"] == "ready", kit.get("error")
+    assert [q["id"] for q in kit["questions"]] == [f"t{tid}-m1"]

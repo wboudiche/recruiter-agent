@@ -59,3 +59,8 @@ class ApplicationUpdate(BaseModel):
     # it; None leaves the existing value alone. Cleared automatically
     # when stage transitions away from rejected.
     rejection_reason: str | None = None
+    # Which template the round being started uses. Only meaningful with
+    # stage "scheduled". Absent → the job's default; explicit null → no
+    # template; an id → that template. Absent and null both arrive as None,
+    # so the handler reads model_fields_set to tell them apart.
+    interview_template_id: int | None = None

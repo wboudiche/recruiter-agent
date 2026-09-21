@@ -22,8 +22,10 @@ from recruiter.models import Application, Candidate, InterviewAssignment, Interv
 from recruiter.pipeline.candidate_profile import profile_text
 from recruiter.pipeline.interview_kit import (
     build_kit,
+    fixed_questions,
     generation_in_flight,
     merge_regenerated,
+    wants_probes,
 )
 from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
 from recruiter.pipeline.interview_sheets import (
@@ -35,7 +37,15 @@ from recruiter.pipeline.interview_sheets import (
     rows_in_round,
     visible_sheets,
 )
-from recruiter.pipeline.kit_store import apply_content, content_of, create_kit, kit_for
+from recruiter.pipeline.kit_store import (
+    apply_content,
+    content_of,
+    create_kit,
+    job_default_template,
+    kit_for,
+    snapshot_from_row,
+    template_fields,
+)
 from recruiter.schemas.interview import (
     BaselineQuestion,
     GeneratedQuestion,
@@ -52,6 +62,7 @@ logger = logging.getLogger(__name__)
 
 class InterviewKitRead(BaseModel):
     kit: InterviewKit | None
+    template_name: str | None = None
     # Filtered per caller — see pipeline/interview_sheets.visible_sheets.
     sheets: list[SheetRead] = Field(default_factory=list)
 
@@ -87,6 +98,7 @@ async def _read(session: AsyncSession, app_row: Application, user: User) -> Inte
     row = await kit_for(session, app_row)
     return InterviewKitRead(
         kit=content_of(row) if row else None,
+        template_name=row.template_name if row else None,
         sheets=await _sheets_for(session, app_row, user),
     )
 
@@ -104,7 +116,7 @@ async def get_kit(
 
 
 async def run_generate_kit(
-    *, application_id: int, engine: AsyncEngine, llm: LLMClient, bus: EventBus,
+    *, application_id: int, engine: AsyncEngine, llm: LLMClient | None, bus: EventBus,
 ) -> None:
     """Generate probes and store the assembled kit. Never raises."""
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -121,6 +133,9 @@ async def run_generate_kit(
         # `kit_row` above is only correct for the round as it stood here.
         kit_row = await kit_for(session, app_row)
         dispatch_round = app_row.interview_round
+        # Built from what the kit was created with, never the live template:
+        # editing a template must not rewrite a round already under way.
+        snapshot = snapshot_from_row(kit_row)
         existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
         # The model call is the only thing inside the try: assembling the
@@ -133,17 +148,24 @@ async def run_generate_kit(
         try:
             job = await session.get(Job, app_row.job_id)
             candidate = await session.get(Candidate, app_row.candidate_id)
-            baseline = [BaselineQuestion.model_validate(b)
-                        for b in (job.interview_baseline or [])]
-            generated = await generate_probes(
-                profile=profile_text(candidate, enrichment=app_row.enrichment),
-                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
-                score_breakdown=app_row.score_breakdown,
-                baseline=baseline,
-                llm=llm,
-            )
-            texts = [q.text for q in generated.questions]
-            criteria_by_probe = [q.criterion for q in generated.questions]
+            job_baseline = [BaselineQuestion.model_validate(b)
+                            for b in (job.interview_baseline or [])]
+            baseline = fixed_questions(snapshot, job_baseline)
+            if wants_probes(snapshot):
+                if llm is None:
+                    # patch_application only dispatches without a model
+                    # when the snapshot wants no probes; recorded as an
+                    # error kit by the except below if that ever changes.
+                    raise RuntimeError("No LLM provider configured. Set one up in Settings.")
+                generated = await generate_probes(
+                    profile=profile_text(candidate, enrichment=app_row.enrichment),
+                    criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
+                    score_breakdown=app_row.score_breakdown,
+                    baseline=baseline,
+                    llm=llm,
+                )
+                texts = [q.text for q in generated.questions]
+                criteria_by_probe = [q.criterion for q in generated.questions]
         except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
             logger.warning("interview kit generation failed: %s", exc, exc_info=True)
             failure = str(exc)[:500]
@@ -264,7 +286,10 @@ async def generate_kit(
         return {"application_id": application_id}
 
     if kit_row is None:
-        kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+        kit_row = await create_kit(
+            session, app_row, round=app_row.interview_round,
+            **template_fields(await job_default_template(session, app_row)),
+        )
     kit_row.status = "generating"
     kit_row.error = None
     kit_row.generating_since = _now()
