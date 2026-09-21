@@ -10,7 +10,7 @@ from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Job, JobStatus
+from recruiter.models import InterviewTemplate, Job, JobStatus
 from recruiter.pipeline.criteria_suggester import suggest_criteria
 from recruiter.pipeline.orchestrator import rescore_applications_for_job
 from recruiter.schemas.interview import BaselineQuestion
@@ -114,6 +114,15 @@ async def update_job(
         job.status = JobStatus(payload.status)
     if payload.enrichment_consent is not None:
         job.enrichment_consent = payload.enrichment_consent
+    if "default_interview_template_id" in payload.model_fields_set:
+        tid = payload.default_interview_template_id
+        if tid is not None:
+            tpl = await session.get(InterviewTemplate, tid)
+            if tpl is None or not tpl.is_active:
+                raise HTTPException(
+                    status_code=422, detail="unknown or archived interview template",
+                )
+        job.default_interview_template_id = tid
     await session.commit()
     await session.refresh(job)
 
@@ -141,6 +150,7 @@ def _to_read(job: Job) -> JobRead:
         status=job.status.value,
         enrichment_consent=job.enrichment_consent,
         interview_baseline=job.interview_baseline,
+        default_interview_template_id=job.default_interview_template_id,
         created_at=job.created_at,
         updated_at=job.updated_at,
     )
