@@ -106,12 +106,21 @@ async def test_absent_uses_the_job_default_and_null_uses_none(
     tid = await _template("RH screen", probe_mode="none", include=False)
     first = await _invited(api_client, create_scored_app)
     job_id = (await api_client.get(f"/api/applications/{first}")).json()["job_id"]
-    await api_client.patch(f"/api/jobs/{job_id}", json={"default_interview_template_id": tid})
+    r = await api_client.patch(f"/api/jobs/{job_id}",
+                               json={"default_interview_template_id": tid})
+    assert r.status_code == 200, r.text
 
     await _schedule(api_client, first, _llm())
     assert (await _kits(first))[0].template_id == tid
 
+    # second's job must also have the default set, or "absent" and
+    # "explicit null" would be indistinguishable: both would resolve to no
+    # template simply because there is no default to fall back to.
     second = await _invited(api_client, create_scored_app)
+    second_job_id = (await api_client.get(f"/api/applications/{second}")).json()["job_id"]
+    r = await api_client.patch(f"/api/jobs/{second_job_id}",
+                               json={"default_interview_template_id": tid})
+    assert r.status_code == 200, r.text
     await _schedule(api_client, second, _llm(), interview_template_id=None)
     assert (await _kits(second))[0].template_id is None
 
