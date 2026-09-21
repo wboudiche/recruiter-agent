@@ -32,6 +32,7 @@ const server = setupServer(
   http.get("http://localhost:8000/api/jobs/6", () =>
     HttpResponse.json({ id: 6, title: "Senior DevOps", criteria: [] }),
   ),
+  http.get("http://localhost:8000/api/interview-templates", () => HttpResponse.json([])),
   http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
     HttpResponse.json({
       kit: {

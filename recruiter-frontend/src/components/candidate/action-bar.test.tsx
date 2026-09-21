@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ActionBar } from "./action-bar";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
+import { queryKeys } from "@/lib/query-keys";
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: vi.fn() }));
 vi.mock("@/lib/api", async () => {
@@ -35,7 +36,8 @@ function renderBar(application: ApplicationRead) {
 
 beforeEach(() => {
   apiMock.mockReset();
-  apiMock.mockResolvedValue({});
+  apiMock.mockImplementation(async (path: string) =>
+    path.startsWith("/api/interview-templates") ? [] : {});
 });
 
 describe("ActionBar — post-invite stage buttons", () => {
@@ -60,8 +62,9 @@ describe("ActionBar — post-invite stage buttons", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /another round/i }));
 
-    await waitFor(() => expect(apiMock).toHaveBeenCalled());
-    const [path, opts] = apiMock.mock.calls[0];
+    const isPatch = ([, o]: unknown[]) => (o as { method?: string } | undefined)?.method === "PATCH";
+    await waitFor(() => expect(apiMock.mock.calls.some(isPatch)).toBe(true));
+    const [path, opts] = apiMock.mock.calls.find(isPatch)!;
     expect(path).toBe("/api/applications/1");
     expect(opts).toMatchObject({ method: "PATCH", json: { stage: "scheduled" } });
   });
@@ -108,5 +111,26 @@ describe("ActionBar — post-invite stage buttons", () => {
         json: { stage: "scheduled" },
       }),
     );
+  });
+
+  it("opens the template picker instead of scheduling when templates exist", async () => {
+    const technical = { id: 1, name: "Technical", description: null, questions: [],
+                        probe_mode: "score_gaps", include_job_questions: true, is_active: true };
+    apiMock.mockImplementation(async (path: string) =>
+      path.startsWith("/api/interview-templates") ? [technical] : {});
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    qc.setQueryData(queryKeys.interviewTemplates(false), [technical]);
+    render(
+      <QueryClientProvider client={qc}>
+        <ActionBar application={baseApp({ stage: "invited" })} candidateEmail="alice@example.com" />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /mark as scheduled/i }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(apiMock.mock.calls.some(([, o]) => o?.method === "PATCH")).toBe(false);
   });
 });

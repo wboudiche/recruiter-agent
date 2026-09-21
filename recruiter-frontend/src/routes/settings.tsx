@@ -1,5 +1,6 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EnrichmentTab } from "@/components/settings/enrichment-tab";
+import { InterviewTemplatesTab } from "@/components/settings/interview-templates-tab";
 import { LlmTab } from "@/components/settings/llm-tab";
 import { NotificationsTab } from "@/components/settings/notifications-tab";
 import { ProfileTab } from "@/components/settings/profile-tab";
@@ -26,6 +27,7 @@ export default function Settings() {
   }
 
   const isAdmin = me.data?.role === "admin";
+  const canManageTemplates = me.data?.role === "admin" || me.data?.role === "recruiter";
 
   return (
     <div className="space-y-6">
@@ -41,6 +43,9 @@ export default function Settings() {
           {isAdmin && <TabsTrigger value="notifications">Notifications</TabsTrigger>}
           {isAdmin && <TabsTrigger value="sourcing">Sourcing</TabsTrigger>}
           {isAdmin && <TabsTrigger value="enrichment">Enrichment</TabsTrigger>}
+          {canManageTemplates && (
+            <TabsTrigger value="templates">Interview templates</TabsTrigger>
+          )}
           <TabsTrigger value="profile">Profile</TabsTrigger>
           {isAdmin && <TabsTrigger value="users">Users</TabsTrigger>}
         </TabsList>
@@ -62,6 +67,11 @@ export default function Settings() {
         {isAdmin && (
           <TabsContent value="enrichment" className="pt-6">
             <EnrichmentTab />
+          </TabsContent>
+        )}
+        {canManageTemplates && (
+          <TabsContent value="templates" className="pt-6">
+            <InterviewTemplatesTab />
           </TabsContent>
         )}
         <TabsContent value="profile" className="pt-6">

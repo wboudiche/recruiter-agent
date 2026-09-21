@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, JSON, DateTime, Enum as SAEnum, String, func
+from sqlalchemy import Boolean, JSON, DateTime, Enum as SAEnum, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -20,6 +20,12 @@ class Job(Base):
     description: Mapped[str] = mapped_column(String)
     criteria: Mapped[list[dict]] = mapped_column(JSON, default=list)
     interview_baseline: Mapped[list[dict] | None] = mapped_column(JSON)
+    # The template preselected when a round starts. An archived template
+    # is treated as no default. SET NULL keeps the job valid if a template
+    # row is ever removed outright.
+    default_interview_template_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("interview_templates.id", ondelete="SET NULL"),
+    )
     status: Mapped[JobStatus] = mapped_column(
         SAEnum(JobStatus, name="job_status", values_callable=lambda x: [e.value for e in x]),
         default=JobStatus.OPEN,

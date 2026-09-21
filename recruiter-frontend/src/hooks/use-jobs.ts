@@ -14,6 +14,7 @@ export interface JobRead {
   description: string;
   criteria: CriteriaItem[];
   status: string;
+  default_interview_template_id?: number | null;
   created_at: string;
   updated_at: string;
 }

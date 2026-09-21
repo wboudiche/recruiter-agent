@@ -22,6 +22,9 @@ class JobUpdate(BaseModel):
     criteria: list[CriteriaItem] | None = None
     status: str | None = None
     enrichment_consent: bool | None = None
+    # Absent leaves it alone; explicit null clears it — distinguished by
+    # model_fields_set in the handler, since both arrive as None.
+    default_interview_template_id: int | None = None
 
 
 class JobRead(BaseModel):
@@ -34,5 +37,6 @@ class JobRead(BaseModel):
     status: str
     enrichment_consent: bool = False
     interview_baseline: list[dict] | None = None
+    default_interview_template_id: int | None = None
     created_at: datetime
     updated_at: datetime

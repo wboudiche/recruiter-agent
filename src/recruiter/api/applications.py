@@ -21,10 +21,24 @@ from recruiter.api.jobs import get_llm_or_none
 from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
-from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
+from recruiter.models import (
+    Application,
+    Candidate,
+    EventLog,
+    InterviewAssignment,
+    InterviewTemplate,
+    Stage,
+)
 from recruiter.models.interview_assignment import empty_sheet
+from recruiter.pipeline.interview_kit import wants_probes
 from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed, rows_in_round
-from recruiter.pipeline.kit_store import create_kit, kit_for
+from recruiter.pipeline.kit_store import (
+    create_kit,
+    job_default_template,
+    kit_for,
+    snapshot_from_row,
+    template_fields,
+)
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -365,19 +379,37 @@ def _validate_transition(current: Stage, target: Stage) -> None:
         raise HTTPException(status_code=409, detail="already rejected")
 
 
-async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
-    """Reopen an interviewed application for another interview round.
+async def _resolve_round_template(
+    session: AsyncSession, app_row: Application, payload: ApplicationUpdate,
+) -> InterviewTemplate | None:
+    if "interview_template_id" not in payload.model_fields_set:
+        return await job_default_template(session, app_row)
+    if payload.interview_template_id is None:
+        return None
+    template = await session.get(InterviewTemplate, payload.interview_template_id)
+    if template is None or not template.is_active:
+        raise HTTPException(status_code=422, detail="unknown or archived interview template")
+    return template
 
-    The round that just closed is left exactly as it is — its sheets stay
-    submitted and immutable, the record of that conversation — and a fresh
-    set of rows is created for the same panel with empty sheets, so the
-    recruiter only touches the panel when round two is a different one.
 
-    The new round's kit starts as a copy of the closed round's questions
-    rather than a fresh generation: the closed round's answers are keyed
-    to its question ids, and `is_frozen` (scoped to that round) still
-    protects them. The new round's own kit is untouched and free to
-    regenerate.
+async def _open_next_round(
+    session: AsyncSession, app_row: Application,
+    template: InterviewTemplate | None, now: datetime,
+) -> bool:
+    """Reopen an interviewed application for another round.
+
+    The closed round's sheets stay as they are and the panel is copied
+    forward with empty sheets. The new round's kit follows the template
+    chosen for it:
+
+    - the same template as the closed round (including none → none):
+      copy the questions forward together with the snapshot, so a
+      follow-up round regenerates from what the first was built on even
+      if the template has since been edited;
+    - a different template: seed fresh from it. Copying a technical
+      round's questions into an RH round is what templates exist to stop.
+
+    Returns True when the new kit must be generated.
     """
     previous_round = app_row.interview_round
     panel = rows_in_round(await load_assignments(session, app_row.id), previous_round)
@@ -388,23 +420,34 @@ async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
     app_row.interviewed_at = None
     for row in panel:
         session.add(InterviewAssignment(
-            application_id=app_row.id,
-            user_id=row.user_id,
-            round=app_row.interview_round,
-            sheet=empty_sheet(),
+            application_id=app_row.id, user_id=row.user_id,
+            round=app_row.interview_round, sheet=empty_sheet(),
         ))
-    if previous_kit is not None:
+
+    chosen_id = template.id if template is not None else None
+    if previous_kit is not None and previous_kit.template_id == chosen_id:
         # Carry the previous kit's status and error forward rather than
         # forcing "ready": a round stuck in "error" must stay visibly
         # broken on reopen too, or the recruiter sees an empty ready kit
         # with the failure hidden instead of a reason to regenerate it.
         await create_kit(
-            session, app_row,
-            round=app_row.interview_round,
+            session, app_row, round=app_row.interview_round,
             questions=list(previous_kit.questions or []),
-            status=previous_kit.status,
-            error=previous_kit.error,
+            status=previous_kit.status, error=previous_kit.error,
+            template_id=previous_kit.template_id,
+            template_name=previous_kit.template_name,
+            template_snapshot=previous_kit.template_snapshot,
         )
+        return False
+    if previous_kit is None and template is None:
+        return False  # nothing to copy and nothing chosen: as today
+
+    kit = await create_kit(
+        session, app_row, round=app_row.interview_round, status="generating",
+        **template_fields(template),
+    )
+    kit.generating_since = now.isoformat()
+    return True
 
 
 @router.patch("/applications/{application_id}", response_model=ApplicationRead)
@@ -429,18 +472,29 @@ async def patch_application(
     if payload.notes is not None:
         app_row.notes = payload.notes
 
+    if "interview_template_id" in payload.model_fields_set and payload.stage != "scheduled":
+        raise HTTPException(
+            status_code=422,
+            detail="interview_template_id is only meaningful when scheduling a round",
+        )
+
     schedule_kit_generation = False
     if payload.stage is not None:
         new_stage = Stage(payload.stage)
         previous_stage = app_row.stage
         _validate_transition(app_row.stage, new_stage)
+        round_template = (
+            await _resolve_round_template(session, app_row, payload)
+            if new_stage == Stage.SCHEDULED else None
+        )
         app_row.stage = new_stage
         now = datetime.now(timezone.utc)
         if new_stage == Stage.VALIDATED:
             app_row.validated_at = now
         elif new_stage == Stage.SCHEDULED and previous_stage == Stage.INTERVIEWED:
             app_row.scheduled_at = now
-            await _open_next_round(session, app_row)
+            if await _open_next_round(session, app_row, round_template, now):
+                schedule_kit_generation = True
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
             # If a sheet in THIS round was already submitted, the question
@@ -474,7 +528,21 @@ async def patch_application(
                 # interview must not lose recorded answers/ratings) —
                 # mirrors generate_kit's logic.
                 if kit_row is None:
-                    kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+                    kit_row = await create_kit(
+                        session, app_row, round=app_row.interview_round,
+                        **template_fields(round_template),
+                    )
+                elif kit_row.template_id != (round_template.id if round_template else None):
+                    # Same round re-entered with an unfrozen kit, but a
+                    # DIFFERENT template was chosen this time: rebuild from
+                    # the new template's snapshot. When the template is
+                    # unchanged, leave the existing snapshot/name alone —
+                    # re-reading the live template here would rewrite the
+                    # kit's snapshot even though nothing about the round
+                    # changed, undermining decision 6 (a kit snapshots its
+                    # template at creation and never re-reads the live one).
+                    for column, value in template_fields(round_template).items():
+                        setattr(kit_row, column, value)
                 kit_row.status = "generating"
                 kit_row.error = None
                 # Pairs with generate_kit's idempotency check, so a
@@ -517,7 +585,10 @@ async def patch_application(
     await session.refresh(app_row, attribute_names=["candidate"])
 
     if schedule_kit_generation:
-        if llm is not None:
+        # A template without probes builds its kit with no model call, so a
+        # missing provider must not fail it.
+        needs_llm = wants_probes(snapshot_from_row(await kit_for(session, app_row)))
+        if llm is not None or not needs_llm:
             background_tasks.add_task(
                 run_generate_kit,
                 application_id=application_id, engine=engine, llm=llm, bus=bus,

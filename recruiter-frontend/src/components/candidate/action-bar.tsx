@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useApplicationMutations } from "@/hooks/use-application-mutations";
+import { useInterviewTemplates } from "@/hooks/use-interview-templates";
+import { useJob } from "@/hooks/use-job";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
 import { NotifyWizard } from "@/components/notify/notify-wizard";
 import { RejectDialog } from "./reject-dialog";
+import { ScheduleRoundDialog } from "./schedule-round-dialog";
 
 interface Props {
   application: ApplicationRead;
@@ -14,6 +17,18 @@ export function ActionBar({ application, candidateEmail }: Props) {
   const m = useApplicationMutations(application.id, application.job_id);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [notifyOpen, setNotifyOpen] = useState(false);
+  const templates = useInterviewTemplates(false).data ?? [];
+  const job = useJob(application.job_id);
+  const [pickerFor, setPickerFor] = useState<"schedule" | "reopen" | null>(null);
+
+  // With no templates the picker would offer only "No template", so skip
+  // it: one click, exactly as before templates existed. A click before the
+  // list has loaded also lands here, and omitting the field makes the
+  // server use the job's default, which is the safe choice.
+  const startSchedule = () =>
+    templates.length === 0 ? m.markScheduled() : setPickerFor("schedule");
+  const startReopen = () =>
+    templates.length === 0 ? m.reopenRound() : setPickerFor("reopen");
 
   const stage = application.stage;
   const canValidate = stage === "scored";
@@ -49,7 +64,7 @@ export function ActionBar({ application, candidateEmail }: Props) {
         </Button>
       )}
       {canMarkScheduled && (
-        <Button size="sm" onClick={m.markScheduled} disabled={m.isPending}>
+        <Button size="sm" onClick={startSchedule} disabled={m.isPending}>
           Mark as scheduled
         </Button>
       )}
@@ -67,7 +82,7 @@ export function ActionBar({ application, candidateEmail }: Props) {
         <Button
           size="sm"
           variant="outline"
-          onClick={m.reopenRound}
+          onClick={startReopen}
           disabled={m.isPending}
         >
           Another round
@@ -92,6 +107,18 @@ export function ActionBar({ application, candidateEmail }: Props) {
         open={rejectOpen}
         onOpenChange={setRejectOpen}
         onConfirm={m.reject}
+      />
+      <ScheduleRoundDialog
+        open={pickerFor !== null}
+        onOpenChange={(o) => { if (!o) setPickerFor(null); }}
+        title={pickerFor === "reopen" ? "Start another round" : "Schedule interview"}
+        templates={templates}
+        defaultTemplateId={job.data?.default_interview_template_id ?? null}
+        pending={m.isPending}
+        onConfirm={(templateId) => {
+          if (pickerFor === "reopen") m.reopenRound(templateId); else m.markScheduled(templateId);
+          setPickerFor(null);
+        }}
       />
       {canNotify && candidateEmail && (
         <NotifyWizard

@@ -1,11 +1,16 @@
 from datetime import UTC, datetime, timedelta
 
+from recruiter.models import InterviewTemplate
 from recruiter.pipeline.interview_kit import (
     build_kit,
+    fixed_questions,
     generation_in_flight,
     merge_regenerated,
+    snapshot_of,
+    wants_probes,
 )
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit, KitQuestion
+from recruiter.schemas.interview_template import TemplateSnapshot
 
 NOW = "2026-09-10T10:00:00+00:00"
 
@@ -206,3 +211,58 @@ def test_a_generating_kit_with_no_timestamp_may_be_retried() -> None:
     """Kits marked generating before this field existed carry no timestamp.
     Treating them as in flight would strand them permanently."""
     assert not generation_in_flight({"status": "generating"}, now=NOW_DT)
+
+
+def _template(
+    *, probe_mode: str, include: bool, qids=("b1",),
+) -> InterviewTemplate:
+    tpl = InterviewTemplate(
+        name="RH screen", probe_mode=probe_mode, include_job_questions=include,
+        questions=[{"id": q, "text": f"Template {q}"} for q in qids],
+    )
+    tpl.id = 7
+    return tpl
+
+
+def _job_baseline():
+    return [
+        BaselineQuestion(id="b1", text="Job b1"),
+        BaselineQuestion(id="b2", text="Job b2"),
+    ]
+
+
+def test_no_template_means_exactly_the_job_baseline_and_probes() -> None:
+    """The guarantee that makes this phase safe to ship with zero templates."""
+    assert [q.id for q in fixed_questions(None, _job_baseline())] == ["b1", "b2"]
+    assert wants_probes(None) is True
+
+
+def test_template_questions_are_namespaced_so_they_cannot_collide() -> None:
+    """Sheets key answers by question id. A template question `b1` and the
+    job's own `b1` must stay two questions, or their answers merge."""
+    snap = snapshot_of(_template(probe_mode="score_gaps", include=True))
+    ids = [q.id for q in fixed_questions(snap, _job_baseline())]
+
+    assert ids == ["t7-b1", "b1", "b2"], "template first, then the job's own, all distinct"
+
+
+def test_job_questions_left_out_when_the_template_says_so() -> None:
+    snap = snapshot_of(_template(probe_mode="none", include=False))
+    assert [q.text for q in fixed_questions(snap, _job_baseline())] == ["Template b1"]
+
+
+def test_probe_mode_none_wants_no_probes() -> None:
+    assert wants_probes(
+        snapshot_of(_template(probe_mode="none", include=False))
+    ) is False
+    assert wants_probes(
+        snapshot_of(_template(probe_mode="score_gaps", include=True))
+    ) is True
+
+
+def test_the_snapshot_survives_a_round_trip_through_the_database_shape() -> None:
+    """The snapshot is stored as a dict on the kit row and read back later;
+    the round trip must not lose the namespacing or the switches."""
+    snap = snapshot_of(_template(probe_mode="none", include=False))
+    again = TemplateSnapshot.model_validate(snap.model_dump())
+    assert again == snap
