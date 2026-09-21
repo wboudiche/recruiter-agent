@@ -84,16 +84,31 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
   // oldest first, so `user_id` alone finds their round-1 row — which reads
   // as already submitted and leaves no way to record this round's feedback.
   const liveRound = interviewRound ?? 1;
-  const mySheetRead =
-    sheets.find((s) => s.user_id === myId && (s.round ?? 1) === liveRound) ?? null;
-  const canWriteSheet = mySheetRead ? mySheetRead.submitted_at === null : (canWrite && sheets.length === 0);
+  // A recruiter is shown EVERY round's sheets, oldest first. Anything that
+  // reasons about "the sheets" means this round's; matching on user_id
+  // alone finds a stale round-1 row.
+  const liveRoundSheets = sheets.filter((s) => (s.round ?? 1) === liveRound);
+  const mySheetRead = liveRoundSheets.find((s) => s.user_id === myId) ?? null;
+  // `liveRoundSheets.length === 0`, not `sheets.length === 0`: this mirrors
+  // the server, where `_own_assignment` auto-creates a row when the LIVE
+  // round has no panel. Checking every round would lock a recruiter out of
+  // a sheet the server would happily create — round one's rows never go
+  // away.
+  const canWriteSheet = mySheetRead
+    ? mySheetRead.submitted_at === null
+    : (canWrite && liveRoundSheets.length === 0);
   const isSubmitted = mySheetRead?.submitted_at != null;
   // Once any interviewer has submitted, the question list freezes for
   // removal — every sheet keeps scoring against the same set of questions.
   // Question ids are stable, so renaming an existing question's text stays
   // allowed after a freeze; only Remove (and regenerate, not a button here)
   // are refused.
-  const frozen = sheets.some((s) => s.submitted_at !== null);
+  // Scoped to the live round, like the sheet lookup above. Round one's
+  // sheets stay submitted forever, so an application-wide check would
+  // freeze every later round permanently — and would contradict the
+  // server, which allows the removal (see
+  // test_round_two_questions_are_editable_after_round_one_closed).
+  const frozen = liveRoundSheets.some((s) => s.submitted_at !== null);
   // A recruiter/admin may always reword a question's text; an interviewer
   // (no `canWrite`) may only edit a question they appended this session
   // (see `canEditThisQuestion` below) — freezing never affects this.
@@ -167,7 +182,13 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
   // Same seeding pattern for the caller's own sheet, keyed on its identity
   // (whose sheet, and whether it's been submitted) so a background refetch
   // never clobbers answers being typed.
-  const sheetKey = mySheetRead ? `${mySheetRead.user_id}:${mySheetRead.submitted_at}` : "none";
+  // Round is part of the identity: closing a round manually with an
+  // unsubmitted sheet and reopening yields the same (user, submitted) pair
+  // either side, so without it the editor keeps the previous round's draft
+  // and Save writes it into the new round.
+  const sheetKey = mySheetRead
+    ? `${mySheetRead.user_id}:${mySheetRead.round ?? 1}:${mySheetRead.submitted_at}`
+    : "none";
   const [seededSheetKey, setSeededSheetKey] = useState<string | null>(null);
   if (sheetKey !== seededSheetKey) {
     setSeededSheetKey(sheetKey);
@@ -567,7 +588,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound }:
       {/* Count THIS round's sheets: after a reopen the raw list holds every
           round, so the side-by-side table would appear for a single
           interviewer purely because an earlier round had two. */}
-      {canWrite && sheets.filter((s) => (s.round ?? 1) === liveRound).length > 1 && (
+      {canWrite && liveRoundSheets.length > 1 && (
         <FeedbackTable questions={draft} sheets={sheets} interviewRound={liveRound} />
       )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
