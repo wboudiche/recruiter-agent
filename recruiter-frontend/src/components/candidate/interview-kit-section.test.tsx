@@ -179,6 +179,85 @@ describe("InterviewKitSection", () => {
     expect(screen.queryByDisplayValue("round one answer")).not.toBeInTheDocument();
   });
 
+  it("does not freeze round two's questions because round one was submitted", async () => {
+    // The server allows this PATCH (see
+    // test_round_two_questions_are_editable_after_round_one_closed). A
+    // client-side freeze computed across every round contradicts it: round
+    // one's sheets stay submitted forever, so Remove would be disabled for
+    // the life of the application.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: {}, verdict: { decision: "hire", note: null } } },
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 2, submitted_at: null,
+          sheet: { answers: {}, verdict: { decision: null, note: null } } },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /remove question 1/i })).toBeEnabled();
+  });
+
+  it("re-seeds the sheet editor when a round is reopened", async () => {
+    // The seed key is (whose sheet, submitted?). Closing a round manually
+    // with an unsubmitted sheet and reopening yields the same key either
+    // side — so the editor keeps round one's draft and Save writes it into
+    // round two.
+    const sheetIn = (round: number, answer: string | null) => ({
+      user_id: 1, name: "Me", email: "me@acme.com", round, submitted_at: null,
+      sheet: { answers: answer ? { b1: { answer, rating: null } } : {},
+               verdict: { decision: null, note: null } },
+    });
+    let sheets = [sheetIn(1, "round one draft")];
+    server.use(
+      http.get("http://localhost:8000/api/auth/me", () =>
+        HttpResponse.json({ id: 1, email: "me@acme.com", name: "Me", picture: null,
+                            role: "recruiter" })),
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: READY, sheets })),
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json([])),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const Tree = ({ round }: { round: number }) => (
+      <QueryClientProvider client={qc}>
+        <InterviewKitSection applicationId={1} canWrite interviewRound={round} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(<Tree round={1} />);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("round one draft")).toBeInTheDocument());
+
+    // Same person, still unsubmitted — but now round two.
+    sheets = [sheetIn(2, null)];
+    await qc.invalidateQueries({ queryKey: queryKeys.interviewKit(1) });
+    rerender(<Tree round={2} />);
+
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue("round one draft")).not.toBeInTheDocument());
+  });
+
+  it("lets a recruiter write when THIS round has no panel, even with history", async () => {
+    // `_own_assignment` auto-creates a row when the LIVE round has none,
+    // which is what keeps the zero-setup single-recruiter flow working.
+    // Checking every round instead locks the recruiter out of a sheet the
+    // server would accept: round one's rows make the list non-empty.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: {}, verdict: { decision: "hire", note: null } } },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /submit interview/i })).toBeInTheDocument());
+  });
+
   it("renders questions with their source badge", async () => {
     mountWithKit(READY);
     await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
