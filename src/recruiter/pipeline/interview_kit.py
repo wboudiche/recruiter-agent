@@ -7,13 +7,60 @@ import uuid
 from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 
+from recruiter.models.interview_template import InterviewTemplate
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit, KitQuestion
+from recruiter.schemas.interview_template import TemplateSnapshot
 
 
 # How long a run marked `generating` is assumed to still be working. Long
 # enough to cover a slow model call, short enough that a run killed
 # mid-flight can be retried rather than stranding the kit forever.
 GENERATION_STALE_AFTER = timedelta(seconds=90)
+
+
+def snapshot_of(template: InterviewTemplate) -> TemplateSnapshot:
+    """Freeze a template into what a kit will be built from.
+
+    Question ids are namespaced as `t<template_id>-<id>`. The editor mints
+    UUIDs, but ids are client-supplied and not required to be — and a
+    template question sharing an id with the job's own baseline would
+    make sheets merge two questions' answers, since answers are keyed by
+    question id. Job baseline ids are never rewritten: existing kits and
+    sheets already reference them.
+    """
+    return TemplateSnapshot(
+        questions=[
+            BaselineQuestion.model_validate({**q, "id": f"t{template.id}-{q['id']}"})
+            for q in (template.questions or [])
+        ],
+        probe_mode=template.probe_mode,
+        include_job_questions=template.include_job_questions,
+    )
+
+
+def fixed_questions(
+    snapshot: TemplateSnapshot | None, job_baseline: list[BaselineQuestion],
+) -> list[BaselineQuestion]:
+    """The questions a kit asks regardless of generation.
+
+    No template → the job's baseline, exactly as kits have always been
+    built. Otherwise the template's questions come first, so a shared
+    standard opens the interview, followed by the job's own when the
+    template includes them.
+    """
+    if snapshot is None:
+        return list(job_baseline)
+    return [
+        *snapshot.questions,
+        *(job_baseline if snapshot.include_job_questions else []),
+    ]
+
+
+def wants_probes(snapshot: TemplateSnapshot | None) -> bool:
+    """Whether generation should call the LLM for probes. Probes come from
+    the technical score breakdown, so an RH-style template switches them
+    off rather than have technical questions appended to an HR round."""
+    return snapshot is None or snapshot.probe_mode == "score_gaps"
 
 
 def generation_in_flight(kit: dict | None, *, now: datetime) -> bool:
