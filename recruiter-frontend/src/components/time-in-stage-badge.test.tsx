@@ -28,12 +28,12 @@ describe("TimeInStageBadge", () => {
   it("renders warning color at 7-14d", () => {
     render(<TimeInStageBadge application={mkApp(10)} />);
     const el = screen.getByText("10d");
-    expect(el.className).toContain("text-yellow-600");
+    expect(el.className).toContain("text-warning");
   });
 
   it("renders critical color at >14d", () => {
     render(<TimeInStageBadge application={mkApp(20)} />);
     const el = screen.getByText("20d");
-    expect(el.className).toContain("text-red-600");
+    expect(el.className).toContain("text-danger");
   });
 });

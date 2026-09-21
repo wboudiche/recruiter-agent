@@ -3,6 +3,7 @@ import { UserChip } from "@/components/auth/user-chip";
 import { CommandPaletteProvider } from "@/components/command-palette/command-palette-context";
 import { CommandPalette } from "@/components/command-palette/command-palette";
 import { SearchTrigger } from "@/components/command-palette/search-trigger";
+import { ThemeToggle } from "./theme-toggle";
 
 export function AppShell() {
   return (
@@ -26,6 +27,7 @@ export function AppShell() {
               <NavLink to="/settings">Settings</NavLink>
               <div className="mx-1 hidden h-4 w-px bg-border sm:block" />
               <SearchTrigger />
+              <ThemeToggle />
               <UserChip />
             </nav>
           </div>

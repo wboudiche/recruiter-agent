@@ -27,6 +27,10 @@ const VERDICTS: { value: VerdictDecision; label: string }[] = [
 interface Props {
   applicationId: number;
   canWrite: boolean;
+  /** Which round is in progress. Labelled only past the first, where a
+   *  reset of every sheet is otherwise indistinguishable from a round
+   *  that never happened. */
+  interviewRound?: number;
 }
 
 // Ids minted client-side for newly-added questions. `Date.now()` alone can
@@ -47,7 +51,7 @@ function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.detail : fallback;
 }
 
-export function InterviewKitSection({ applicationId, canWrite }: Props) {
+export function InterviewKitSection({ applicationId, canWrite, interviewRound }: Props) {
   const { kit, sheets, isLoading, isError, refetch, generate, patch, saveSheet, submitSheet, draftQuestion } =
     useInterviewKit(applicationId);
   const me = useCurrentUser();
@@ -76,15 +80,35 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // row yet". This mirrors the server: a recruiter/admin with no assignment
   // row on the application gets one created on first save; an unassigned
   // recruiter on an application that already has rows gets a 404.
-  const mySheetRead = sheets.find((s) => s.user_id === myId) ?? null;
-  const canWriteSheet = mySheetRead ? mySheetRead.submitted_at === null : (canWrite && sheets.length === 0);
+  // Match on round as well as user: a recruiter sees EVERY round's sheets,
+  // oldest first, so `user_id` alone finds their round-1 row — which reads
+  // as already submitted and leaves no way to record this round's feedback.
+  const liveRound = interviewRound ?? 1;
+  // A recruiter is shown EVERY round's sheets, oldest first. Anything that
+  // reasons about "the sheets" means this round's; matching on user_id
+  // alone finds a stale round-1 row.
+  const liveRoundSheets = sheets.filter((s) => (s.round ?? 1) === liveRound);
+  const mySheetRead = liveRoundSheets.find((s) => s.user_id === myId) ?? null;
+  // `liveRoundSheets.length === 0`, not `sheets.length === 0`: this mirrors
+  // the server, where `_own_assignment` auto-creates a row when the LIVE
+  // round has no panel. Checking every round would lock a recruiter out of
+  // a sheet the server would happily create — round one's rows never go
+  // away.
+  const canWriteSheet = mySheetRead
+    ? mySheetRead.submitted_at === null
+    : (canWrite && liveRoundSheets.length === 0);
   const isSubmitted = mySheetRead?.submitted_at != null;
   // Once any interviewer has submitted, the question list freezes for
   // removal — every sheet keeps scoring against the same set of questions.
   // Question ids are stable, so renaming an existing question's text stays
   // allowed after a freeze; only Remove (and regenerate, not a button here)
   // are refused.
-  const frozen = sheets.some((s) => s.submitted_at !== null);
+  // Scoped to the live round, like the sheet lookup above. Round one's
+  // sheets stay submitted forever, so an application-wide check would
+  // freeze every later round permanently — and would contradict the
+  // server, which allows the removal (see
+  // test_round_two_questions_are_editable_after_round_one_closed).
+  const frozen = liveRoundSheets.some((s) => s.submitted_at !== null);
   // A recruiter/admin may always reword a question's text; an interviewer
   // (no `canWrite`) may only edit a question they appended this session
   // (see `canEditThisQuestion` below) — freezing never affects this.
@@ -158,7 +182,13 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
   // Same seeding pattern for the caller's own sheet, keyed on its identity
   // (whose sheet, and whether it's been submitted) so a background refetch
   // never clobbers answers being typed.
-  const sheetKey = mySheetRead ? `${mySheetRead.user_id}:${mySheetRead.submitted_at}` : "none";
+  // Round is part of the identity: closing a round manually with an
+  // unsubmitted sheet and reopening yields the same (user, submitted) pair
+  // either side, so without it the editor keeps the previous round's draft
+  // and Save writes it into the new round.
+  const sheetKey = mySheetRead
+    ? `${mySheetRead.user_id}:${mySheetRead.round ?? 1}:${mySheetRead.submitted_at}`
+    : "none";
   const [seededSheetKey, setSeededSheetKey] = useState<string | null>(null);
   if (sheetKey !== seededSheetKey) {
     setSeededSheetKey(sheetKey);
@@ -195,7 +225,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     return (
       <section className="space-y-2">
         <h3 className="text-lg font-semibold">Interview kit</h3>
-        <p className="text-xs border border-red-400 bg-red-50 text-red-900 rounded p-2">
+        <p className="text-xs border border-danger-line bg-danger-soft text-danger rounded p-2">
           Couldn't load the interview kit.
         </p>
         <Button variant="outline" onClick={() => refetch()}>Retry</Button>
@@ -232,11 +262,17 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
     );
   }
 
-  if (kit.status === "error") {
+  // Only take over the whole section when there is nothing else to show. A
+  // failed regeneration KEEPS the questions it already had (see
+  // run_generate_kit), and sheets may already hold answers against them —
+  // so an error over a populated kit is a banner, not a screen. Retry is
+  // recruiter-only, which made the bare screen a dead end for an
+  // interviewer: no questions, no sheet, no way out.
+  if (kit.status === "error" && kit.questions.length === 0) {
     return (
       <section className="space-y-2">
         <h3 className="text-lg font-semibold">Interview kit</h3>
-        <p className="text-xs border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2">
+        <p className="text-xs border border-warning-line bg-warning-soft text-warning rounded p-2">
           {kit.error ?? "Generation failed."}
         </p>
         {canWrite && (
@@ -262,6 +298,20 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
 
   const unanswered = draft.filter((q) => !sheet.answers[q.id]?.answer?.trim()).length;
   const serverQuestionIds = new Set((kit.questions ?? []).map((q) => q.id));
+  // Wording is locked once a SUBMITTED sheet has answered or rated the
+  // question: its text is part of the record of what was asked. The server
+  // enforces this (patch_kit 409s), so offering an editable box that fails
+  // on save would only be a worse way to find out. A draft answer locks
+  // nothing — there is no record yet.
+  const recordedQuestionIds = new Set(
+    sheets
+      .filter((s) => s.submitted_at)
+      .flatMap((s) =>
+        Object.entries(s.sheet.answers)
+          .filter(([, a]) => a?.answer || a?.rating)
+          .map(([id]) => id),
+      ),
+  );
 
   function discardQuestionEdits() {
     if (!kit) return;
@@ -319,11 +369,26 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
 
   return (
     <section className="space-y-3">
-      <h3 className="text-lg font-semibold">Interview kit</h3>
+      <h3 className="text-lg font-semibold">
+        Interview kit
+        {(interviewRound ?? 1) > 1 && (
+          <span className="ml-2 text-xs font-normal uppercase tracking-[0.18em] text-muted-foreground">
+            Round {interviewRound}
+          </span>
+        )}
+      </h3>
+      {kit.status === "error" && (
+        <p className="text-xs border border-warning-line bg-warning-soft text-warning rounded p-2">
+          {kit.error ?? "Generation failed."} The questions below are the ones
+          already on the kit.
+        </p>
+      )}
       <ul className="space-y-3">
         {draft.map((q, i) => {
           const mine = sheet.answers[q.id] ?? { answer: null, rating: null };
-          const canEditThisQuestion = canEditQuestions || (canAppend && !serverQuestionIds.has(q.id));
+          const recorded = recordedQuestionIds.has(q.id);
+          const canEditThisQuestion =
+            !recorded && (canEditQuestions || (canAppend && !serverQuestionIds.has(q.id)));
           return (
             <li key={q.id} className="border border-border rounded p-2 space-y-2">
               <div className="flex items-start justify-between gap-2">
@@ -467,7 +532,7 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
               variant="outline"
               onClick={() => saveAll()}
               data-dirty={isDirty}
-              className={isDirty ? "border-amber-400 text-amber-400" : undefined}
+              className={isDirty ? "border-warning-line text-warning" : undefined}
               disabled={saveSheet.isPending || patch.isPending || submitSheet.isPending}
             >
               {canWriteSheet ? "Save answers" : "Save questions"}{isDirty && <span aria-hidden="true">*</span>}
@@ -520,7 +585,12 @@ export function InterviewKitSection({ applicationId, canWrite }: Props) {
           />
         </div>
       )}
-      {canWrite && sheets.length > 1 && <FeedbackTable questions={draft} sheets={sheets} />}
+      {/* Count THIS round's sheets: after a reopen the raw list holds every
+          round, so the side-by-side table would appear for a single
+          interviewer purely because an earlier round had two. */}
+      {canWrite && liveRoundSheets.length > 1 && (
+        <FeedbackTable questions={draft} sheets={sheets} interviewRound={liveRound} />
+      )}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>

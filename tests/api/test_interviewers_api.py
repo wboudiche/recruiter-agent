@@ -9,6 +9,7 @@ from recruiter.api.candidates import get_engine_dep
 from recruiter.auth.passwords import hash_password
 from recruiter.main import app
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 
 
 @pytest.fixture(autouse=True)
@@ -182,12 +183,12 @@ async def test_put_closes_the_round_when_the_last_unsubmitted_interviewer_is_rem
     b = await _add_user_via_engine("b@acme.com", Role.VIEWER)
     async with _sessionmaker()() as session:
         await session.execute(
-            update(Application).where(Application.id == app_id).values(
-                stage=Stage.SCHEDULED,
-                interview_kit={"status": "ready",
-                               "questions": [{"id": "q1", "text": "Why?", "source": "probe"}]},
-            )
+            update(Application).where(Application.id == app_id).values(stage=Stage.SCHEDULED)
         )
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+        ))
         session.add(InterviewAssignment(application_id=app_id, user_id=a,
                                         submitted_at=datetime.now(UTC)))
         session.add(InterviewAssignment(application_id=app_id, user_id=b))
@@ -261,12 +262,12 @@ async def test_put_no_change_save_does_not_close_the_round(
     a = await _add_user_via_engine("a@acme.com", Role.VIEWER)
     async with _sessionmaker()() as session:
         await session.execute(
-            update(Application).where(Application.id == app_id).values(
-                stage=Stage.SCHEDULED,
-                interview_kit={"status": "ready",
-                               "questions": [{"id": "q1", "text": "Why?", "source": "probe"}]},
-            )
+            update(Application).where(Application.id == app_id).values(stage=Stage.SCHEDULED)
         )
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+        ))
         session.add(InterviewAssignment(application_id=app_id, user_id=a,
                                         submitted_at=datetime.now(UTC)))
         await session.commit()

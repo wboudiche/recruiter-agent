@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.auth.passwords import hash_password
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 
 PW = "pw-12345678"
 SHEET = {"answers": {}, "verdict": {"decision": "unsure", "note": None}}
@@ -44,10 +45,13 @@ async def _seed(session: AsyncSession) -> int:
     await session.flush()
     app_row = Application(
         job_id=job.id, candidate_id=cand.id, stage=Stage.SCHEDULED, score=80,
-        interview_kit={"status": "ready",
-                       "questions": [{"id": "q1", "text": "Why?", "source": "probe"}]},
     )
     session.add(app_row)
+    await session.flush()
+    session.add(InterviewKitRow(
+        application_id=app_row.id, round=1, track="default", status="ready",
+        questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+    ))
     await session.commit()
     return app_row.id
 

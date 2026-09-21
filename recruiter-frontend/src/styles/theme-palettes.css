@@ -1,0 +1,161 @@
+/* Theme palettes — the only place a colour literal belongs.
+ *
+ * Both themes declare the same token names on <html>, so every rule in the
+ * app (and every Tailwind colour utility, which maps onto these via
+ * tailwind.config.ts) flips by swapping one class. `use-theme.ts` owns that
+ * class; the inline boot script in index.html sets it before first paint.
+ *
+ * The `--ed-*` names are ROLES, not literal colours. `--ed-cream` is "the
+ * high-contrast type colour" — cream on the dark ground, deep oxblood ink on
+ * parchment. Likewise `--ed-bg-deep` is "the recessed ground": near-black in
+ * dark, near-white in light. Reading them as literals will mislead you.
+ */
+
+/* ----- Shared across both themes ----- */
+:root {
+  --radius: 0;                        /* hard editorial edges — no rounded corners */
+}
+
+/* ----- Dark: oxblood ground, cream type, amber accent ----- */
+:root,
+html.dark {
+  color-scheme: dark;
+
+  --ed-bg-deep: 8 12% 5%;            /* #0b0808 — near-black warmth */
+  --ed-bg: 8 14% 8%;                 /* slightly lifted off pure black */
+  --ed-wine: 350 52% 16%;            /* #3a1218 — oxblood */
+  --ed-cream: 36 56% 92%;            /* #f5ede0 — primary fg */
+  --ed-cream-dim: 36 18% 73%;        /* #c9bfae — muted fg */
+  --ed-amber: 41 47% 58%;            /* #c8a961 — accent */
+  --ed-amber-dim: 41 47% 58%;        /* same hue, used at low alpha */
+  --ed-hairline: 36 56% 92%;         /* cream at low alpha → border */
+
+  /* Stage / status palette (kept distinct so pipelines still read clearly) */
+  --stage-extracting: 38 92% 50%;
+  --stage-enriching:  271 81% 56%;
+  --stage-scored:     217 91% 60%;
+  --stage-validated:  142 71% 45%;
+  --stage-invited:    199 89% 48%;
+  --stage-scheduled:  173 80% 40%;
+  --stage-interviewed: 258 85% 66%;
+  --stage-offer:      300 65% 60%;
+  --stage-hired:      84 55% 45%;
+  --stage-rejected:   0 84% 60%;
+  --stage-sourced:    36 18% 73%;
+
+  /* shadcn tokens mapped onto the editorial palette */
+  --background: var(--ed-bg);
+  --foreground: var(--ed-cream);
+  --card: var(--ed-bg-deep);
+  --card-foreground: var(--ed-cream);
+  --popover: var(--ed-bg-deep);
+  --popover-foreground: var(--ed-cream);
+  --primary: var(--ed-cream);
+  --primary-foreground: var(--ed-bg-deep);
+  --secondary: 350 35% 12%;
+  --secondary-foreground: var(--ed-cream);
+  --muted: 8 14% 12%;
+  --muted-foreground: var(--ed-cream-dim);
+  --accent: var(--ed-amber);
+  --accent-foreground: var(--ed-bg-deep);
+  --destructive: 8 70% 50%;
+  --destructive-foreground: var(--ed-cream);
+  --border: 36 30% 25%;              /* low-chroma cream hairline */
+  --input: 36 30% 25%;
+  --ring: var(--ed-amber);
+
+  /* Cast shadows: black on a near-black ground needs to be heavy to register. */
+  --ed-shadow: 0 0% 0%;
+  --ed-shadow-strength: 0.7;
+
+  /* Modal scrim. */
+  --ed-scrim: 0 0% 0%;
+  --ed-scrim-strength: 0.8;
+
+  /* Status colours for banners, pills and inline notices. Each is a trio:
+     the type colour, the wash it sits on, and its hairline. Components use
+     these instead of raw Tailwind palette steps, which are fixed to one
+     ground and go unreadable on the other. */
+  --warning: 38 92% 62%;
+  --warning-soft: 38 55% 13%;
+  --warning-line: 38 65% 34%;
+  --danger: 0 84% 68%;
+  --danger-soft: 0 55% 13%;
+  --danger-line: 0 65% 36%;
+  --success: 152 58% 56%;
+  --success-soft: 152 45% 11%;
+  --success-line: 152 45% 30%;
+}
+
+/* ----- Light: warm parchment ground, oxblood ink, darkened amber -----
+ *
+ * The accent darkens from #c8a961 to #8a6d28 because the dark-mode amber
+ * lands around 1.9:1 on parchment — unreadable. The stage colours darken
+ * for the same reason: they were tuned to glow on near-black.
+ */
+html.light {
+  color-scheme: light;
+
+  --ed-bg-deep: 40 55% 97%;          /* #fbf8f1 — raised card ground */
+  --ed-bg: 40 49% 94%;               /* #f7f2e8 — warm parchment */
+  --ed-wine: 353 49% 32%;            /* #7a2a33 — oxblood, lifted to read on light */
+  --ed-cream: 355 35% 12%;           /* #2a1416 — deep oxblood ink */
+  --ed-cream-dim: 24 13% 37%;        /* #6b5c52 — warm gray */
+  --ed-amber: 42 60% 30%;            /* #7a5f19 — darkened accent, 5.4:1 on the ground */
+  --ed-amber-dim: 42 60% 30%;
+  --ed-hairline: 355 35% 12%;        /* ink at low alpha → border */
+
+  --stage-extracting: 38 95% 30%;
+  --stage-enriching:  271 60% 45%;
+  --stage-scored:     217 75% 42%;
+  --stage-validated:  142 65% 28%;
+  --stage-invited:    199 80% 34%;
+  --stage-scheduled:  173 70% 27%;
+  --stage-interviewed: 258 60% 48%;
+  --stage-offer:      300 50% 40%;
+  --stage-hired:      84 55% 28%;
+  --stage-rejected:   0 70% 42%;
+  --stage-sourced:    24 13% 37%;
+
+  --background: var(--ed-bg);
+  --foreground: var(--ed-cream);
+  --card: var(--ed-bg-deep);
+  --card-foreground: var(--ed-cream);
+  --popover: var(--ed-bg-deep);
+  --popover-foreground: var(--ed-cream);
+  --primary: var(--ed-cream);
+  --primary-foreground: var(--ed-bg-deep);
+  --secondary: 350 30% 92%;
+  --secondary-foreground: var(--ed-cream);
+  --muted: 40 30% 90%;
+  --muted-foreground: var(--ed-cream-dim);
+  --accent: var(--ed-amber);
+  --accent-foreground: var(--ed-bg-deep);
+  --destructive: 0 65% 42%;
+  --destructive-foreground: 40 55% 97%;
+  --border: 24 16% 66%;              /* warm hairline; matches dark's ~2:1 rule weight */
+  --input: 24 16% 66%;
+  --ring: var(--ed-amber);
+
+  /* A warm grey at low alpha — black at 0.7 reads as a bruise on parchment. */
+  --ed-shadow: 24 20% 40%;
+  --ed-shadow-strength: 0.22;
+
+  /* A warm veil, not a blackout: 0.8 black over parchment reads as a fault,
+     not as focus. Still dims enough to push the page behind the dialog. */
+  --ed-scrim: 24 18% 30%;
+  --ed-scrim-strength: 0.42;
+
+  /* Status trio on parchment: the type colours are darkened to clear AA on
+     their own wash, and the washes are tinted just far enough off the
+     ground to read as a panel rather than a stain. */
+  --warning: 35 95% 26%;
+  --warning-soft: 44 70% 89%;
+  --warning-line: 40 55% 62%;
+  --danger: 0 72% 38%;
+  --danger-soft: 8 70% 93%;
+  --danger-line: 6 50% 70%;
+  --success: 152 70% 22%;
+  --success-soft: 150 40% 90%;
+  --success-line: 150 35% 64%;
+}

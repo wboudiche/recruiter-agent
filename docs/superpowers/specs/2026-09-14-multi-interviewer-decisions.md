@@ -58,6 +58,17 @@ made question text read-only once a round is frozen. The spec keeps question
 renaming allowed after a freeze, because question ids — not their text — are
 what stay stable, so the component keeps the question textarea editable for
 recruiters after a freeze and disables only Remove.
+
+> **Superseded 2026-09-20.** Narrowed rather than reverted. Wording is now
+> locked for a question that has been answered or rated in a *submitted*
+> sheet, because its text is part of the record of what was asked and said,
+> and rewording it changes what that record means. Everything this decision
+> was protecting still holds: an unanswered question stays freely editable,
+> so fixing a typo after one interview — the case named in the design's
+> Risks — still works, and a draft answer locks nothing, since there is no
+> record yet and the recruiter may be fixing the very question the
+> interviewer is struggling with. Enforced in `patch_kit` (409) and
+> mirrored in the component, which renders a locked question as text.
 `canWriteSheet`'s `sheets.length === 0` fallback was challenged in review for
 the same reason and kept: it mirrors the server's own rule (no assignment
 rows means auto-create; rows exist and the caller is unassigned means 404),

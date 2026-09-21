@@ -49,6 +49,24 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // Status trios: `text-warning` / `bg-warning-soft` /
+        // `border-warning-line`, and the same for danger and success. These
+        // flip with the theme; raw palette steps do not.
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          soft: "hsl(var(--warning-soft))",
+          line: "hsl(var(--warning-line))",
+        },
+        danger: {
+          DEFAULT: "hsl(var(--danger))",
+          soft: "hsl(var(--danger-soft))",
+          line: "hsl(var(--danger-line))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          soft: "hsl(var(--success-soft))",
+          line: "hsl(var(--success-line))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

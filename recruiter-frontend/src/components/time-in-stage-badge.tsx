@@ -3,8 +3,8 @@ import type { ApplicationRead } from "@/hooks/use-job-applications";
 
 const COLOR: Record<"fresh" | "warning" | "critical", string> = {
   fresh: "text-muted-foreground",
-  warning: "text-yellow-600",
-  critical: "text-red-600",
+  warning: "text-warning",
+  critical: "text-danger",
 };
 
 interface Props {

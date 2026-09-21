@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, UniqueConstraint, func
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from recruiter.models.base import Base
@@ -13,14 +13,23 @@ def empty_sheet() -> dict:
 class InterviewAssignment(Base):
     """One interviewer on one application, with their feedback sheet.
 
-    Questions are shared and live in `applications.interview_kit`; only the
-    answers, ratings and verdict are per person. Each interviewer writes
-    their own row, so two people saving at once never overwrite each other.
+    Questions are shared and live in `interview_kits`, one row per
+    `(application_id, round, track)`; this assignment's sheet is matched to
+    its kit by that triple. Only the answers, ratings and verdict are per
+    person. Each interviewer writes their own row, so two people saving at
+    once never overwrite each other.
+
+    One row per interviewer PER ROUND. Reopening an application for a
+    second interview creates a fresh set of rows at the next `round`,
+    leaving the first round's submitted sheets immutable beside them —
+    which is what makes a second interview possible without rejecting the
+    candidate to get back through the funnel.
     """
 
     __tablename__ = "interview_assignments"
     __table_args__ = (
-        UniqueConstraint("application_id", "user_id", name="uq_interview_assignment_app_user"),
+        UniqueConstraint("application_id", "user_id", "round", "track",
+                         name="uq_interview_assignment_app_user_round_track"),
         Index("ix_interview_assignments_application_id", "application_id"),
         Index("ix_interview_assignments_user_id", "user_id"),
     )
@@ -31,6 +40,16 @@ class InterviewAssignment(Base):
     )
     user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    # Which interview round this sheet belongs to; matches
+    # `applications.interview_round` for the round currently in progress.
+    round: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1",
+    )
+    # Which track within the round. Always "default" until phase 3; part of
+    # the unique constraint below.
+    track: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="default", server_default="default",
     )
     sheet: Mapped[dict] = mapped_column(JSON, nullable=False, default=empty_sheet)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -54,6 +54,10 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
     unreject: () => patch.mutate({ stage: "scored" }),
     markScheduled: () => patch.mutate({ stage: "scheduled" }),
     markInterviewed: () => patch.mutate({ stage: "interviewed" }),
+    // Reopen an interviewed candidate for another round. Same PATCH as
+    // markScheduled: the server distinguishes the two by the stage it is
+    // leaving, and only bumps the round when leaving `interviewed`.
+    reopenRound: () => patch.mutate({ stage: "scheduled" }),
     extendOffer: () => patch.mutate({ stage: "offer" }),
     markHired: () => patch.mutate({ stage: "hired" }),
     isPending: patch.isPending,

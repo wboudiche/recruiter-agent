@@ -1,19 +1,31 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.api.interview import run_generate_kit
 from recruiter.events import EventBus
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
-from recruiter.models import Application, InterviewAssignment, Role, Stage, User
+from recruiter.models import Application, Candidate, InterviewAssignment, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 _Q1 = {"id": "q1", "text": "Why?", "source": "probe"}
+
+
+async def _read_kit(engine: AsyncEngine, app_id: int) -> InterviewKitRow:
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        return (await session.execute(
+            select(InterviewKitRow).where(
+                InterviewKitRow.application_id == app_id,
+                InterviewKitRow.round == 1, InterviewKitRow.track == "default",
+            )
+        )).scalar_one()
 
 
 async def _move_to_invited(api_client: AsyncClient, app_id: int) -> None:
@@ -139,21 +151,18 @@ async def test_re_entering_scheduled_preserves_answered_questions(
         # SQLAlchemy already has loaded, so it is never flagged dirty and
         # the write silently would not persist.
         engine = app.dependency_overrides[get_engine_dep]()
+        kit_row = await _read_kit(engine, app_id)
+        answered_id = kit_row.questions[0]["id"]
+        new_questions = [
+            {**kit_row.questions[0], "answer": "Handled a prod outage calmly.",
+             "rating": "strong"},
+            *kit_row.questions[1:],
+        ]
         SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
         async with SessionLocal() as session:
-            row = await session.get(Application, app_id)
-            kit = row.interview_kit
-            answered_id = kit["questions"][0]["id"]
-            new_kit = {
-                **kit,
-                "questions": [
-                    {**kit["questions"][0], "answer": "Handled a prod outage calmly.",
-                     "rating": "strong"},
-                    *kit["questions"][1:],
-                ],
-            }
             await session.execute(
-                update(Application).where(Application.id == app_id).values(interview_kit=new_kit)
+                update(InterviewKitRow).where(InterviewKitRow.id == kit_row.id)
+                .values(questions=new_questions)
             )
             await session.commit()
 
@@ -260,11 +269,10 @@ async def test_regeneration_in_flight_does_not_orphan_a_sheet_submitted_meanwhil
             application_id=app_id, user_id=interviewer.id,
             submitted_at=datetime.now(UTC),
         ))
-        await session.execute(
-            update(Application).where(Application.id == app_id).values(
-                interview_kit={"status": "generating", "questions": [_Q1]},
-            )
-        )
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[_Q1],
+        ))
         await session.commit()
 
     await run_generate_kit(
@@ -272,11 +280,187 @@ async def test_regeneration_in_flight_does_not_orphan_a_sheet_submitted_meanwhil
         llm=_fake_llm_with_one_question(), bus=EventBus(),
     )
 
+    kit_row = await _read_kit(engine, app_id)
+    assert kit_row.status == "ready"
+    assert [q["id"] for q in kit_row.questions] == ["q1"]
+
+
+@pytest.mark.asyncio
+async def test_regeneration_keeps_a_question_an_unsubmitted_sheet_answered(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The freeze only starts at the FIRST submit. Before that, an
+    interviewer can have draft answers saved while a recruiter regenerates
+    — and a fresh probe id would orphan them, silently, because the next
+    sheet save prunes answers whose question is no longer in the kit."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
     async with SessionLocal() as session:
-        row = await session.get(Application, app_id)
-        kit = row.interview_kit
-    assert kit["status"] == "ready"
-    assert [q["id"] for q in kit["questions"]] == ["q1"]
+        interviewer = User(email="drafter@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id,
+            sheet={"answers": {"q1": {"answer": "half-typed", "rating": None}}},
+            submitted_at=None,   # NOT submitted: the kit is not frozen
+        ))
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[_Q1],
+        ))
+        await session.commit()
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine,
+        llm=_fake_llm_with_one_question(), bus=EventBus(),
+    )
+
+    kit_row = await _read_kit(engine, app_id)
+    assert kit_row.status == "ready"
+    assert "q1" in [q["id"] for q in kit_row.questions], (
+        "the answered question was regenerated away, orphaning the draft answer"
+    )
+    # The regeneration still did its job alongside the preserved question.
+    assert len(kit_row.questions) > 1
+
+
+@pytest.mark.asyncio
+async def test_regeneration_keeps_a_question_answered_while_it_was_in_flight(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The narrow version of the case above: the answer is typed DURING the
+    model call. Deciding from a panel read taken before the round trip would
+    still drop the question, so the answered set is read under the same lock
+    as the freeze check, after generation."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        interviewer = User(email="midflight@acme.com", role=Role.VIEWER, is_active=True)
+        session.add(interviewer)
+        await session.flush()
+        session.add(InterviewAssignment(
+            application_id=app_id, user_id=interviewer.id, sheet={}, submitted_at=None,
+        ))
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[_Q1],
+        ))
+        await session.commit()
+
+    class _AnswersMidCall:
+        """Writes an answer from another session while the model 'thinks'."""
+
+        async def chat_structured(self, *a: object, **kw: object) -> GeneratedQuestions:
+            async with SessionLocal() as other:
+                row = (await other.execute(
+                    select(InterviewAssignment).where(
+                        InterviewAssignment.application_id == app_id)
+                )).scalars().one()
+                row.sheet = {"answers": {"q1": {"answer": "typed just now", "rating": None}}}
+                await other.commit()
+            return GeneratedQuestions(questions=[
+                GeneratedQuestion(text="A freshly generated probe.", criterion="reliability"),
+            ])
+
+    await run_generate_kit(
+        application_id=app_id, engine=engine, llm=_AnswersMidCall(), bus=EventBus(),
+    )
+
+    kit_row = await _read_kit(engine, app_id)
+    assert "q1" in [q["id"] for q in kit_row.questions], (
+        "an answer typed during generation was orphaned"
+    )
+
+
+@pytest.mark.asyncio
+async def test_generation_sees_the_whole_candidate_and_their_enrichment(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Probes used to be generated from `summary` alone while scoring got the
+    full structured candidate — which is why they drifted towards things the
+    CV already answers. Enrichment never reached the generator at all."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        app_row = await session.get(Application, app_id)
+        candidate = await session.get(Candidate, app_row.candidate_id)
+        candidate.skills = ["Kubernetes", "Terraform"]
+        candidate.experience = [{"title": "Staff SRE", "company": "Acme",
+                                 "description": "Owned the cluster migration."}]
+        app_row.enrichment = {"results": [{
+            "source": "github", "profile_url": "https://github.com/x", "confidence": 0.9,
+            "discovered": False, "signals": [],
+            "summary": "Maintains a Terraform provider with 400 stars.",
+        }]}
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    await run_generate_kit(application_id=app_id, engine=engine, llm=llm, bus=EventBus())
+
+    prompt = "\n".join(
+        m.content for call in llm.calls for m in call.get("messages", [])
+    )
+    assert "Kubernetes" in prompt
+    assert "Owned the cluster migration" in prompt
+    assert "Terraform provider with 400 stars" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_second_generate_while_one_is_running_is_a_no_op(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """A double-click used to buy a second LLM call whose result merely
+    overwrote the first."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[_Q1],
+            generating_since=datetime.now(UTC).isoformat(),
+        ))
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        resp = await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+        assert resp.status_code == 202
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert llm.calls == [], "a second generation ran while one was already in flight"
+
+
+@pytest.mark.asyncio
+async def test_a_generate_after_a_stale_run_is_allowed(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """The escape hatch: a run killed mid-generation must not strand the kit
+    as `generating` with no way back."""
+    app_id = await create_scored_app()
+    engine = app.dependency_overrides[get_engine_dep]()
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+    async with SessionLocal() as session:
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[],
+            generating_since=(datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+        ))
+        await session.commit()
+
+    llm = _fake_llm_with_one_question()
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        await api_client.post(f"/api/applications/{app_id}/interview-kit/generate")
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert llm.calls, "a stale generation left the kit unable to retry"
 
 
 @pytest.mark.asyncio
@@ -289,11 +473,10 @@ async def test_generation_failure_keeps_existing_questions(
     engine = app.dependency_overrides[get_engine_dep]()
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
     async with SessionLocal() as session:
-        await session.execute(
-            update(Application).where(Application.id == app_id).values(
-                interview_kit={"status": "generating", "questions": [_Q1]},
-            )
-        )
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="generating", questions=[_Q1],
+        ))
         await session.commit()
 
     await run_generate_kit(
@@ -301,11 +484,9 @@ async def test_generation_failure_keeps_existing_questions(
         llm=FakeLLMClient(structured_responses=[]), bus=EventBus(),
     )
 
-    async with SessionLocal() as session:
-        row = await session.get(Application, app_id)
-        kit = row.interview_kit
-    assert kit["status"] == "error"
-    assert [q["id"] for q in kit["questions"]] == ["q1"]
+    kit_row = await _read_kit(engine, app_id)
+    assert kit_row.status == "error"
+    assert [q["id"] for q in kit_row.questions] == ["q1"]
 
 
 @pytest.mark.asyncio
@@ -333,11 +514,10 @@ async def test_re_entering_scheduled_recovers_a_frozen_errored_kit(
             application_id=app_id, user_id=interviewer.id,
             submitted_at=datetime.now(UTC),
         ))
-        await session.execute(
-            update(Application).where(Application.id == app_id).values(
-                interview_kit={"status": "error", "error": "boom", "questions": [_Q1]},
-            )
-        )
+        session.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default",
+            status="error", error="boom", questions=[_Q1],
+        ))
         await session.commit()
 
     resp = await api_client.patch(
@@ -376,11 +556,10 @@ async def test_re_entering_scheduled_regenerates_a_frozen_but_empty_kit(
                 application_id=app_id, user_id=interviewer.id,
                 submitted_at=datetime.now(UTC),
             ))
-            await session.execute(
-                update(Application).where(Application.id == app_id).values(
-                    interview_kit={"status": "error", "error": "boom", "questions": []},
-                )
-            )
+            session.add(InterviewKitRow(
+                application_id=app_id, round=1, track="default",
+                status="error", error="boom", questions=[],
+            ))
             await session.commit()
 
         resp = await api_client.patch(

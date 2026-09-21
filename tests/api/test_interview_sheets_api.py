@@ -6,6 +6,7 @@ from recruiter.api.candidates import get_engine_dep
 from recruiter.auth.passwords import hash_password
 from recruiter.main import app
 from recruiter.models import Application, Candidate, InterviewAssignment, Job, Role, Stage, User
+from recruiter.models.interview_kit_row import InterviewKitRow
 
 PW = "pw-12345678"
 
@@ -45,11 +46,15 @@ async def _seed_scheduled_with_kit(session: AsyncSession) -> int:
     await session.flush()
     app_row = Application(
         job_id=job.id, candidate_id=cand.id, stage=Stage.SCHEDULED, score=80,
-        interview_kit={"status": "ready", "generated_at": "2026-09-14T00:00:00+00:00",
-                       "questions": [{"id": "q1", "text": "Why?", "source": "probe"},
-                                     {"id": "q2", "text": "How?", "source": "probe"}]},
     )
     session.add(app_row)
+    await session.flush()
+    session.add(InterviewKitRow(
+        application_id=app_row.id, round=1, track="default",
+        status="ready", generated_at="2026-09-14T00:00:00+00:00",
+        questions=[{"id": "q1", "text": "Why?", "source": "probe"},
+                   {"id": "q2", "text": "How?", "source": "probe"}],
+    ))
     await session.commit()
     return app_row.id
 
@@ -101,11 +106,10 @@ async def test_second_submit_is_409(api_client: AsyncClient, create_scored_app) 
     app_id = await create_scored_app()
     engine = app.dependency_overrides[get_engine_dep]()
     async with async_sessionmaker(engine, expire_on_commit=False)() as s:
-        row = await s.get(Application, app_id)
-        row.interview_kit = {
-            "status": "ready",
-            "questions": [{"id": "q1", "text": "Why?", "source": "probe"}],
-        }
+        s.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+        ))
         await s.commit()
     sheet_url = f"/api/applications/{app_id}/interview-kit/sheet"
     assert (await api_client.post(f"{sheet_url}/submit")).status_code == 200
@@ -120,11 +124,10 @@ async def test_recruiter_with_no_assignments_gets_a_sheet_on_first_save(
     app_id = await create_scored_app()
     engine = app.dependency_overrides[get_engine_dep]()
     async with async_sessionmaker(engine, expire_on_commit=False)() as s:
-        row = await s.get(Application, app_id)
-        row.interview_kit = {
-            "status": "ready",
-            "questions": [{"id": "q1", "text": "Why?", "source": "probe"}],
-        }
+        s.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+        ))
         await s.commit()
     r = await api_client.patch(f"/api/applications/{app_id}/interview-kit/sheet", json=SHEET)
     assert r.status_code == 200
@@ -140,11 +143,10 @@ async def test_answers_for_unknown_questions_are_dropped_on_save(
     app_id = await create_scored_app()
     engine = app.dependency_overrides[get_engine_dep]()
     async with async_sessionmaker(engine, expire_on_commit=False)() as s:
-        row = await s.get(Application, app_id)
-        row.interview_kit = {
-            "status": "ready",
-            "questions": [{"id": "q1", "text": "Why?", "source": "probe"}],
-        }
+        s.add(InterviewKitRow(
+            application_id=app_id, round=1, track="default", status="ready",
+            questions=[{"id": "q1", "text": "Why?", "source": "probe"}],
+        ))
         await s.commit()
     body = {
         "answers": {"q1": {"answer": "a", "rating": None}, "zzz": {"answer": "b", "rating": None}},

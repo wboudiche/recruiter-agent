@@ -22,7 +22,9 @@ from recruiter.config import get_config
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, EventLog, InterviewAssignment, Stage
-from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed
+from recruiter.models.interview_assignment import empty_sheet
+from recruiter.pipeline.interview_sheets import is_frozen, mark_interviewed, rows_in_round
+from recruiter.pipeline.kit_store import create_kit, kit_for
 from recruiter.pipeline.orchestrator import (
     process_application,
     re_enrich_application as run_re_enrich,
@@ -30,7 +32,6 @@ from recruiter.pipeline.orchestrator import (
 from recruiter.pipeline.router import RoutedInput
 from recruiter.schemas.application import ApplicationRead, ApplicationUpdate, ScoreBreakdownItem
 from recruiter.schemas.candidate import CandidateRead, CandidateUpdate
-from recruiter.schemas.interview import InterviewKit
 
 # Authorization model: shared workspace. Any user authenticated via OIDC and
 # accepted by the domain allowlist (`auth.allowlist`) can read and mutate any
@@ -40,16 +41,29 @@ from recruiter.schemas.interview import InterviewKit
 router = APIRouter(prefix="/api", tags=["applications"], dependencies=[Depends(require_user)])
 
 
-async def _load_application(session: AsyncSession, application_id: int) -> Application | None:
+async def _load_application(
+    session: AsyncSession, application_id: int, *, for_update: bool = False,
+) -> Application | None:
     """Load an application with the candidate eager-loaded so awaiting_paste
-    can be computed without a follow-up query."""
-    return (
-        await session.execute(
-            select(Application)
-            .where(Application.id == application_id)
-            .options(selectinload(Application.candidate))
-        )
-    ).scalar_one_or_none()
+    can be computed without a follow-up query.
+
+    `for_update` row-locks it. Mutating callers need it: reopening a round
+    read-modify-writes `interview_round` and then inserts a row per
+    panellist at the new round, so two concurrent reopens would both read
+    the old round and collide on the assignment unique constraint. The
+    other round mutations (submit_sheet, patch_sheet, put_interviewers)
+    already lock for the same reason.
+    """
+    stmt = (
+        select(Application)
+        .where(Application.id == application_id)
+        .options(selectinload(Application.candidate))
+    )
+    if for_update:
+        # Only the applications row; the eager-loaded candidate is a
+        # separate SELECT that must not be locked with it.
+        stmt = stmt.with_for_update(of=Application)
+    return (await session.execute(stmt)).scalar_one_or_none()
 
 
 @router.get("/applications/{application_id}", response_model=ApplicationRead)
@@ -208,7 +222,13 @@ async def _latest_errors(
 async def _sheet_counts(
     session: AsyncSession, application_ids: list[int]
 ) -> dict[int, tuple[int, int]]:
-    """application id → (assigned, submitted). One query for the board."""
+    """application id → (assigned, submitted) for the LIVE round only.
+
+    Joined to `applications.interview_round` rather than counting every row:
+    a reopened two-person panel keeps its round-1 rows submitted forever, so
+    counting across rounds makes the board badge read 2/4 — as if half the
+    new round were already in — when nothing in it has been submitted.
+    """
     if not application_ids:
         return {}
     rows = (await session.execute(
@@ -217,7 +237,11 @@ async def _sheet_counts(
             func.count(InterviewAssignment.id),
             func.count(InterviewAssignment.submitted_at),
         )
-        .where(InterviewAssignment.application_id.in_(application_ids))
+        .join(Application, Application.id == InterviewAssignment.application_id)
+        .where(
+            InterviewAssignment.application_id.in_(application_ids),
+            InterviewAssignment.round == Application.interview_round,
+        )
         .group_by(InterviewAssignment.application_id)
     )).all()
     return {app_id: (total, submitted) for app_id, total, submitted in rows}
@@ -269,6 +293,7 @@ def _to_read(
         hired_at=app_row.hired_at,
         rejected_at=app_row.rejected_at,
         rejection_reason=app_row.rejection_reason,
+        interview_round=app_row.interview_round,
         created_at=app_row.created_at,
         updated_at=app_row.updated_at,
         awaiting_paste=awaiting_paste,
@@ -303,6 +328,12 @@ def _validate_transition(current: Stage, target: Stage) -> None:
     """Enforce business rules. Raises HTTPException(409) on illegal transitions."""
     if current == Stage.HIRED:
         raise HTTPException(status_code=409, detail="cannot move from hired")
+    # Reopening for another interview round. Without this, a second
+    # interview could only be reached by rejecting the candidate and
+    # re-inviting them, since SCHEDULED is otherwise entered from INVITED
+    # alone — see the interview-rounds migration.
+    if (current, target) == (Stage.INTERVIEWED, Stage.SCHEDULED):
+        return
     if current in _FORWARD_STAGE_AFTER and target != Stage.REJECTED:
         expected = _FORWARD_STAGE_AFTER[current]
         if target != expected:
@@ -334,6 +365,48 @@ def _validate_transition(current: Stage, target: Stage) -> None:
         raise HTTPException(status_code=409, detail="already rejected")
 
 
+async def _open_next_round(session: AsyncSession, app_row: Application) -> None:
+    """Reopen an interviewed application for another interview round.
+
+    The round that just closed is left exactly as it is — its sheets stay
+    submitted and immutable, the record of that conversation — and a fresh
+    set of rows is created for the same panel with empty sheets, so the
+    recruiter only touches the panel when round two is a different one.
+
+    The new round's kit starts as a copy of the closed round's questions
+    rather than a fresh generation: the closed round's answers are keyed
+    to its question ids, and `is_frozen` (scoped to that round) still
+    protects them. The new round's own kit is untouched and free to
+    regenerate.
+    """
+    previous_round = app_row.interview_round
+    panel = rows_in_round(await load_assignments(session, app_row.id), previous_round)
+    previous_kit = await kit_for(session, app_row)  # still the old round here
+
+    app_row.interview_round = previous_round + 1
+    # The round is open again, so the application is no longer interviewed.
+    app_row.interviewed_at = None
+    for row in panel:
+        session.add(InterviewAssignment(
+            application_id=app_row.id,
+            user_id=row.user_id,
+            round=app_row.interview_round,
+            sheet=empty_sheet(),
+        ))
+    if previous_kit is not None:
+        # Carry the previous kit's status and error forward rather than
+        # forcing "ready": a round stuck in "error" must stay visibly
+        # broken on reopen too, or the recruiter sees an empty ready kit
+        # with the failure hidden instead of a reason to regenerate it.
+        await create_kit(
+            session, app_row,
+            round=app_row.interview_round,
+            questions=list(previous_kit.questions or []),
+            status=previous_kit.status,
+            error=previous_kit.error,
+        )
+
+
 @router.patch("/applications/{application_id}", response_model=ApplicationRead)
 async def patch_application(
     application_id: int,
@@ -349,7 +422,7 @@ async def patch_application(
     llm: LLMClient | None = Depends(get_llm_or_none),
     bus: EventBus = Depends(get_event_bus),
 ) -> ApplicationRead:
-    app_row = await _load_application(session, application_id)
+    app_row = await _load_application(session, application_id, for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
@@ -359,32 +432,38 @@ async def patch_application(
     schedule_kit_generation = False
     if payload.stage is not None:
         new_stage = Stage(payload.stage)
+        previous_stage = app_row.stage
         _validate_transition(app_row.stage, new_stage)
         app_row.stage = new_stage
         now = datetime.now(timezone.utc)
         if new_stage == Stage.VALIDATED:
             app_row.validated_at = now
+        elif new_stage == Stage.SCHEDULED and previous_stage == Stage.INTERVIEWED:
+            app_row.scheduled_at = now
+            await _open_next_round(session, app_row)
         elif new_stage == Stage.SCHEDULED:
             app_row.scheduled_at = now
-            # If a sheet was already submitted (a prior round on this same
-            # application), the question list is frozen — see
-            # pipeline/interview_sheets.is_frozen. Regenerating would mint
-            # fresh question ids and orphan that submitted sheet's answers.
-            # But that's only a real risk when there's something to
-            # orphan: frozen with an empty question list (nothing was ever
-            # asked) is safe to generate into exactly as if it weren't
-            # frozen at all.
-            existing = app_row.interview_kit or {}
-            existing_questions = existing.get("questions") or []
-            frozen = is_frozen(await load_assignments(session, app_row.id))
+            # If a sheet in THIS round was already submitted, the question
+            # list is frozen — see pipeline/interview_sheets.is_frozen.
+            # Regenerating would mint fresh question ids and orphan that
+            # submitted sheet's answers. But that's only a real risk when
+            # there's something to orphan: frozen with an empty question
+            # list (nothing was ever asked) is safe to generate into
+            # exactly as if it weren't frozen at all.
+            kit_row = await kit_for(session, app_row)
+            existing_questions = kit_row.questions if kit_row else []
+            frozen = is_frozen(rows_in_round(
+                await load_assignments(session, app_row.id), app_row.interview_round,
+            ))
             if frozen and existing_questions:
-                if existing.get("status") != "ready":
+                if kit_row.status != "ready":
                     # A prior freeze-in-flight (see run_generate_kit) or a
                     # since-deleted LLM provider can leave the kit stuck in
                     # "error"/"generating" with no way to ever regenerate
                     # again. Recover it to "ready" with its questions
                     # intact rather than leave it stuck forever.
-                    app_row.interview_kit = {**existing, "status": "ready", "error": None}
+                    kit_row.status = "ready"
+                    kit_row.error = None
                 # else: already "ready" — leave the kit exactly as it is.
             else:
                 # Mark the kit pending here, but enqueue the model call for
@@ -394,18 +473,23 @@ async def patch_application(
                 # (e.g. a candidate moved back to SCHEDULED after an
                 # interview must not lose recorded answers/ratings) —
                 # mirrors generate_kit's logic.
-                app_row.interview_kit = {
-                    **existing, "status": "generating", "error": None,
-                    "questions": existing_questions,
-                }
+                if kit_row is None:
+                    kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+                kit_row.status = "generating"
+                kit_row.error = None
+                # Pairs with generate_kit's idempotency check, so a
+                # manual Generate during this run is a no-op rather
+                # than a second model call.
+                kit_row.generating_since = now.isoformat()
                 schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
             # The recruiter closed the round by hand (a no-show, say).
             # Shares mark_interviewed with the all-sheets-in path in
             # submit_sheet so both stamp interviewed_at/closed_at the same
             # way. With no kit yet, there's nothing to stamp closed.
-            if app_row.interview_kit:
-                mark_interviewed(app_row, InterviewKit.model_validate(app_row.interview_kit), now)
+            kit_row = await kit_for(session, app_row)
+            if kit_row is not None:
+                mark_interviewed(app_row, kit_row, now)
             else:
                 app_row.interviewed_at = now
         elif new_stage == Stage.OFFER:
@@ -443,11 +527,10 @@ async def patch_application(
             # above is already committed and safe either way; leave the
             # kit in an error state rather than stuck at "generating"
             # forever with no task ever running to resolve it.
-            app_row.interview_kit = {
-                **(app_row.interview_kit or {}),
-                "status": "error",
-                "error": "No LLM provider configured. Set one up in Settings.",
-            }
+            kit_row = await kit_for(session, app_row)
+            if kit_row is not None:
+                kit_row.status = "error"
+                kit_row.error = "No LLM provider configured. Set one up in Settings."
             await session.commit()
             await session.refresh(app_row)
     counts = await _sheet_counts(session, [app_row.id])

@@ -27,6 +27,8 @@ export interface ApplicationRead {
   validated_at: string | null;
   invited_at: string | null;
   scheduled_at: string | null;
+  /** Which interview round is in progress; 1 unless reopened. */
+  interview_round?: number;
   interviewed_at?: string | null;
   offer_at?: string | null;
   hired_at?: string | null;

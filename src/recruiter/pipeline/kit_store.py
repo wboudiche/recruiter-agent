@@ -1,0 +1,73 @@
+"""Reading, creating and converting interview kit rows.
+
+Kept out of the routers so both `api/interview.py` and
+`api/applications.py` can use it without importing each other — the same
+cycle `interview_sheets.py` already works around.
+
+The Pydantic `InterviewKit` stays the API shape; these two converters are
+the only place the row and the schema meet.
+"""
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from recruiter.models import Application
+from recruiter.models.interview_kit_row import InterviewKitRow
+from recruiter.schemas.interview import InterviewKit
+
+DEFAULT_TRACK = "default"
+
+
+async def kit_for(
+    session: AsyncSession, app_row: Application, *, track: str = DEFAULT_TRACK,
+) -> InterviewKitRow | None:
+    """The kit for the application's CURRENT round. Reads only — creation is
+    explicit at the three points that mean it (entering scheduled, opening
+    the next round, and generating on an application that has none yet)."""
+    return (await session.execute(
+        select(InterviewKitRow).where(
+            InterviewKitRow.application_id == app_row.id,
+            InterviewKitRow.round == app_row.interview_round,
+            InterviewKitRow.track == track,
+        )
+    )).scalars().one_or_none()
+
+
+async def create_kit(
+    session: AsyncSession,
+    app_row: Application,
+    *,
+    round: int,
+    track: str = DEFAULT_TRACK,
+    questions: list[dict] | None = None,
+    status: str = "ready",
+    error: str | None = None,
+) -> InterviewKitRow:
+    row = InterviewKitRow(
+        application_id=app_row.id, round=round, track=track,
+        questions=questions or [], status=status, error=error,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+def content_of(row: InterviewKitRow) -> InterviewKit:
+    return InterviewKit.model_validate({
+        "status": row.status,
+        "error": row.error,
+        "generated_at": row.generated_at,
+        "generating_since": row.generating_since,
+        "submitted_at": row.submitted_at,
+        "closed_at": row.closed_at,
+        "questions": row.questions or [],
+    })
+
+
+def apply_content(row: InterviewKitRow, kit: InterviewKit) -> None:
+    row.status = kit.status
+    row.error = kit.error
+    row.generated_at = kit.generated_at
+    row.generating_since = kit.generating_since
+    row.submitted_at = kit.submitted_at
+    row.closed_at = kit.closed_at
+    row.questions = [q.model_dump() for q in kit.questions]

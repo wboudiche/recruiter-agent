@@ -70,7 +70,7 @@ export function ChatPanel({ applicationId, jobId, canWrite = false }: Props) {
           <p className="text-xs text-muted-foreground animate-pulse">Thinking…</p>
         )}
         {error && (
-          <p className="text-xs text-red-600 border border-red-300 rounded p-2 bg-red-50">
+          <p className="text-xs text-danger border border-danger-line rounded p-2 bg-danger-soft">
             {error}
           </p>
         )}

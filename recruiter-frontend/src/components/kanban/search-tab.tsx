@@ -163,17 +163,17 @@ export function SearchTab({ jobId, canWrite = false }: Props) {
       </Button>
 
       {apiErr && (
-        <p className="text-xs text-red-600 border border-red-300 rounded p-2 bg-red-50">
+        <p className="text-xs text-danger border border-danger-line rounded p-2 bg-danger-soft">
           {apiErr}
         </p>
       )}
 
-      {/* text-yellow-900 is load-bearing: the app renders permanently dark
-          (cream --foreground), so an unstyled banner inherits cream text onto
-          near-white bg-yellow-50 and disappears. The red banner above pairs
-          its colours the same way. */}
+      {/* Pairing the text with its own wash is load-bearing: an unstyled
+          banner inherits --foreground, which is cream in dark and ink in
+          light, and vanishes against a fixed background. The warning trio
+          flips together, so the pairing holds in both themes. */}
       {data?.errors && data.errors.length > 0 && (
-        <div className="border border-yellow-400 bg-yellow-50 text-yellow-900 rounded p-2 space-y-1 text-xs">
+        <div className="border border-warning-line bg-warning-soft text-warning rounded p-2 space-y-1 text-xs">
           {data.errors.map((e) => (
             <p key={e.source}>
               <span className="font-medium uppercase">{e.source}</span>: {e.reason}

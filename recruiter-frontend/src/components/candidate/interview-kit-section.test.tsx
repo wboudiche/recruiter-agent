@@ -17,7 +17,7 @@ afterAll(() => server.close());
 function mountWithKit(
   kit: unknown,
   capture: { body?: any; sheet?: any; submitted?: boolean } = {},
-  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[] } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number } = {},
 ) {
   const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
@@ -46,7 +46,7 @@ function mountWithKit(
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}<Toaster /></QueryClientProvider>
   );
-  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} /></Wrapper>);
+  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} interviewRound={opts.interviewRound} /></Wrapper>);
   return { ...result, qc };
 }
 
@@ -76,6 +76,186 @@ describe("InterviewKitSection", () => {
     mountWithKit({ status: "error", error: "model unavailable", questions: [] });
     await waitFor(() => expect(screen.getByText(/model unavailable/i)).toBeInTheDocument());
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("still shows the questions when a kit with questions is in error", async () => {
+    // A failed regeneration keeps the questions it already had (see
+    // run_generate_kit). Rendering only the banner hides a live interview's
+    // questions — and the sheets beneath them — behind a message about a
+    // generation that failed.
+    mountWithKit({ ...READY, status: "error", error: "model unavailable" });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.getByText(/model unavailable/i)).toBeInTheDocument();
+  });
+
+  it("shows an interviewer the questions of an errored kit they cannot retry", async () => {
+    // The Retry button is recruiter-only, so for an interviewer the bare
+    // error screen is a dead end: no questions, no sheet, no way out.
+    mountWithKit(
+      { ...READY, status: "error", error: "model unavailable" },
+      {},
+      {
+        me: { id: 7, role: "viewer" },
+        canWrite: false,
+        sheets: [{ user_id: 7, name: "Panelist", email: "p@acme.com",
+                   sheet: { answers: {}, verdict: {} }, submitted_at: null }],
+        interviewers: [{ user_id: 7, name: "Panelist", email: "p@acme.com", submitted_at: null }],
+      },
+    );
+
+    // An interviewer cannot edit questions, so they render as text rather
+    // than as a textarea — hence getByText, not getByDisplayValue.
+    await waitFor(() =>
+      expect(screen.getByText("Why this role?")).toBeInTheDocument());
+    expect(screen.getByText(/model unavailable/i)).toBeInTheDocument();
+  });
+
+  it("labels the round once an application has been reopened", async () => {
+    // Reopening resets every sheet to empty, which looks identical to a
+    // round that never happened unless the round is named.
+    mountWithKit(READY, {}, { interviewRound: 2 });
+
+    await waitFor(() => expect(screen.getByText(/round 2/i)).toBeInTheDocument());
+  });
+
+  it("does not label the round during the first one", async () => {
+    mountWithKit(READY, {}, { interviewRound: 1 });
+    await waitFor(() => expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.queryByText(/round 1/i)).not.toBeInTheDocument();
+  });
+
+  it("locks the wording of a question answered in a submitted sheet", async () => {
+    // The server 409s on this (see patch_kit); offering an editable box that
+    // fails on save would be a worse way to find out.
+    mountWithKit(READY, {}, {
+      sheets: [{
+        user_id: 1, name: "Ann", email: "ann@acme.com",
+        submitted_at: "2026-09-20T10:00:00Z",
+        sheet: { answers: { b1: { answer: "Because scale.", rating: "strong" } }, verdict: {} },
+      }],
+    });
+
+    // b1 was answered and submitted: read-only. p1 was not: still editable.
+    await waitFor(() => expect(screen.getByText("Why this role?")).toBeInTheDocument());
+    expect(screen.queryByDisplayValue("Why this role?")).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("Describe an incident.")).toBeInTheDocument();
+  });
+
+  it("leaves wording editable while the answer is still a draft", async () => {
+    mountWithKit(READY, {}, {
+      sheets: [{
+        user_id: 1, name: "Ann", email: "ann@acme.com", submitted_at: null,
+        sheet: { answers: { b1: { answer: "half a thought", rating: null } }, verdict: {} },
+      }],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+  });
+
+  it("gives a recruiter their LIVE round's sheet, not their round-1 one", async () => {
+    // A recruiter sees every round's sheets, oldest first. Matching on
+    // user_id alone finds the round-1 row, shows it as already submitted,
+    // and leaves no way to record round-2 feedback — which also means the
+    // round can never close.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 1, name: "Me", email: "me@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: { b1: { answer: "round one answer", rating: "strong" } },
+                   verdict: { decision: "hire", note: null } } },
+        { user_id: 1, name: "Me", email: "me@acme.com", round: 2, submitted_at: null,
+          sheet: { answers: {}, verdict: { decision: null, note: null } } },
+      ],
+    });
+
+    // Round 2's sheet is unsubmitted, so the sheet editor must be writable
+    // and must NOT be pre-filled with round 1's answer.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /submit interview/i })).toBeInTheDocument());
+    expect(screen.queryByDisplayValue("round one answer")).not.toBeInTheDocument();
+  });
+
+  it("does not freeze round two's questions because round one was submitted", async () => {
+    // The server allows this PATCH (see
+    // test_round_two_questions_are_editable_after_round_one_closed). A
+    // client-side freeze computed across every round contradicts it: round
+    // one's sheets stay submitted forever, so Remove would be disabled for
+    // the life of the application.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: {}, verdict: { decision: "hire", note: null } } },
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 2, submitted_at: null,
+          sheet: { answers: {}, verdict: { decision: null, note: null } } },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("Why this role?")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /remove question 1/i })).toBeEnabled();
+  });
+
+  it("re-seeds the sheet editor when a round is reopened", async () => {
+    // The seed key is (whose sheet, submitted?). Closing a round manually
+    // with an unsubmitted sheet and reopening yields the same key either
+    // side — so the editor keeps round one's draft and Save writes it into
+    // round two.
+    const sheetIn = (round: number, answer: string | null) => ({
+      user_id: 1, name: "Me", email: "me@acme.com", round, submitted_at: null,
+      sheet: { answers: answer ? { b1: { answer, rating: null } } : {},
+               verdict: { decision: null, note: null } },
+    });
+    let sheets = [sheetIn(1, "round one draft")];
+    server.use(
+      http.get("http://localhost:8000/api/auth/me", () =>
+        HttpResponse.json({ id: 1, email: "me@acme.com", name: "Me", picture: null,
+                            role: "recruiter" })),
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: READY, sheets })),
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json([])),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const Tree = ({ round }: { round: number }) => (
+      <QueryClientProvider client={qc}>
+        <InterviewKitSection applicationId={1} canWrite interviewRound={round} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(<Tree round={1} />);
+    await waitFor(() =>
+      expect(screen.getByDisplayValue("round one draft")).toBeInTheDocument());
+
+    // Same person, still unsubmitted — but now round two.
+    sheets = [sheetIn(2, null)];
+    await qc.invalidateQueries({ queryKey: queryKeys.interviewKit(1) });
+    rerender(<Tree round={2} />);
+
+    await waitFor(() =>
+      expect(screen.queryByDisplayValue("round one draft")).not.toBeInTheDocument());
+  });
+
+  it("lets a recruiter write when THIS round has no panel, even with history", async () => {
+    // `_own_assignment` auto-creates a row when the LIVE round has none,
+    // which is what keeps the zero-setup single-recruiter flow working.
+    // Checking every round instead locks the recruiter out of a sheet the
+    // server would accept: round one's rows make the list non-empty.
+    mountWithKit(READY, {}, {
+      interviewRound: 2,
+      sheets: [
+        { user_id: 9, name: "Ann", email: "ann@acme.com", round: 1,
+          submitted_at: "2026-09-20T10:00:00Z",
+          sheet: { answers: {}, verdict: { decision: "hire", note: null } } },
+      ],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /submit interview/i })).toBeInTheDocument());
   });
 
   it("renders questions with their source badge", async () => {
@@ -372,9 +552,10 @@ describe("InterviewKitSection", () => {
       sheet: { answers: { b1: { answer: "Done", rating: "weak" } }, verdict: { decision: "no_hire", note: null } },
       submitted_at: "2026-09-14T10:00:00Z" };
     mountWithKit(READY, {}, { sheets: [mine] });
-    // Question ids are stable, so renaming stays allowed even once frozen —
-    // the row is still an editable textarea, not read-only text.
-    await screen.findByDisplayValue("Why this role?");
+    // b1 carries a submitted answer, so its wording is now part of the
+    // record and renders as read-only text rather than a textarea.
+    await screen.findByText("Why this role?");
+    expect(screen.queryByDisplayValue("Why this role?")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /submit interview/i })).not.toBeInTheDocument();
     expect(screen.getByText("Done")).toBeInTheDocument();
   });
@@ -384,8 +565,9 @@ describe("InterviewKitSection", () => {
     mountWithKit(READY, {}, { sheets: [other] });
     await screen.findByDisplayValue("Why this role?");
     expect(screen.getByRole("button", { name: /remove question 1/i })).toBeDisabled();
-    // Freezing only refuses removal (and regenerate) — the question text
-    // itself stays editable for a recruiter/admin.
+    // The submitted sheet answered nothing, so no question's wording is part
+    // of the record yet: a recruiter can still fix a typo. Only removal and
+    // regenerate are refused by the freeze itself.
     expect(screen.getByLabelText("Question 1")).toBeEnabled();
   });
 

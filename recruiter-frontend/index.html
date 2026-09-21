@@ -10,8 +10,31 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=Manrope:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Paint the theme before first paint, otherwise a light-mode user gets a
+      // flash of the dark ground while the bundle loads. Deliberately inline
+      // and dependency-free: it must run ahead of the module graph. The
+      // precedence here mirrors `resolveTheme()` in src/hooks/use-theme.ts —
+      // change one, change the other.
+      (function () {
+        try {
+          var stored = localStorage.getItem("recruiter-theme");
+          var theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+          document.documentElement.classList.add(theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {
+          // Private mode can throw on localStorage; dark is the safe default.
+          document.documentElement.classList.add("dark");
+        }
+      })();
+    </script>
   </head>
-  <body class="dark">
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

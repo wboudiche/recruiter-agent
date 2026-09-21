@@ -92,7 +92,7 @@ export function SecretField({
         onChange={(e) => onChange(e.target.value)}
       />
       {revoked && (
-        <p className="text-xs text-yellow-500">
+        <p className="text-xs text-warning">
           Stored credential will be removed on save.
         </p>
       )}

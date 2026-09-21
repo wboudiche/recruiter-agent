@@ -14,7 +14,11 @@ from recruiter.api.candidates import get_event_bus
 from recruiter.api.deps import get_session, require_role, require_user
 from recruiter.events import EventBus
 from recruiter.models import Application, InterviewAssignment, Role, User
-from recruiter.pipeline.interview_sheets import close_round_if_complete, sheet_has_content
+from recruiter.pipeline.interview_sheets import (
+    close_round_if_complete,
+    rows_in_round,
+    sheet_has_content,
+)
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
 
@@ -38,8 +42,13 @@ async def load_assignments(session: AsyncSession, application_id: int) -> list[I
     )).scalars().all())
 
 
-async def _read_all(session: AsyncSession, application_id: int) -> list[InterviewerRead]:
-    rows = await load_assignments(session, application_id)
+async def _read_all(
+    session: AsyncSession, application_id: int, current_round: int,
+) -> list[InterviewerRead]:
+    """The panel for the round in progress. Earlier rounds' rows stay in the
+    table as the record of who interviewed then, but the chips, the picker
+    and every edit below concern the live round only."""
+    rows = rows_in_round(await load_assignments(session, application_id), current_round)
     users = {u.id: u for u in (await session.execute(
         select(User).where(User.id.in_([r.user_id for r in rows] or [-1]))
     )).scalars().all()}
@@ -58,9 +67,10 @@ async def _read_all(session: AsyncSession, application_id: int) -> list[Intervie
 async def list_interviewers(
     application_id: int, session: AsyncSession = Depends(get_session),
 ) -> list[InterviewerRead]:
-    if await session.get(Application, application_id) is None:
+    app_row = await session.get(Application, application_id)
+    if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    return await _read_all(session, application_id)
+    return await _read_all(session, application_id, app_row.interview_round)
 
 
 @router.put("/applications/{application_id}/interviewers", response_model=list[InterviewerRead])
@@ -81,7 +91,9 @@ async def put_interviewers(
         raise HTTPException(status_code=404, detail="application not found")
 
     wanted = list(dict.fromkeys(payload.user_ids))  # dedupe, keep order
-    existing = await load_assignments(session, application_id)
+    existing = rows_in_round(
+        await load_assignments(session, application_id), app_row.interview_round,
+    )
     by_user = {r.user_id: r for r in existing}
     # Only ids not already on the panel need to be active: an interviewer
     # deactivated after being assigned must not make the panel unsaveable —
@@ -126,7 +138,10 @@ async def put_interviewers(
             deleted = True
     for uid in wanted:
         if uid not in by_user:
-            session.add(InterviewAssignment(application_id=application_id, user_id=uid))
+            session.add(InterviewAssignment(
+                application_id=application_id, user_id=uid,
+                round=app_row.interview_round,
+            ))
 
     # Removing the last unsubmitted interviewer can leave every remaining
     # assignment submitted, which closes the round the same way a late
@@ -142,4 +157,4 @@ async def put_interviewers(
         "type": "interview_kit", "application_id": application_id, "status": "ready",
         "job_id": app_row.job_id, "stage_changed": stage_changed,
     })
-    return await _read_all(session, application_id)
+    return await _read_all(session, application_id, app_row.interview_round)

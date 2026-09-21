@@ -3,6 +3,8 @@ from datetime import UTC, datetime
 from recruiter.models import InterviewAssignment, Role, User
 from recruiter.pipeline.interview_sheets import (
     all_submitted,
+    answered_question_ids,
+    rows_in_round,
     can_edit_questions,
     is_frozen,
     prune_answers,
@@ -18,9 +20,9 @@ def _user(uid: int, role: Role) -> User:
     return u
 
 
-def _row(uid: int, submitted: bool) -> InterviewAssignment:
+def _row(uid: int, submitted: bool, round_number: int = 1) -> InterviewAssignment:
     return InterviewAssignment(
-        application_id=1, user_id=uid, sheet={},
+        application_id=1, user_id=uid, sheet={}, round=round_number,
         submitted_at=datetime.now(UTC) if submitted else None,
     )
 
@@ -39,25 +41,48 @@ def test_all_submitted_requires_every_row_and_at_least_one() -> None:
 
 def test_recruiter_and_admin_see_every_sheet() -> None:
     rows = [_row(1, False), _row(2, True)]
-    assert visible_sheets(rows, user=_user(9, Role.RECRUITER)) == rows
-    assert visible_sheets(rows, user=_user(9, Role.ADMIN)) == rows
+    assert visible_sheets(rows, user=_user(9, Role.RECRUITER), current_round=1) == rows
+    assert visible_sheets(rows, user=_user(9, Role.ADMIN), current_round=1) == rows
 
 
 def test_assigned_interviewer_sees_only_own_sheet_until_submitted() -> None:
     rows = [_row(1, False), _row(2, True)]
-    assert visible_sheets(rows, user=_user(1, Role.VIEWER)) == [rows[0]]
+    assert visible_sheets(rows, user=_user(1, Role.VIEWER), current_round=1) == [rows[0]]
 
 
 def test_assigned_interviewer_sees_all_after_own_submit() -> None:
     """After submitting, drafts stay private to their author: row 2 (not
     submitted) stays hidden even though the caller has now submitted."""
     rows = [_row(1, True), _row(2, False), _row(3, True)]
-    assert visible_sheets(rows, user=_user(1, Role.VIEWER)) == [rows[0], rows[2]]
+    assert visible_sheets(rows, user=_user(1, Role.VIEWER), current_round=1) == [rows[0], rows[2]]
 
 
 def test_unassigned_viewer_sees_no_sheets() -> None:
     rows = [_row(1, True), _row(2, True)]
-    assert visible_sheets(rows, user=_user(3, Role.VIEWER)) == []
+    assert visible_sheets(rows, user=_user(3, Role.VIEWER), current_round=1) == []
+
+
+def test_answered_question_ids_unions_every_sheet() -> None:
+    """Feeds merge_regenerated: a question any interviewer has answered or
+    rated must keep its id through a regeneration."""
+    rows = [_row(1, False), _row(2, False)]
+    rows[0].sheet = {"answers": {"q1": {"answer": "yes", "rating": None}}}
+    rows[1].sheet = {"answers": {"q2": {"answer": None, "rating": "weak"}}}
+
+    assert answered_question_ids(rows) == {"q1", "q2"}
+
+
+def test_answered_question_ids_ignores_empty_and_untouched_answers() -> None:
+    """The client posts a row per rendered question, so blank answers are the
+    normal case — counting them would pin every question forever."""
+    rows = [_row(1, False)]
+    rows[0].sheet = {"answers": {
+        "blank": {"answer": "", "rating": None},
+        "untouched": {"answer": None, "rating": None},
+        "real": {"answer": "something", "rating": None},
+    }}
+
+    assert answered_question_ids(rows) == {"real"}
 
 
 def test_prune_drops_answers_for_questions_no_longer_in_kit() -> None:
@@ -108,3 +133,43 @@ def test_sheet_has_content_true_for_a_verdict_decision() -> None:
         "answers": {},
         "verdict": {"decision": "hire", "note": None},
     })
+
+
+def test_rows_in_round_selects_only_that_round() -> None:
+    rows = [_row(1, True, 1), _row(2, False, 2), _row(1, False, 2)]
+    assert rows_in_round(rows, 2) == [rows[1], rows[2]]
+    assert rows_in_round(rows, 1) == [rows[0]]
+
+
+def test_the_question_freeze_is_scoped_to_one_round() -> None:
+    """Each round owns its questions now, so round one's submitted sheet
+    does not freeze round two. Callers pass one round's rows."""
+    rows = [_row(1, True, 1), _row(2, False, 2)]
+    assert is_frozen(rows_in_round(rows, 1))
+    assert not is_frozen(rows_in_round(rows, 2))
+
+
+def test_round_completion_ignores_earlier_rounds() -> None:
+    """Round 2 closes when round 2's sheets are in. Round 1's rows stay
+    submitted forever and would otherwise close round 2 immediately."""
+    rows = [_row(1, True, 1), _row(2, False, 2)]
+    assert not all_submitted(rows_in_round(rows, 2))
+    rows[1].submitted_at = datetime.now(UTC)
+    assert all_submitted(rows_in_round(rows, 2))
+
+
+def test_recruiter_sees_sheets_from_every_round() -> None:
+    """Earlier rounds are the record of how the candidate got here."""
+    rows = [_row(1, True, 1), _row(1, False, 2)]
+    assert visible_sheets(rows, user=_user(9, Role.RECRUITER), current_round=2) == rows
+
+
+def test_interviewer_sees_only_the_current_round() -> None:
+    """Their own round-1 sheet is submitted, so the blind rule would happily
+    reveal it — but showing round 1 back to them while they are judging
+    round 2 is exactly the anchoring the blind rule exists to prevent."""
+    rows = [_row(1, True, 1), _row(2, True, 1), _row(1, False, 2)]
+
+    visible = visible_sheets(rows, user=_user(1, Role.VIEWER), current_round=2)
+
+    assert visible == [rows[2]]

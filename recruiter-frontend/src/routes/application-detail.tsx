@@ -87,8 +87,8 @@ export default function ApplicationDetail() {
         </div>
         <InterviewersPicker applicationId={id} canWrite={canWrite} />
         {application.data.awaiting_paste && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
-            <p className="font-medium text-amber-200">
+          <div className="rounded-lg border border-warning-line bg-warning-soft p-4 text-sm">
+            <p className="font-medium text-warning">
               Auto-extraction couldn’t fetch this profile.
             </p>
             <p className="text-muted-foreground mt-1">
@@ -130,7 +130,11 @@ export default function ApplicationDetail() {
             />
           </TabsContent>
           <TabsContent value="interview">
-            <InterviewKitSection applicationId={id} canWrite={canWrite} />
+            <InterviewKitSection
+              applicationId={id}
+              canWrite={canWrite}
+              interviewRound={application.data.interview_round}
+            />
           </TabsContent>
         </Tabs>
       </div>
