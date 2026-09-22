@@ -19,6 +19,13 @@ def rows_in_round(
     return [r for r in rows if r.round == round_number]
 
 
+def rows_in_track(
+    rows: Iterable[InterviewAssignment], round_number: int, track: str,
+) -> list[InterviewAssignment]:
+    """The assignments on one track of one round — the panel for one kit."""
+    return [r for r in rows if r.round == round_number and r.track == track]
+
+
 def is_frozen(rows: Iterable[InterviewAssignment]) -> bool:
     """Once any sheet is submitted the question list must not lose rows,
     or submitted feedback would silently lose its answers.
@@ -36,6 +43,24 @@ def all_submitted(rows: Iterable[InterviewAssignment]) -> bool:
     would otherwise close the new round the instant it opened."""
     rows = list(rows)
     return bool(rows) and all(r.submitted_at is not None for r in rows)
+
+
+def round_complete(
+    kits: Iterable[InterviewKitRow], rows: Iterable[InterviewAssignment],
+) -> bool:
+    """Whether a round can close on its own: it has at least one kit, every
+    kit's track has at least one interviewer, and every interviewer in the
+    round has submitted. Callers pass ONE round's kits and rows.
+
+    The staffing clause is what stops an RH track nobody was assigned to
+    from being silently skipped the moment the technical panel finishes."""
+    kits, rows = list(kits), list(rows)
+    if not kits or not rows:
+        return False
+    staffed = {r.track for r in rows}
+    return all(k.track in staffed for k in kits) and all(
+        r.submitted_at is not None for r in rows
+    )
 
 
 def can_edit_questions(user: User) -> bool:

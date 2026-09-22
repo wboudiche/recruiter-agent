@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
 
-from recruiter.models import InterviewAssignment, Role, User
+from recruiter.models import InterviewAssignment, InterviewKitRow, Role, User
 from recruiter.pipeline.interview_sheets import (
     all_submitted,
     answered_question_ids,
     rows_in_round,
+    round_complete,
+    rows_in_track,
     can_edit_questions,
     is_frozen,
     prune_answers,
@@ -25,6 +27,16 @@ def _row(uid: int, submitted: bool, round_number: int = 1) -> InterviewAssignmen
         application_id=1, user_id=uid, sheet={}, round=round_number,
         submitted_at=datetime.now(UTC) if submitted else None,
     )
+
+
+def _kit(track: str) -> InterviewKitRow:
+    return InterviewKitRow(application_id=1, round=1, track=track, status="ready", questions=[])
+
+
+def _on(track: str, uid: int, submitted: bool, round_number: int = 1) -> InterviewAssignment:
+    row = _row(uid, submitted, round_number)
+    row.track = track
+    return row
 
 
 def test_frozen_once_any_sheet_is_submitted() -> None:
@@ -173,3 +185,26 @@ def test_interviewer_sees_only_the_current_round() -> None:
     visible = visible_sheets(rows, user=_user(1, Role.VIEWER), current_round=2)
 
     assert visible == [rows[2]]
+
+
+def test_rows_in_track_is_one_round_and_one_track() -> None:
+    rows = [_on("tech", 1, False), _on("rh", 2, False), _on("tech", 3, False, round_number=2)]
+    assert rows_in_track(rows, 1, "tech") == [rows[0]]
+    assert rows_in_track(rows, 2, "tech") == [rows[2]]
+    assert rows_in_track(rows, 1, "nope") == []
+
+
+def test_a_round_closes_only_when_every_track_is_staffed_and_submitted() -> None:
+    kits = [_kit("tech"), _kit("rh")]
+    assert not round_complete([], [_on("tech", 1, True)]), "no kit: nothing to close"
+    assert not round_complete(kits, []), "nobody assigned"
+    assert not round_complete(kits, [_on("tech", 1, True)]), (
+        "an unstaffed RH track must not be skipped when the technical panel finishes")
+    assert not round_complete(kits, [_on("tech", 1, True), _on("rh", 2, False)])
+    assert round_complete(kits, [_on("tech", 1, True), _on("rh", 2, True)])
+
+
+def test_a_one_track_round_closes_as_before() -> None:
+    one = [_kit("default")]
+    assert round_complete(one, [_on("default", 1, True), _on("default", 2, True)])
+    assert not round_complete(one, [_on("default", 1, True), _on("default", 2, False)])

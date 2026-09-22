@@ -1,5 +1,5 @@
 from recruiter.models.interview_kit_row import InterviewKitRow
-from recruiter.pipeline.kit_store import apply_content, content_of
+from recruiter.pipeline.kit_store import DEFAULT_TRACK, apply_content, content_of, track_key
 from recruiter.schemas.interview import InterviewKit, KitQuestion
 
 
@@ -44,3 +44,8 @@ def test_round_trip_is_lossless() -> None:
     row = _row()
     apply_content(row, content_of(row))
     assert content_of(row).model_dump() == content_of(_row()).model_dump()
+
+
+def test_a_track_key_is_derived_from_its_template() -> None:
+    assert track_key(None) == DEFAULT_TRACK == "default"
+    assert track_key(7) == "t7"

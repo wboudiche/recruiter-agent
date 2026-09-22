@@ -19,6 +19,14 @@ from recruiter.schemas.interview_template import TemplateSnapshot
 DEFAULT_TRACK = "default"
 
 
+def track_key(template_id: int | None) -> str:
+    """A track's key, derived once from its template when the track is
+    created and never changed: `t<template_id>`, or `default` for the
+    no-template track. Because (application, round, track) is unique, this
+    alone guarantees one track per template per round."""
+    return DEFAULT_TRACK if template_id is None else f"t{template_id}"
+
+
 async def kit_for(
     session: AsyncSession, app_row: Application, *, track: str = DEFAULT_TRACK,
 ) -> InterviewKitRow | None:
