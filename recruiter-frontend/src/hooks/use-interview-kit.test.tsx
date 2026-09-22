@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { EMPTY_SHEET, useInterviewKit } from "./use-interview-kit";
+import { EMPTY_SHEET, useInterviewKit, useTrackKitActions } from "./use-interview-kit";
 import { queryKeys } from "@/lib/query-keys";
 
 const server = setupServer();
@@ -108,6 +108,30 @@ describe("useInterviewKit", () => {
     expect(hintSent).toBe("Terraform state locking");
     expect(drafted.question.text).toBe("How do you handle Terraform state locking?");
     expect(result.current.kit?.questions).toHaveLength(0);
+  });
+
+  it("reads a one-track response as a single default track", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
+        HttpResponse.json({ kit: { status: "ready", questions: [] }, sheets: [],
+                            template_name: "RH screen" })),
+    );
+    const { result } = renderHook(() => useInterviewKit(1), { wrapper: wrap() });
+    await waitFor(() => expect(result.current.tracks).toHaveLength(1));
+    expect(result.current.tracks[0]).toMatchObject({ track: "default", template_name: "RH screen" });
+  });
+
+  it("names the track on every request for a named track", async () => {
+    const seen: (string | null)[] = [];
+    server.use(
+      http.post("http://localhost:8000/api/applications/1/interview-kit/generate", ({ request }) => {
+        seen.push(new URL(request.url).searchParams.get("track"));
+        return HttpResponse.json({ application_id: 1 }, { status: 202 });
+      }),
+    );
+    const { result } = renderHook(() => useTrackKitActions(1, "t5"), { wrapper: wrap() });
+    await act(() => result.current.generate.mutateAsync());
+    expect(seen).toEqual(["t5"]);
   });
 });
 
