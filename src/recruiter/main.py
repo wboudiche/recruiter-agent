@@ -15,6 +15,7 @@ from recruiter.api import (
     events,
     interview,
     interview_templates,
+    interview_tracks,
     interviewers,
     jobs,
     notifications,
@@ -110,6 +111,7 @@ _api_router.include_router(chat.router)
 _api_router.include_router(applications.router)
 _api_router.include_router(interview.router)
 _api_router.include_router(interview_templates.router)
+_api_router.include_router(interview_tracks.router)
 _api_router.include_router(interviewers.router)
 _api_router.include_router(notifications.router)
 _api_router.include_router(settings.router)
