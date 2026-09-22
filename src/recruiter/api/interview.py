@@ -16,6 +16,7 @@ from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
 from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
+from recruiter.api.kit_tracks import kit_for_caller, own_row, resolve_track
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, InterviewAssignment, InterviewKitRow, Job, User
@@ -35,10 +36,12 @@ from recruiter.pipeline.interview_sheets import (
     is_frozen,
     prune_answers,
     rows_in_round,
+    rows_in_track,
     visible_kits,
     visible_sheets,
 )
 from recruiter.pipeline.kit_store import (
+    DEFAULT_TRACK,
     apply_content,
     content_of,
     create_kit,
@@ -47,6 +50,7 @@ from recruiter.pipeline.kit_store import (
     kits_in_round,
     snapshot_from_row,
     template_fields,
+    track_key,
 )
 from recruiter.schemas.interview import (
     BaselineQuestion,
@@ -60,6 +64,9 @@ from recruiter.schemas.job import CriteriaItem
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
 logger = logging.getLogger(__name__)
+
+# Shown on a kit that needs generated probes when no model is configured.
+NO_LLM_PROVIDER = "No LLM provider configured. Set one up in Settings."
 
 
 class TrackRead(BaseModel):
@@ -115,10 +122,7 @@ async def _read(session: AsyncSession, app_row: Application, user: User) -> Inte
         await kits_in_round(session, app_row), rows,
         user=user, current_round=app_row.interview_round,
     )
-    own = next(
-        (r for r in rows_in_round(rows, app_row.interview_round) if r.user_id == user.id),
-        None,
-    )
+    own = own_row(rows_in_round(rows, app_row.interview_round), user)
     primary = next((k for k in shown if own is not None and k.track == own.track), None)
     if primary is None and shown:
         primary = shown[0]
@@ -148,6 +152,7 @@ async def get_kit(
 
 async def run_generate_kit(
     *, application_id: int, engine: AsyncEngine, llm: LLMClient | None, bus: EventBus,
+    track: str = DEFAULT_TRACK,
 ) -> None:
     """Generate probes and store the assembled kit. Never raises."""
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -162,7 +167,8 @@ async def run_generate_kit(
         # `dispatch_round` does the same job for a round BUMP: SCHEDULED →
         # INTERVIEWED → SCHEDULED is a legal one-click round trip, and
         # `kit_row` above is only correct for the round as it stood here.
-        kit_row = await kit_for(session, app_row)
+        kit_row = await kit_for(session, app_row, track=track)
+        had_kit = kit_row is not None
         dispatch_round = app_row.interview_round
         existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
@@ -190,7 +196,7 @@ async def run_generate_kit(
                     # patch_application only dispatches without a model
                     # when the snapshot wants no probes; recorded as an
                     # error kit by the except below if that ever changes.
-                    raise RuntimeError("No LLM provider configured. Set one up in Settings.")
+                    raise RuntimeError(NO_LLM_PROVIDER)
                 generated = await generate_probes(
                     profile=profile_text(candidate, enrichment=app_row.enrichment),
                     criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
@@ -220,7 +226,7 @@ async def run_generate_kit(
         # empty right after a reopen, so it cannot catch this on its own.
         # Re-resolve against the current round and abandon the write
         # entirely if it moved, rather than create or overwrite anything.
-        kit_row = await kit_for(session, app_row)
+        kit_row = await kit_for(session, app_row, track=track)
         if app_row.interview_round != dispatch_round:
             logger.warning(
                 "interview kit generation abandoned: round moved from %s to %s "
@@ -228,7 +234,18 @@ async def run_generate_kit(
                 dispatch_round, app_row.interview_round, application_id,
             )
             return
-        rows = await load_assignments(session, application_id)
+        if kit_row is None and had_kit:
+            # The track was removed while the model was running (see
+            # api/interview_tracks.remove_track). Recreating it here would
+            # resurrect a track the recruiter just deleted.
+            logger.warning(
+                "interview kit generation abandoned: track %s was removed during "
+                "generation for application %s", track, application_id,
+            )
+            return
+        track_rows = rows_in_track(
+            await load_assignments(session, application_id), app_row.interview_round, track,
+        )
 
         if failure is not None:
             # Keep whatever questions the existing kit had rather than wipe
@@ -245,7 +262,7 @@ async def run_generate_kit(
             kit = merge_regenerated(
                 InterviewKit.model_validate(existing_raw), baseline, texts,
                 criteria_by_probe=criteria_by_probe, now=_now(),
-                answered_ids=answered_question_ids(rows_in_round(rows, app_row.interview_round)),
+                answered_ids=answered_question_ids(track_rows),
             )
         else:
             kit = build_kit(baseline, texts,
@@ -256,7 +273,7 @@ async def run_generate_kit(
         # something to orphan, discard whatever was just computed, success
         # or error, and restore the frozen kit to "ready" instead of
         # overwriting it with a result computed from stale, now-frozen state.
-        if is_frozen(rows_in_round(rows, app_row.interview_round)) and existing_questions:
+        if is_frozen(track_rows) and existing_questions:
             logger.warning(
                 "interview kit regeneration discarded: a sheet was submitted "
                 "during generation for application %s", application_id,
@@ -265,12 +282,12 @@ async def run_generate_kit(
                 update={"status": "ready", "error": None}
             )
         if kit_row is None:
-            kit_row = await create_kit(session, app_row, round=app_row.interview_round)
+            kit_row = await create_kit(session, app_row, round=app_row.interview_round, track=track)
         apply_content(kit_row, kit)
         await session.commit()
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": kit.status,
-        "job_id": app_row.job_id, "stage_changed": False,
+        "job_id": app_row.job_id, "stage_changed": False, "track": track,
     })
 
 
@@ -278,6 +295,7 @@ async def run_generate_kit(
 async def generate_kit(
     application_id: int,
     background_tasks: BackgroundTasks,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     engine: AsyncEngine = Depends(get_engine_dep),
     llm: LLMClient = Depends(get_llm),
@@ -287,11 +305,18 @@ async def generate_kit(
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
-    kit_row = await kit_for(session, app_row)
+    kits = await kits_in_round(session, app_row)
+    if kits:
+        kit_row = resolve_track(kits, track)
+    elif track is not None:
+        raise HTTPException(status_code=404, detail=f"no track {track!r} in this round")
+    else:
+        kit_row = None
     existing_questions = kit_row.questions if kit_row else []
-    frozen = is_frozen(
-        rows_in_round(await load_assignments(session, application_id), app_row.interview_round)
-    )
+    frozen = kit_row is not None and is_frozen(rows_in_track(
+        await load_assignments(session, application_id), app_row.interview_round,
+        kit_row.track,
+    ))
     # A freeze only blocks regeneration when there is something it could
     # orphan. Frozen with an empty question list means nothing has ever
     # been asked yet, so generation may proceed exactly as if it weren't
@@ -320,9 +345,11 @@ async def generate_kit(
         return {"application_id": application_id}
 
     if kit_row is None:
+        template = await job_default_template(session, app_row)
         kit_row = await create_kit(
             session, app_row, round=app_row.interview_round,
-            **template_fields(await job_default_template(session, app_row)),
+            track=track_key(template.id if template else None),
+            **template_fields(template),
         )
     kit_row.status = "generating"
     kit_row.error = None
@@ -331,6 +358,7 @@ async def generate_kit(
 
     background_tasks.add_task(
         run_generate_kit, application_id=application_id, engine=engine, llm=llm, bus=bus,
+        track=kit_row.track,
     )
     return {"application_id": application_id}
 
@@ -344,27 +372,34 @@ class InterviewKitPatch(BaseModel):
 async def patch_kit(
     application_id: int,
     payload: InterviewKitPatch,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
 ) -> InterviewKitRead:
     app_row = await session.get(Application, application_id)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    kit_row = await kit_for(session, app_row)
-    kit = _require_kit(kit_row)
+
+    kits = await kits_in_round(session, app_row)
+    if not kits:
+        raise HTTPException(status_code=404, detail="no interview kit; generate one first")
 
     ids = [q.id for q in payload.questions]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=422, detail="duplicate question ids")
 
-    rows = await load_assignments(session, application_id)
+    rows = rows_in_round(await load_assignments(session, application_id), app_row.interview_round)
+    kit_row = kit_for_caller(kits, rows, user, track)
+    kit = content_of(kit_row)
+    # Freeze and recorded answers are this track's alone: a submitted RH
+    # sheet must not lock the technical questions.
+    track_rows = [r for r in rows if r.track == kit_row.track]
     stored_ids = [q.id for q in kit.questions]
     incoming_ids = [q.id for q in payload.questions]
 
     if not can_edit_questions(user):
-        # An assigned interviewer may append, and nothing else.
-        if user.id not in {r.user_id for r in rows_in_round(rows, app_row.interview_round)}:
-            raise HTTPException(status_code=403, detail="not assigned to this interview")
+        # An assigned interviewer may append to their own track, and
+        # nothing else.
         prefix = payload.questions[:len(stored_ids)]
         unchanged = [q.model_dump(exclude={"added_by", "answer", "rating"}) for q in prefix] == [
             q.model_dump(exclude={"added_by", "answer", "rating"}) for q in kit.questions
@@ -372,7 +407,7 @@ async def patch_kit(
         if not unchanged:
             raise HTTPException(status_code=403, detail="interviewers may only add questions")
 
-    if is_frozen(rows_in_round(rows, app_row.interview_round)) and any(
+    if is_frozen(track_rows) and any(
         qid not in incoming_ids for qid in stored_ids
     ):
         raise HTTPException(
@@ -386,12 +421,12 @@ async def patch_kit(
     # an untouched question stays editable and the "fix a typo after one
     # interview" case the design protected still works. A draft answer locks
     # nothing: there is no record yet, and the recruiter may be fixing the
-    # very question the interviewer is struggling with. Also scoped to the
-    # CURRENT round, like `is_frozen` above: each round owns its own kit
-    # and question ids now, so a question answered in an earlier, closed
-    # round cannot lock a same-id question in this one.
+    # very question the interviewer is struggling with. Also scoped to this
+    # track of the CURRENT round, like `is_frozen` above: each track owns
+    # its own kit and question ids, so an answer on another track, or in an
+    # earlier round, cannot lock a same-id question here.
     recorded = answered_question_ids(
-        r for r in rows_in_round(rows, app_row.interview_round) if r.submitted_at is not None
+        r for r in track_rows if r.submitted_at is not None
     )
     stored_text = {q.id: q.text for q in kit.questions}
     reworded = [
@@ -423,25 +458,34 @@ async def patch_kit(
     return await _read(session, app_row, user)
 
 
-async def _own_assignment(
-    session: AsyncSession, app_row: Application, user: User,
-) -> InterviewAssignment:
-    """The caller's row, or 404. A recruiter/admin with no panel at all gets
-    one created on the spot — that is what keeps the single-recruiter flow
-    working with zero setup."""
+async def _sheet_target(
+    session: AsyncSession, app_row: Application, user: User, requested: str | None,
+) -> tuple[InterviewKit, InterviewAssignment]:
+    """The kit a sheet save or submit belongs to, and the caller's row.
+
+    The caller's own assignment names the track; `?track=` may only repeat
+    it (409 otherwise — their sheet is on another track). A recruiter or
+    admin with no row gets one created on a track whose panel is empty —
+    phase 1's zero-setup single-recruiter flow — naming the track with
+    `?track=` when the round has several."""
+    kits = await kits_in_round(session, app_row)
     rows = rows_in_round(
         await load_assignments(session, app_row.id), app_row.interview_round,
     )
-    own = next((r for r in rows if r.user_id == user.id), None)
+    own = own_row(rows, user)
     if own is not None:
-        return own
-    if not rows and can_edit_questions(user):
+        if requested is not None and requested != own.track:
+            raise HTTPException(status_code=409, detail="your sheet is on another track")
+        return _require_kit(next((k for k in kits if k.track == own.track), None)), own
+    kit_row = resolve_track(kits, requested)
+    if can_edit_questions(user) and not any(r.track == kit_row.track for r in rows):
         own = InterviewAssignment(
-            application_id=app_row.id, user_id=user.id, round=app_row.interview_round,
+            application_id=app_row.id, user_id=user.id,
+            round=app_row.interview_round, track=kit_row.track,
         )
         session.add(own)
         await session.flush()
-        return own
+        return content_of(kit_row), own
     raise HTTPException(status_code=404, detail="you are not assigned to this interview")
 
 
@@ -456,18 +500,18 @@ def _require_kit(kit_row: InterviewKitRow | None) -> InterviewKit:
 async def patch_sheet(
     application_id: int,
     payload: InterviewSheet,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
 ) -> InterviewKitRead:
-    # Row-locked, like submit_sheet: the auto-create in _own_assignment
+    # Row-locked, like submit_sheet: the auto-create in _sheet_target
     # must not run twice for a recruiter's first save arriving concurrently
     # from two tabs, which would otherwise both pass the "no rows yet"
     # check and try to insert the same (application_id, user_id) row.
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    kit = _require_kit(await kit_for(session, app_row))
-    own = await _own_assignment(session, app_row, user)
+    kit, own = await _sheet_target(session, app_row, user, track)
     if own.submitted_at is not None:
         raise HTTPException(status_code=409, detail="sheet already submitted")
     own.sheet = prune_answers(payload, {q.id for q in kit.questions}).model_dump()
@@ -479,6 +523,7 @@ async def patch_sheet(
              response_model=InterviewKitRead)
 async def submit_sheet(
     application_id: int,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
     bus: EventBus = Depends(get_event_bus),
@@ -490,10 +535,7 @@ async def submit_sheet(
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    # Resolved before the kit lookup, and the lookup scoped to it: with
-    # several tracks each has its own kit, keyed by the caller's own track.
-    own = await _own_assignment(session, app_row, user)
-    kit = _require_kit(await kit_for(session, app_row, track=own.track))
+    kit, own = await _sheet_target(session, app_row, user, track)
     if own.submitted_at is not None:
         raise HTTPException(status_code=409, detail="sheet already submitted")
     own.submitted_at = datetime.now(UTC)
@@ -505,7 +547,7 @@ async def submit_sheet(
     await session.commit()
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": kit.status,
-        "job_id": app_row.job_id, "stage_changed": stage_changed,
+        "job_id": app_row.job_id, "stage_changed": stage_changed, "track": own.track,
     })
     return await _read(session, app_row, user)
 
@@ -527,6 +569,7 @@ class DraftQuestionResponse(BaseModel):
 async def draft_kit_question(
     application_id: int,
     payload: DraftQuestionRequest,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     user: User = Depends(require_user),
     # get_llm_or_none, not get_llm: FastAPI resolves dependencies eagerly, so
@@ -548,12 +591,11 @@ async def draft_kit_question(
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
-    if not can_edit_questions(user):
-        rows = rows_in_round(
-            await load_assignments(session, application_id), app_row.interview_round,
-        )
-        if user.id not in {r.user_id for r in rows}:
-            raise HTTPException(status_code=403, detail="not assigned to this interview")
+    rows = rows_in_round(
+        await load_assignments(session, application_id), app_row.interview_round,
+    )
+    if not can_edit_questions(user) and own_row(rows, user) is None:
+        raise HTTPException(status_code=403, detail="not assigned to this interview")
 
     if llm is None:
         raise HTTPException(
@@ -563,7 +605,8 @@ async def draft_kit_question(
 
     job = await session.get(Job, app_row.job_id)
     candidate = await session.get(Candidate, app_row.candidate_id)
-    kit_row = await kit_for(session, app_row)
+    kits = await kits_in_round(session, app_row)
+    kit_row = kit_for_caller(kits, rows, user, track) if kits else None
     existing = [
         q.get("text", "")
         for q in (kit_row.questions if kit_row else [])
