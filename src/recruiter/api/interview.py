@@ -291,6 +291,37 @@ async def run_generate_kit(
     })
 
 
+async def dispatch_generation(
+    session: AsyncSession, background_tasks: BackgroundTasks, app_row: Application,
+    tracks: list[str], *, engine: AsyncEngine, llm: LLMClient | None, bus: EventBus,
+) -> None:
+    """Enqueue one generation per track, after the commit that marked each
+    track's kit `generating` — the stage transition must be durable before
+    anything that can fail runs.
+
+    A track whose snapshot wants no probes runs without a model. One that
+    needs a model when none is configured is failed on its own — the other
+    tracks still generate — rather than left stuck at `generating` with no
+    task ever coming to resolve it.
+    """
+    failed = False
+    for track in tracks:
+        kit_row = await kit_for(session, app_row, track=track)
+        if kit_row is None:
+            continue
+        if llm is not None or not wants_probes(snapshot_from_row(kit_row)):
+            background_tasks.add_task(
+                run_generate_kit, application_id=app_row.id, track=track,
+                engine=engine, llm=llm, bus=bus,
+            )
+        else:
+            kit_row.status = "error"
+            kit_row.error = NO_LLM_PROVIDER
+            failed = True
+    if failed:
+        await session.commit()
+
+
 @router.post("/applications/{application_id}/interview-kit/generate", status_code=202)
 async def generate_kit(
     application_id: int,
