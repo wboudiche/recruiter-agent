@@ -19,6 +19,7 @@ import { pushRecentApp } from "@/components/command-palette/command-palette-cont
 import { useApplication } from "@/hooks/use-application";
 import { useCandidate } from "@/hooks/use-candidate";
 import { useCanWrite } from "@/hooks/use-current-user";
+import { useInterviewKit } from "@/hooks/use-interview-kit";
 import { useJob } from "@/hooks/use-job";
 import { readOnlyNotice } from "@/lib/read-only-notice";
 
@@ -36,6 +37,7 @@ export default function ApplicationDetail() {
   // Job is only needed for the breadcrumb. We pass `enabled` via the
   // application's job_id so the query waits for the application fetch.
   const job = useJob(application.data?.job_id ?? Number.NaN);
+  const kit = useInterviewKit(id);
 
   useEffect(() => {
     if (application.data && candidate.data) {
@@ -85,7 +87,7 @@ export default function ApplicationDetail() {
             )}
           </div>
         </div>
-        <InterviewersPicker applicationId={id} canWrite={canWrite} />
+        <InterviewersPicker applicationId={id} canWrite={canWrite} tracks={kit.tracks} />
         {application.data.awaiting_paste && (
           <div className="rounded-lg border border-warning-line bg-warning-soft p-4 text-sm">
             <p className="font-medium text-warning">

@@ -5,6 +5,7 @@ import { delay, http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import type { TrackRead } from "@/hooks/use-interview-kit";
 import { InterviewersPicker } from "./interviewers-picker";
 
 const server = setupServer();
@@ -160,5 +161,47 @@ describe("InterviewersPicker", () => {
     expect(await screen.findByText(/couldn.t load users/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
     expect(screen.queryByText(/inactive/i)).not.toBeInTheDocument();
+  });
+
+  it("edits one track's panel when the round has several", async () => {
+    const capture: { body?: any; url?: string } = {};
+    server.use(
+      http.get("http://localhost:8000/api/applications/1/interviewers", () =>
+        HttpResponse.json([{ user_id: 2, name: "Bob", email: "bob@acme.com",
+                             submitted_at: null, track: "t1" }])),
+      http.get("http://localhost:8000/api/users/directory", () =>
+        HttpResponse.json([
+          { id: 2, name: "Bob", email: "bob@acme.com", role: "viewer" },
+          { id: 3, name: null, email: "carol@acme.com", role: "recruiter" },
+        ])),
+      http.put("http://localhost:8000/api/applications/1/interviewers", async ({ request }) => {
+        capture.url = request.url;
+        capture.body = await request.json();
+        return HttpResponse.json([]);
+      }),
+    );
+    const tracks: TrackRead[] = [
+      { track: "t1", template_id: 1, template_name: "Technical",
+        kit: { status: "ready", questions: [] } },
+      { track: "t2", template_id: 2, template_name: "RH screen",
+        kit: { status: "ready", questions: [] } },
+    ];
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <InterviewersPicker applicationId={1} canWrite tracks={tracks} />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: /assign interviewers to rh screen/i }));
+
+    expect(await screen.findByRole("checkbox", { name: /bob/i })).toBeDisabled();
+    expect(screen.getByText(/on technical/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("checkbox", { name: /carol@acme.com/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(capture.body).toEqual({ user_ids: [3] }));
+    expect(new URL(capture.url!).searchParams.get("track")).toBe("t2");
   });
 });

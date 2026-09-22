@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useApplicationMutations } from "@/hooks/use-application-mutations";
+import { useInterviewKit } from "@/hooks/use-interview-kit";
 import { useInterviewTemplates } from "@/hooks/use-interview-templates";
 import { useJob } from "@/hooks/use-job";
 import type { ApplicationRead } from "@/hooks/use-job-applications";
@@ -19,7 +20,14 @@ export function ActionBar({ application, candidateEmail }: Props) {
   const [notifyOpen, setNotifyOpen] = useState(false);
   const templates = useInterviewTemplates(false).data ?? [];
   const job = useJob(application.job_id);
+  const kitTracks = useInterviewKit(application.id).tracks;
   const [pickerFor, setPickerFor] = useState<"schedule" | "reopen" | null>(null);
+
+  // First scheduling offers the job's default; "Another round" offers the
+  // tracks the closing round ran, so "the same again" is one click.
+  const preselected = pickerFor === "reopen" && kitTracks.length > 0
+    ? kitTracks.map((t) => t.template_id)
+    : [job.data?.default_interview_template_id ?? null];
 
   // With no templates the picker would offer only "No template", so skip
   // it: one click, exactly as before templates existed. A click before the
@@ -113,10 +121,10 @@ export function ActionBar({ application, candidateEmail }: Props) {
         onOpenChange={(o) => { if (!o) setPickerFor(null); }}
         title={pickerFor === "reopen" ? "Start another round" : "Schedule interview"}
         templates={templates}
-        defaultTemplateId={job.data?.default_interview_template_id ?? null}
+        preselected={preselected}
         pending={m.isPending}
-        onConfirm={(templateId) => {
-          if (pickerFor === "reopen") m.reopenRound(templateId); else m.markScheduled(templateId);
+        onConfirm={(templateIds) => {
+          if (pickerFor === "reopen") m.reopenRound(templateIds); else m.markScheduled(templateIds);
           setPickerFor(null);
         }}
       />
