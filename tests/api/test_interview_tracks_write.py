@@ -6,10 +6,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.api.interview import run_generate_kit
+from recruiter.auth.passwords import hash_password
 from recruiter.events import EventBus
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
-from recruiter.models import InterviewAssignment, InterviewKitRow
+from recruiter.models import InterviewAssignment, InterviewKitRow, InterviewTemplate, Role, User
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 KIT = "/api/applications/{}/interview-kit"
@@ -179,3 +180,58 @@ async def test_generation_abandons_a_track_removed_meanwhile(
     )
 
     assert await _kit(app_id, "tech") is None, "generation resurrected a removed track"
+
+
+@pytest.mark.asyncio
+async def test_generate_adopts_interviewers_picked_before_any_kit(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """An interviewer assigned before the round has any kit sits on
+    `default` (the model default). Once generate creates the round's first
+    kit — on the job's default template's track, not `default` — that row
+    must move with it, or the interviewer is stranded on a track nobody
+    created a kit for."""
+    app_id = await create_scored_app()
+    job_id = (await api_client.get(f"/api/applications/{app_id}")).json()["job_id"]
+
+    async with _db()() as s:
+        template = InterviewTemplate(
+            name="RH screen", questions=[], probe_mode="none", include_job_questions=False,
+        )
+        s.add(template)
+        await s.flush()
+        tid = template.id
+        viewer = User(email="orphan-viewer@acme.com", role=Role.VIEWER, is_active=True,
+                     password_hash=hash_password("pw-12345678"))
+        s.add(viewer)
+        await s.commit()
+        viewer_id = viewer.id
+
+    r = await api_client.patch(f"/api/jobs/{job_id}",
+                               json={"default_interview_template_id": tid})
+    assert r.status_code == 200, r.text
+
+    r = await api_client.put(f"/api/applications/{app_id}/interviewers",
+                             json={"user_ids": [viewer_id]})
+    assert r.status_code == 200, r.text
+    async with _db()() as s:
+        before = (await s.execute(select(InterviewAssignment).where(
+            InterviewAssignment.application_id == app_id,
+            InterviewAssignment.user_id == viewer_id,
+        ))).scalar_one()
+    assert before.track == "default", "picked before any kit: parked on the model default"
+
+    app.dependency_overrides[get_llm] = lambda: FakeLLMClient()
+    try:
+        r = await api_client.post(f"{KIT.format(app_id)}/generate")
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+    assert r.status_code == 202, r.text
+
+    async with _db()() as s:
+        after = (await s.execute(select(InterviewAssignment).where(
+            InterviewAssignment.application_id == app_id,
+            InterviewAssignment.user_id == viewer_id,
+        ))).scalar_one()
+    assert after.track == f"t{tid}", "adopted into the round's first (only) kit's track"
+    assert await _kit(app_id, f"t{tid}") is not None

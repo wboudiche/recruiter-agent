@@ -33,6 +33,21 @@ def own_row(rows: list[InterviewAssignment], user: User) -> InterviewAssignment 
     return next((r for r in rows if r.user_id == user.id), None)
 
 
+def adopt_orphan_rows(
+    kits: list[InterviewKitRow], rows: list[InterviewAssignment],
+) -> None:
+    """Interviewers picked before the round had a kit sit on `default`.
+    Once the round's tracks exist, any of its rows on a track with no kit
+    joins the round's first track, so nobody picked early is stranded.
+    `rows` are ONE round's rows; they are updated in place."""
+    if not kits:
+        return
+    tracks = {k.track for k in kits}
+    for row in rows:
+        if row.track not in tracks:
+            row.track = kits[0].track
+
+
 def kit_for_caller(
     kits: list[InterviewKitRow], rows: list[InterviewAssignment], user: User,
     requested: str | None,

@@ -1,7 +1,7 @@
 import pytest
 from fastapi import HTTPException
 
-from recruiter.api.kit_tracks import kit_for_caller, own_row, resolve_track
+from recruiter.api.kit_tracks import adopt_orphan_rows, kit_for_caller, own_row, resolve_track
 from recruiter.models import InterviewAssignment, InterviewKitRow, Role, User
 
 
@@ -54,3 +54,17 @@ def test_a_recruiter_names_the_track() -> None:
     recruiter = _user(5, Role.RECRUITER)
     assert kit_for_caller(kits, [], recruiter, "tech") is kits[0]
     assert _status(kit_for_caller, kits, [], recruiter, None) == 422
+
+
+def test_adopt_orphan_rows() -> None:
+    kits = [_kit("t1"), _kit("t2")]
+    orphan, staffed = _row(1, "default"), _row(2, "t2")
+    adopt_orphan_rows(kits, [orphan, staffed])
+    assert orphan.track == "t1", "a row on a track with no kit joins the round's first track"
+    assert staffed.track == "t2", "a row already on a kit's track is untouched"
+
+
+def test_adopt_orphan_rows_with_no_kits_changes_nothing() -> None:
+    row = _row(1, "default")
+    adopt_orphan_rows([], [row])
+    assert row.track == "default"

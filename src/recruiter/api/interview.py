@@ -16,7 +16,7 @@ from recruiter.api.candidates import get_engine_dep, get_event_bus, get_llm
 from recruiter.api.deps import get_session, require_user
 from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
-from recruiter.api.kit_tracks import kit_for_caller, own_row, resolve_track
+from recruiter.api.kit_tracks import adopt_orphan_rows, kit_for_caller, own_row, resolve_track
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, Candidate, InterviewAssignment, InterviewKitRow, Job, User
@@ -350,6 +350,11 @@ async def generate_kit(
             session, app_row, round=app_row.interview_round,
             track=track_key(template.id if template else None),
             **template_fields(template),
+        )
+        adopt_orphan_rows(
+            [kit_row],
+            rows_in_round(await load_assignments(session, application_id),
+                          app_row.interview_round),
         )
     kit_row.status = "generating"
     kit_row.error = None
