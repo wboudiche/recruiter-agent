@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from recruiter.models import InterviewAssignment, InterviewKitRow, User
 from recruiter.pipeline.interview_sheets import can_edit_questions
+from recruiter.pipeline.kit_store import DEFAULT_TRACK
 
 
 def resolve_track(kits: list[InterviewKitRow], requested: str | None) -> InterviewKitRow:
@@ -63,3 +64,15 @@ def kit_for_caller(
     if requested is not None and requested != own.track:
         raise HTTPException(status_code=403, detail="you are on another track")
     return resolve_track(kits, own.track)
+
+
+def target_track(kits: list[InterviewKitRow], requested: str | None) -> str:
+    """The track a panel edit targets. Before the round has any kit — a
+    panel picked ahead of scheduling — that is `default`; the round's
+    tracks adopt those rows when they are created (see
+    adopt_orphan_rows). Once kits exist, `resolve_track`."""
+    if not kits:
+        if requested not in (None, DEFAULT_TRACK):
+            raise HTTPException(status_code=404, detail=f"no track {requested!r} in this round")
+        return DEFAULT_TRACK
+    return resolve_track(kits, requested).track

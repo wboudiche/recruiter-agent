@@ -1,7 +1,13 @@
 import pytest
 from fastapi import HTTPException
 
-from recruiter.api.kit_tracks import adopt_orphan_rows, kit_for_caller, own_row, resolve_track
+from recruiter.api.kit_tracks import (
+    adopt_orphan_rows,
+    kit_for_caller,
+    own_row,
+    resolve_track,
+    target_track,
+)
 from recruiter.models import InterviewAssignment, InterviewKitRow, Role, User
 
 
@@ -68,3 +74,11 @@ def test_adopt_orphan_rows_with_no_kits_changes_nothing() -> None:
     row = _row(1, "default")
     adopt_orphan_rows([], [row])
     assert row.track == "default"
+
+
+def test_a_panel_picked_before_any_kit_goes_on_default() -> None:
+    assert target_track([], None) == "default"
+    assert target_track([], "default") == "default"
+    assert _status(target_track, [], "rh") == 404
+    assert target_track([_kit("tech"), _kit("rh")], "rh") == "rh"
+    assert _status(target_track, [_kit("tech"), _kit("rh")], None) == 422

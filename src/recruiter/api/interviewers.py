@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from recruiter.api.candidates import get_event_bus
 from recruiter.api.deps import get_session, require_role, require_user
+from recruiter.api.kit_tracks import target_track
 from recruiter.events import EventBus
 from recruiter.models import Application, InterviewAssignment, Role, User
 from recruiter.pipeline.interview_sheets import (
@@ -19,6 +20,7 @@ from recruiter.pipeline.interview_sheets import (
     rows_in_round,
     sheet_has_content,
 )
+from recruiter.pipeline.kit_store import kits_in_round
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
 
@@ -28,6 +30,8 @@ class InterviewerRead(BaseModel):
     name: str | None
     email: str
     submitted_at: str | None
+    # Which track of the live round they are on — one per person per round.
+    track: str
 
 
 class InterviewersPut(BaseModel):
@@ -45,9 +49,9 @@ async def load_assignments(session: AsyncSession, application_id: int) -> list[I
 async def _read_all(
     session: AsyncSession, application_id: int, current_round: int,
 ) -> list[InterviewerRead]:
-    """The panel for the round in progress. Earlier rounds' rows stay in the
-    table as the record of who interviewed then, but the chips, the picker
-    and every edit below concern the live round only."""
+    """The panel for the round in progress, every track. Earlier rounds'
+    rows stay in the table as the record of who interviewed then, but the
+    chips, the picker and every edit below concern the live round only."""
     rows = rows_in_round(await load_assignments(session, application_id), current_round)
     users = {u.id: u for u in (await session.execute(
         select(User).where(User.id.in_([r.user_id for r in rows] or [-1]))
@@ -58,6 +62,7 @@ async def _read_all(
             name=users[r.user_id].name,
             email=users[r.user_id].email,
             submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
+            track=r.track,
         )
         for r in rows
     ]
@@ -77,24 +82,37 @@ async def list_interviewers(
 async def put_interviewers(
     application_id: int,
     payload: InterviewersPut,
+    track: str | None = None,
     session: AsyncSession = Depends(get_session),
     bus: EventBus = Depends(get_event_bus),
     _: User = Depends(require_role(Role.ADMIN, Role.RECRUITER)),
 ) -> list[InterviewerRead]:
     """Reconcile to exactly `user_ids`: create missing rows, delete the rest.
     Refuses to delete a submitted sheet, or an unsubmitted one with any
-    content — feedback must not vanish by unticking a name."""
+    content — feedback must not vanish by unticking a name.
+    `?track=` names the track whose panel this is (optional when the round
+    has one track, or none yet); a person already on another track of this
+    round is refused (409)."""
     # Row-locked: removing the last unsubmitted interviewer can complete the
     # round (see close_round_if_complete below), same race as submit_sheet.
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 
-    wanted = list(dict.fromkeys(payload.user_ids))  # dedupe, keep order
-    existing = rows_in_round(
+    target = target_track(await kits_in_round(session, app_row), track)
+    round_rows = rows_in_round(
         await load_assignments(session, application_id), app_row.interview_round,
     )
+    existing = [r for r in round_rows if r.track == target]
     by_user = {r.user_id: r for r in existing}
+    wanted = list(dict.fromkeys(payload.user_ids))  # dedupe, keep order
+    # One track per person per round: moving someone means taking them off
+    # their current track first.
+    clash = sorted(r.user_id for r in round_rows if r.track != target and r.user_id in wanted)
+    if clash:
+        raise HTTPException(
+            status_code=409, detail=f"already on another track this round: {clash}",
+        )
     # Only ids not already on the panel need to be active: an interviewer
     # deactivated after being assigned must not make the panel unsaveable —
     # their existing row is left alone below regardless of is_active.
@@ -140,7 +158,7 @@ async def put_interviewers(
         if uid not in by_user:
             session.add(InterviewAssignment(
                 application_id=application_id, user_id=uid,
-                round=app_row.interview_round,
+                round=app_row.interview_round, track=target,
             ))
 
     # Removing the last unsubmitted interviewer can leave every remaining
@@ -155,6 +173,6 @@ async def put_interviewers(
     # interviewer chips and sheets (see lib/sse.ts).
     await bus.publish({
         "type": "interview_kit", "application_id": application_id, "status": "ready",
-        "job_id": app_row.job_id, "stage_changed": stage_changed,
+        "job_id": app_row.job_id, "stage_changed": stage_changed, "track": target,
     })
     return await _read_all(session, application_id, app_row.interview_round)
