@@ -159,6 +159,39 @@ export function useTrackKitActions(applicationId: number, track: string | null) 
   return { generate, patch, saveSheet, submitSheet, draftQuestion };
 }
 
+/** Whether a sheet holds anything a recruiter would not want discarded —
+ *  mirrors the server's sheet_has_content. */
+export function sheetHasContent(sheet: InterviewSheet): boolean {
+  return Object.values(sheet.answers).some((a) => a?.answer || a?.rating)
+    || !!(sheet.verdict.decision || sheet.verdict.note);
+}
+
+/** Adding and removing a track of the live round. Both return the full kit
+ *  read, cached as-is. */
+export function useTrackMutations(applicationId: number) {
+  const qc = useQueryClient();
+  const key = queryKeys.interviewKit(applicationId);
+  const path = `/api/applications/${applicationId}/interview-tracks`;
+  const settle = (data: KitResponse) => {
+    qc.setQueryData(key, data);
+    qc.invalidateQueries({ queryKey: key });
+    qc.invalidateQueries({ queryKey: queryKeys.interviewers(applicationId) });
+    // Removing the last unfinished track can close the round.
+    qc.invalidateQueries({ queryKey: queryKeys.application(applicationId) });
+  };
+  const addTrack = useMutation({
+    mutationFn: (templateId: number | null) =>
+      api<KitResponse>(path, { method: "POST", json: { template_id: templateId } }),
+    onSuccess: settle,
+  });
+  const removeTrack = useMutation({
+    mutationFn: (track: string) =>
+      api<KitResponse>(`${path}/${encodeURIComponent(track)}`, { method: "DELETE" }),
+    onSuccess: settle,
+  });
+  return { addTrack, removeTrack };
+}
+
 export function useInterviewKit(applicationId: number) {
   const query = useQuery({
     queryKey: queryKeys.interviewKit(applicationId),

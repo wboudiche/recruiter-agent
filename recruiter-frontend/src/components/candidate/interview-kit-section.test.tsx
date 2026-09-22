@@ -16,15 +16,18 @@ afterAll(() => server.close());
 
 function mountWithKit(
   kit: unknown,
-  capture: { body?: any; sheet?: any; submitted?: boolean } = {},
-  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number; templateName?: string } = {},
+  capture: { body?: any; sheet?: any; submitted?: boolean; addedTrack?: any; removedTrack?: string } = {},
+  opts: { sheets?: unknown[]; me?: { id: number; role: string }; canWrite?: boolean; interviewers?: unknown[]; interviewRound?: number; templateName?: string; tracks?: unknown[]; stage?: string; templates?: unknown[] } = {},
 ) {
   const me = opts.me ?? { id: 1, role: "recruiter" };
   server.use(
     http.get("http://localhost:8000/api/auth/me", () =>
       HttpResponse.json({ id: me.id, email: "me@acme.com", name: "Me", picture: null, role: me.role })),
     http.get("http://localhost:8000/api/applications/1/interview-kit", () =>
-      HttpResponse.json({ kit, sheets: opts.sheets ?? [], template_name: opts.templateName ?? null })),
+      HttpResponse.json({
+        kit, sheets: opts.sheets ?? [], template_name: opts.templateName ?? null,
+        ...(opts.tracks ? { tracks: opts.tracks } : {}),
+      })),
     http.patch("http://localhost:8000/api/applications/1/interview-kit", async ({ request }) => {
       capture.body = await request.json();
       return HttpResponse.json({ kit, sheets: opts.sheets ?? [] });
@@ -41,12 +44,23 @@ function mountWithKit(
       HttpResponse.json({ application_id: 1 }, { status: 202 })),
     http.get("http://localhost:8000/api/applications/1/interviewers", () =>
       HttpResponse.json(opts.interviewers ?? [])),
+    http.get("http://localhost:8000/api/interview-templates", () =>
+      HttpResponse.json(opts.templates ?? [])),
+    http.post("http://localhost:8000/api/applications/1/interview-tracks", async ({ request }) => {
+      capture.addedTrack = await request.json();
+      return HttpResponse.json({ kit, sheets: opts.sheets ?? [], tracks: opts.tracks ?? [] },
+                               { status: 201 });
+    }),
+    http.delete("http://localhost:8000/api/applications/1/interview-tracks/:track", ({ params }) => {
+      capture.removedTrack = String(params.track);
+      return HttpResponse.json({ kit, sheets: opts.sheets ?? [], tracks: opts.tracks ?? [] });
+    }),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}<Toaster /></QueryClientProvider>
   );
-  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} interviewRound={opts.interviewRound} /></Wrapper>);
+  const result = render(<Wrapper><InterviewKitSection applicationId={1} canWrite={opts.canWrite ?? true} interviewRound={opts.interviewRound} stage={opts.stage} /></Wrapper>);
   return { ...result, qc };
 }
 
@@ -870,5 +884,59 @@ describe("InterviewKitSection", () => {
 
     await waitFor(() => expect(saveButton).toBeDisabled());
     await waitFor(() => expect(saveButton).toBeEnabled(), { timeout: 3000 });
+  });
+});
+
+const q = (id: string, text: string) =>
+  ({ id, text, source: "baseline", answer: null, rating: null });
+const TECH = { track: "t1", template_id: 1, template_name: "Technical",
+               kit: { status: "ready", questions: [q("q1", "Clusters?")] } };
+const RH = { track: "t2", template_id: 2, template_name: "RH screen",
+             kit: { status: "ready", questions: [q("r1", "Why us?")] } };
+const TEMPLATE = (id: number, name: string) => ({ id, name, description: null, questions: [],
+  probe_mode: "none", include_job_questions: false, is_active: true });
+
+describe("InterviewKitSection — tracks", () => {
+  it("shows one tab per track, each with its own questions", async () => {
+    mountWithKit(TECH.kit, {}, { tracks: [TECH, RH] });
+    const rhTab = await screen.findByRole("tab", { name: /rh screen/i });
+    expect(screen.getByRole("tab", { name: /technical/i })).toHaveAttribute("aria-selected", "true");
+    await userEvent.click(rhTab);
+    expect(rhTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: /rh screen/i })).toHaveTextContent("Why us?");
+  });
+
+  it("adds a track from the templates the round does not have", async () => {
+    const capture: { addedTrack?: any } = {};
+    mountWithKit(TECH.kit, capture, {
+      tracks: [TECH], stage: "scheduled",
+      templates: [TEMPLATE(1, "Technical"), TEMPLATE(2, "RH screen")],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /add track/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /track template/i }));
+    expect(screen.queryByRole("option", { name: "Technical" })).not.toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("option", { name: /rh screen/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^add track$/i }));
+    await waitFor(() => expect(capture.addedTrack).toEqual({ template_id: 2 }));
+  });
+
+  it("will not remove a track someone has written in", async () => {
+    const capture: { removedTrack?: string } = {};
+    mountWithKit(TECH.kit, capture, {
+      tracks: [TECH, RH], stage: "scheduled",
+      sheets: [{ user_id: 7, name: "Carol", email: "c@acme.com", round: 1, track: "t2",
+                 submitted_at: null,
+                 sheet: { answers: {}, verdict: { decision: null, note: "promising" } } }],
+    });
+    expect(await screen.findByRole("button", { name: /remove track rh screen/i })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: /remove track technical/i }));
+    await waitFor(() => expect(capture.removedTrack).toBe("t1"));
+  });
+
+  it("shows an interviewer their one track without tabs", async () => {
+    mountWithKit(RH.kit, {}, { tracks: [RH], me: { id: 7, role: "viewer" }, canWrite: false });
+    expect(await screen.findByText("Why us?")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getByText(/rh screen/i)).toBeInTheDocument();
   });
 });

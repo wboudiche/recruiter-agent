@@ -134,6 +134,7 @@ export default function ApplicationDetail() {
               applicationId={id}
               canWrite={canWrite}
               interviewRound={application.data.interview_round}
+              stage={application.data.stage}
             />
           </TabsContent>
         </Tabs>
