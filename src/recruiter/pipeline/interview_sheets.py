@@ -83,6 +83,10 @@ def visible_sheets(
     would happily hand it back to them, but replaying an earlier round
     while they judge this one is the anchoring the blind rule exists to
     prevent.
+
+    Within a round the rule is scoped to the caller's TRACK (phase 3): an
+    RH interviewer never sees a technical sheet, before or after submitting
+    their own.
     """
     rows = list(rows)
     if can_edit_questions(user):
@@ -91,9 +95,29 @@ def visible_sheets(
     own = next((r for r in rows if r.user_id == user.id), None)
     if own is None:
         return []
+    rows = [r for r in rows if r.track == own.track]
     if own.submitted_at is None:
         return [own]
     return [r for r in rows if r.user_id == own.user_id or r.submitted_at is not None]
+
+
+def visible_kits(
+    kits: Iterable[InterviewKitRow], rows: Iterable[InterviewAssignment], *,
+    user: User, current_round: int,
+) -> list[InterviewKitRow]:
+    """The live round's tracks a caller may see. Recruiters and admins see
+    every track. An interviewer sees only their own track's kit, so an RH
+    interviewer is never shown the technical questions. Someone on no
+    track of the live round sees every track, as before tracks existed."""
+    kits = list(kits)
+    if can_edit_questions(user):
+        return kits
+    own = next(
+        (r for r in rows_in_round(rows, current_round) if r.user_id == user.id), None,
+    )
+    if own is None:
+        return kits
+    return [k for k in kits if k.track == own.track]
 
 
 def answered_question_ids(rows: Iterable[InterviewAssignment]) -> set[str]:
@@ -137,20 +161,22 @@ def sheet_has_content(sheet: dict) -> bool:
 
 
 def mark_interviewed(
-    app_row: Application, kit_row: InterviewKitRow, now: datetime,
+    app_row: Application, kits: Iterable[InterviewKitRow], now: datetime,
 ) -> None:
-    """Close the round: move the application to INTERVIEWED and stamp the
-    kit's closed_at. Shared by the automatic all-sheets-in rule
+    """Close the round: move the application to INTERVIEWED and stamp
+    closed_at on every kit (track) in it. Shared by the automatic rule
     (close_round_if_complete) and the recruiter's manual override in
     patch_application, so both paths stamp the same fields the same way."""
     app_row.stage = Stage.INTERVIEWED
     app_row.interviewed_at = now
-    kit_row.closed_at = now.isoformat()
+    for kit_row in kits:
+        kit_row.closed_at = now.isoformat()
 
 
 async def close_round_if_complete(session: AsyncSession, app_row: Application) -> bool:
-    """Close the round if `app_row` is SCHEDULED, has a kit, and every
-    assigned interviewer has submitted. Returns True iff it did.
+    """Close the round if `app_row` is SCHEDULED and `round_complete` holds
+    for its live round — every track staffed, every sheet submitted.
+    Returns True iff it did.
 
     `app_row` must already be loaded with `with_for_update=True` by the
     caller — see submit_sheet's row-lock comment: two interviewers
@@ -164,17 +190,15 @@ async def close_round_if_complete(session: AsyncSession, app_row: Application) -
     top-level import in both directions would be a cycle.
     """
     from recruiter.api.interviewers import load_assignments
-    from recruiter.pipeline.kit_store import kit_for
+    from recruiter.pipeline.kit_store import kits_in_round
 
     if app_row.stage != Stage.SCHEDULED:
         return False
-    kit_row = await kit_for(session, app_row)
-    if kit_row is None:
-        return False
+    kits = await kits_in_round(session, app_row)
     rows = rows_in_round(
         await load_assignments(session, app_row.id), app_row.interview_round,
     )
-    if not all_submitted(rows):
+    if not round_complete(kits, rows):
         return False
-    mark_interviewed(app_row, kit_row, datetime.now(UTC))
+    mark_interviewed(app_row, kits, datetime.now(UTC))
     return True

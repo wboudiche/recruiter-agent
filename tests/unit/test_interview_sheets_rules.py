@@ -11,6 +11,7 @@ from recruiter.pipeline.interview_sheets import (
     is_frozen,
     prune_answers,
     sheet_has_content,
+    visible_kits,
     visible_sheets,
 )
 from recruiter.schemas.interview import InterviewSheet
@@ -208,3 +209,21 @@ def test_a_one_track_round_closes_as_before() -> None:
     one = [_kit("default")]
     assert round_complete(one, [_on("default", 1, True), _on("default", 2, True)])
     assert not round_complete(one, [_on("default", 1, True), _on("default", 2, False)])
+
+
+def test_the_blind_rule_is_per_track() -> None:
+    """An RH interviewer never sees a technical sheet, before or after
+    submitting their own; within their track the phase-1 rule holds."""
+    rows = [_on("tech", 1, True), _on("rh", 2, True), _on("rh", 3, False), _on("rh", 4, True)]
+    assert visible_sheets(rows, user=_user(3, Role.VIEWER), current_round=1) == [rows[2]]
+    assert visible_sheets(rows, user=_user(2, Role.VIEWER), current_round=1) == [rows[1], rows[3]]
+    assert visible_sheets(rows, user=_user(9, Role.RECRUITER), current_round=1) == rows
+
+
+def test_an_interviewer_sees_only_their_tracks_kit() -> None:
+    kits = [_kit("tech"), _kit("rh")]
+    rows = [_on("tech", 1, False), _on("rh", 2, False)]
+    assert visible_kits(kits, rows, user=_user(2, Role.VIEWER), current_round=1) == [kits[1]]
+    assert visible_kits(kits, rows, user=_user(9, Role.RECRUITER), current_round=1) == kits
+    assert visible_kits(kits, rows, user=_user(7, Role.VIEWER), current_round=1) == kits, (
+        "someone on no track sees every track, as before tracks existed")

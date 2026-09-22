@@ -35,6 +35,7 @@ from recruiter.pipeline.interview_sheets import (
     is_frozen,
     prune_answers,
     rows_in_round,
+    visible_kits,
     visible_sheets,
 )
 from recruiter.pipeline.kit_store import (
@@ -43,6 +44,7 @@ from recruiter.pipeline.kit_store import (
     create_kit,
     job_default_template,
     kit_for,
+    kits_in_round,
     snapshot_from_row,
     template_fields,
 )
@@ -60,9 +62,21 @@ router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(requ
 logger = logging.getLogger(__name__)
 
 
+class TrackRead(BaseModel):
+    track: str
+    template_id: int | None = None
+    template_name: str | None = None
+    kit: InterviewKit
+
+
 class InterviewKitRead(BaseModel):
+    # Kept for one-track clients: the caller's own track if they are on one,
+    # otherwise the round's first track. New clients read `tracks`.
     kit: InterviewKit | None
     template_name: str | None = None
+    # Every track of the live round the caller may see, in creation order —
+    # see pipeline/interview_sheets.visible_kits.
+    tracks: list[TrackRead] = Field(default_factory=list)
     # Filtered per caller — see pipeline/interview_sheets.visible_sheets.
     sheets: list[SheetRead] = Field(default_factory=list)
 
@@ -89,16 +103,33 @@ async def _sheets_for(
             sheet=InterviewSheet.model_validate(r.sheet or {}),
             submitted_at=r.submitted_at.isoformat() if r.submitted_at else None,
             round=r.round,
+            track=r.track,
         )
         for r in rows
     ]
 
 
 async def _read(session: AsyncSession, app_row: Application, user: User) -> InterviewKitRead:
-    row = await kit_for(session, app_row)
+    rows = await load_assignments(session, app_row.id)
+    shown = visible_kits(
+        await kits_in_round(session, app_row), rows,
+        user=user, current_round=app_row.interview_round,
+    )
+    own = next(
+        (r for r in rows_in_round(rows, app_row.interview_round) if r.user_id == user.id),
+        None,
+    )
+    primary = next((k for k in shown if own is not None and k.track == own.track), None)
+    if primary is None and shown:
+        primary = shown[0]
     return InterviewKitRead(
-        kit=content_of(row) if row else None,
-        template_name=row.template_name if row else None,
+        kit=content_of(primary) if primary else None,
+        template_name=primary.template_name if primary else None,
+        tracks=[
+            TrackRead(track=k.track, template_id=k.template_id,
+                      template_name=k.template_name, kit=content_of(k))
+            for k in shown
+        ],
         sheets=await _sheets_for(session, app_row, user),
     )
 
@@ -459,8 +490,10 @@ async def submit_sheet(
     app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
-    kit = _require_kit(await kit_for(session, app_row))
+    # Resolved before the kit lookup, and the lookup scoped to it: with
+    # several tracks each has its own kit, keyed by the caller's own track.
     own = await _own_assignment(session, app_row, user)
+    kit = _require_kit(await kit_for(session, app_row, track=own.track))
     if own.submitted_at is not None:
         raise HTTPException(status_code=409, detail="sheet already submitted")
     own.submitted_at = datetime.now(UTC)

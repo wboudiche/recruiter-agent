@@ -90,3 +90,6 @@ class SheetRead(BaseModel):
     # sheets, so without this the client cannot tell one person's round-1
     # sheet from their round-2 one and will match on user_id alone.
     round: int = 1
+    # Which track of that round. An interviewer is on one track per round,
+    # so (round, track) names the kit these answers are keyed against.
+    track: str = "default"

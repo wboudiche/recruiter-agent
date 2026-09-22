@@ -36,6 +36,7 @@ from recruiter.pipeline.kit_store import (
     create_kit,
     job_default_template,
     kit_for,
+    kits_in_round,
     snapshot_from_row,
     template_fields,
 )
@@ -552,14 +553,10 @@ async def patch_application(
                 schedule_kit_generation = True
         elif new_stage == Stage.INTERVIEWED:
             # The recruiter closed the round by hand (a no-show, say).
-            # Shares mark_interviewed with the all-sheets-in path in
-            # submit_sheet so both stamp interviewed_at/closed_at the same
-            # way. With no kit yet, there's nothing to stamp closed.
-            kit_row = await kit_for(session, app_row)
-            if kit_row is not None:
-                mark_interviewed(app_row, kit_row, now)
-            else:
-                app_row.interviewed_at = now
+            # Shares mark_interviewed with the automatic rule in
+            # close_round_if_complete, so both paths stamp interviewed_at and
+            # every track's closed_at the same way.
+            mark_interviewed(app_row, await kits_in_round(session, app_row), now)
         elif new_stage == Stage.OFFER:
             app_row.offer_at = now
         elif new_stage == Stage.HIRED:
