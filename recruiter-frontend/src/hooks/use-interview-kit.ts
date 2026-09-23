@@ -178,6 +178,8 @@ export function useTrackMutations(applicationId: number) {
     qc.invalidateQueries({ queryKey: queryKeys.interviewers(applicationId) });
     // Removing the last unfinished track can close the round.
     qc.invalidateQueries({ queryKey: queryKeys.application(applicationId) });
+    // A closed round can also change the board (see submitSheet above).
+    qc.invalidateQueries({ queryKey: ["jobs"], exact: false });
   };
   const addTrack = useMutation({
     mutationFn: (templateId: number | null) =>

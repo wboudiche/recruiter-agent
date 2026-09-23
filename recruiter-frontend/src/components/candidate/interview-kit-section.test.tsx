@@ -939,4 +939,12 @@ describe("InterviewKitSection — tracks", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.getByText(/rh screen/i)).toBeInTheDocument();
   });
+
+  it("marks an errored track's tab distinctly from a healthy one", async () => {
+    const ERRORED_RH = { ...RH, kit: { status: "error", error: "boom", questions: [] } };
+    mountWithKit(TECH.kit, {}, { tracks: [TECH, ERRORED_RH] });
+    const rhTab = await screen.findByRole("tab", { name: /rh screen/i });
+    expect(rhTab).toHaveTextContent("failed");
+    expect(screen.getByRole("tab", { name: /technical/i })).not.toHaveTextContent("failed");
+  });
 });

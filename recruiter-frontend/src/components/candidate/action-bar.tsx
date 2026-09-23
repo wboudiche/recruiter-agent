@@ -23,9 +23,12 @@ export function ActionBar({ application, candidateEmail }: Props) {
   const kitTracks = useInterviewKit(application.id).tracks;
   const [pickerFor, setPickerFor] = useState<"schedule" | "reopen" | null>(null);
 
-  // First scheduling offers the job's default; "Another round" offers the
-  // tracks the closing round ran, so "the same again" is one click.
-  const preselected = pickerFor === "reopen" && kitTracks.length > 0
+  // First scheduling offers the job's default. A round that already has
+  // tracks — "Another round", or re-scheduling the SAME round after a
+  // reject → re-invite → schedule — offers its own tracks, so a re-scheduled
+  // round doesn't silently drop the tracks a click away from being deleted
+  // by start_round for anything left unticked.
+  const preselected = kitTracks.length > 0
     ? kitTracks.map((t) => t.template_id)
     : [job.data?.default_interview_template_id ?? null];
 

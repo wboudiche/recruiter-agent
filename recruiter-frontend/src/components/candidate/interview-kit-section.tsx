@@ -155,8 +155,15 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound, s
             return (
               <TabsTrigger key={t.track} value={t.track}>
                 {trackLabel(t)}
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span
+                  className={
+                    t.kit.status === "error"
+                      ? "ml-2 text-xs text-danger"
+                      : "ml-2 text-xs text-muted-foreground"
+                  }
+                >
                   {t.kit.status === "generating" ? "…"
+                    : t.kit.status === "error" ? "failed"
                     : panel.length === 0 ? "no interviewers" : `${done}/${panel.length}`}
                 </span>
               </TabsTrigger>
