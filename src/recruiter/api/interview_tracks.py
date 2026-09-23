@@ -16,12 +16,14 @@ from recruiter.api.deps import get_session, require_role, require_user
 from recruiter.api.interview import InterviewKitRead, _read, dispatch_generation
 from recruiter.api.interviewers import load_assignments
 from recruiter.api.jobs import get_llm_or_none
+from recruiter.api.kit_tracks import adopt_orphan_rows
 from recruiter.api.round_tracks import create_track
 from recruiter.events import EventBus
 from recruiter.llm.client import LLMClient
 from recruiter.models import Application, InterviewTemplate, Role, Stage, User
 from recruiter.pipeline.interview_sheets import (
     close_round_if_complete,
+    rows_in_round,
     rows_in_track,
     sheet_has_content,
 )
@@ -68,6 +70,14 @@ async def add_track(
     if await kit_for(session, app_row, track=key) is not None:
         raise HTTPException(status_code=409, detail="this round already has that track")
     await create_track(session, app_row, template, datetime.now(UTC))
+    # Mirrors generate_kit's no-kit branch: a round reopened with no
+    # template (the "never had a kit" carve-out) can carry panel rows on
+    # `default` with no kit of their own; the round's first (and, here,
+    # only) track adopts them so nobody picked early is stranded.
+    adopt_orphan_rows(
+        await kits_in_round(session, app_row),
+        rows_in_round(await load_assignments(session, application_id), app_row.interview_round),
+    )
     await session.commit()
     await dispatch_generation(
         session, background_tasks, app_row, [key], engine=engine, llm=llm, bus=bus,

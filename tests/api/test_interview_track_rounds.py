@@ -10,7 +10,13 @@ from recruiter.auth.passwords import hash_password
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
 from recruiter.models import (
-    Application, InterviewAssignment, InterviewKitRow, InterviewTemplate, Role, Stage, User,
+    Application,
+    InterviewAssignment,
+    InterviewKitRow,
+    InterviewTemplate,
+    Role,
+    Stage,
+    User,
 )
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 

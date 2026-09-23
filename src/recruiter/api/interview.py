@@ -168,7 +168,6 @@ async def run_generate_kit(
         # INTERVIEWED → SCHEDULED is a legal one-click round trip, and
         # `kit_row` above is only correct for the round as it stood here.
         kit_row = await kit_for(session, app_row, track=track)
-        had_kit = kit_row is not None
         dispatch_round = app_row.interview_round
         existing_raw = content_of(kit_row).model_dump() if kit_row else {}
         existing_questions = existing_raw.get("questions") or []
@@ -234,7 +233,7 @@ async def run_generate_kit(
                 dispatch_round, app_row.interview_round, application_id,
             )
             return
-        if kit_row is None and had_kit:
+        if kit_row is None:
             # The track was removed while the model was running (see
             # api/interview_tracks.remove_track). Recreating it here would
             # resurrect a track the recruiter just deleted.
@@ -281,8 +280,6 @@ async def run_generate_kit(
             kit = InterviewKit.model_validate(existing_raw).model_copy(
                 update={"status": "ready", "error": None}
             )
-        if kit_row is None:
-            kit_row = await create_kit(session, app_row, round=app_row.interview_round, track=track)
         apply_content(kit_row, kit)
         await session.commit()
     await bus.publish({
@@ -332,7 +329,13 @@ async def generate_kit(
     llm: LLMClient = Depends(get_llm),
     bus: EventBus = Depends(get_event_bus),
 ) -> dict:
-    app_row = await session.get(Application, application_id)
+    # Row-locked like every other track mutation: this endpoint can now
+    # create a track and rewrite panel rows (adopt_orphan_rows below), not
+    # merely flip a status. It also closes the race between two concurrent
+    # first-Generate calls, which the unique (application, round, track)
+    # key would otherwise turn into a 500 instead of the idempotent no-op
+    # `generation_in_flight` intends.
+    app_row = await session.get(Application, application_id, with_for_update=True)
     if app_row is None:
         raise HTTPException(status_code=404, detail="application not found")
 

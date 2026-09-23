@@ -299,7 +299,8 @@ def test_tracks_migration_rekeys_templated_kits_and_is_reversible(
         app_ids = [conn.execute(sa.text(
             "INSERT INTO applications (job_id, candidate_id, stage, interview_round,"
             " created_at, updated_at)"
-            " VALUES ((SELECT id FROM jobs LIMIT 1), (SELECT id FROM candidates LIMIT 1 OFFSET :offset),"
+            " VALUES ((SELECT id FROM jobs LIMIT 1),"
+            " (SELECT id FROM candidates LIMIT 1 OFFSET :offset),"
             " 'scheduled', 1, now(), now()) RETURNING id"),
             {"offset": i}).scalar_one() for i in range(2)]
         templated, plain = app_ids
