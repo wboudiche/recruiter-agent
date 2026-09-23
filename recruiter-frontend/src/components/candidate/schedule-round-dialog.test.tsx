@@ -8,31 +8,38 @@ const T = (id: number, name: string) => ({
   include_job_questions: false, is_active: true,
 });
 
+function mount(preselected: (number | null)[], onConfirm = vi.fn()) {
+  render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
+    templates={[T(1, "Technical"), T(2, "RH screen")]} preselected={preselected}
+    onConfirm={onConfirm} />);
+  return onConfirm;
+}
+
 describe("ScheduleRoundDialog", () => {
-  it("preselects the job's default and confirms it", async () => {
-    const onConfirm = vi.fn();
-    render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
-      templates={[T(1, "Technical"), T(2, "RH screen")]} defaultTemplateId={2}
-      onConfirm={onConfirm} />);
-
-    expect(screen.getByRole("combobox")).toHaveTextContent("RH screen");
+  it("preselects the given templates and confirms them", async () => {
+    const onConfirm = mount([2]);
+    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Technical" })).not.toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
-    expect(onConfirm).toHaveBeenCalledWith(2);
+    expect(onConfirm).toHaveBeenCalledWith([2]);
   });
 
-  it("offers No template, confirmed as null", async () => {
-    const onConfirm = vi.fn();
-    render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
-      templates={[T(1, "Technical")]} defaultTemplateId={null} onConfirm={onConfirm} />);
-
-    expect(screen.getByRole("combobox")).toHaveTextContent(/no template/i);
+  it("confirms several tracks, No template first, then list order", async () => {
+    const onConfirm = mount([2]);
+    await userEvent.click(screen.getByRole("checkbox", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /no template/i }));
     await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
-    expect(onConfirm).toHaveBeenCalledWith(null);
+    expect(onConfirm).toHaveBeenCalledWith([null, 1, 2]);
   });
 
-  it("does not preselect a default that is not among the active templates", () => {
-    render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
-      templates={[T(1, "Technical")]} defaultTemplateId={99} onConfirm={() => {}} />);
-    expect(screen.getByRole("combobox")).toHaveTextContent(/no template/i);
+  it("falls back to No template when the preselection is archived or unknown", () => {
+    mount([99]);
+    expect(screen.getByRole("checkbox", { name: /no template/i })).toBeChecked();
+  });
+
+  it("cannot schedule with nothing ticked", async () => {
+    mount([1]);
+    await userEvent.click(screen.getByRole("checkbox", { name: "Technical" }));
+    expect(screen.getByRole("button", { name: /^schedule$/i })).toBeDisabled();
   });
 });

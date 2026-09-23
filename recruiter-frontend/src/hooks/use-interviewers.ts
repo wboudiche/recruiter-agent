@@ -7,6 +7,8 @@ export interface InterviewerRead {
   name: string | null;
   email: string;
   submitted_at: string | null;
+  /** Which track of the live round (phase 3); absent from older servers. */
+  track?: string;
 }
 
 export interface DirectoryUser {
@@ -26,8 +28,13 @@ export function useInterviewers(applicationId: number) {
     enabled: !Number.isNaN(applicationId),
   });
   const setInterviewers = useMutation({
-    mutationFn: (userIds: number[]) =>
-      api<InterviewerRead[]>(path, { method: "PUT", json: { user_ids: userIds } }),
+    // A bare list is the whole panel of a one-track round; `{ userIds,
+    // track }` sets one track's panel (`?track=`).
+    mutationFn: (arg: number[] | { userIds: number[]; track: string }) => {
+      const { userIds, track } = Array.isArray(arg) ? { userIds: arg, track: null } : arg;
+      const url = track === null ? path : `${path}?track=${encodeURIComponent(track)}`;
+      return api<InterviewerRead[]>(url, { method: "PUT", json: { user_ids: userIds } });
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: queryKeys.interviewKit(applicationId) });

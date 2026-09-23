@@ -79,3 +79,19 @@ async def test_deleting_the_user_deletes_their_assignments(
     await db_session_with_schema.commit()
     left = (await db_session_with_schema.execute(select(InterviewAssignment))).scalars().all()
     assert left == []
+
+
+@pytest.mark.asyncio
+async def test_a_person_is_on_one_track_per_round(db_session_with_schema: AsyncSession) -> None:
+    """Tracks run in parallel, but one interviewer sits on at most one of
+    them in a round. The same person may be on another track next round."""
+    app_id, user_id = await _seed(db_session_with_schema)
+    db_session_with_schema.add(InterviewAssignment(
+        application_id=app_id, user_id=user_id, round=1, track="tech"))
+    db_session_with_schema.add(InterviewAssignment(
+        application_id=app_id, user_id=user_id, round=2, track="rh"))
+    await db_session_with_schema.commit()
+    db_session_with_schema.add(InterviewAssignment(
+        application_id=app_id, user_id=user_id, round=1, track="rh"))
+    with pytest.raises(IntegrityError):
+        await db_session_with_schema.commit()

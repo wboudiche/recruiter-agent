@@ -64,3 +64,7 @@ class ApplicationUpdate(BaseModel):
     # template; an id → that template. Absent and null both arrive as None,
     # so the handler reads model_fields_set to tell them apart.
     interview_template_id: int | None = None
+    # The tracks of the round being started (phase 3): the ticked templates,
+    # `null` being the no-template track. `interview_template_id` is phase
+    # 2's shorthand for a one-item list; sending both is a 422.
+    interview_template_ids: list[int | None] | None = None

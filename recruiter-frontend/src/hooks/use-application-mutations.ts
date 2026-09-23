@@ -15,7 +15,7 @@ interface PatchPayload {
     | "hired";
   notes?: string;
   rejection_reason?: string;
-  interview_template_id?: number | null;
+  interview_template_ids?: (number | null)[];
 }
 
 export function useApplicationMutations(applicationId: number, jobId?: number) {
@@ -41,6 +41,13 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
     },
   });
 
+  // `undefined` omits the choice so the server applies the job's default;
+  // a list is sent as the round's tracks.
+  const schedule = (templateIds?: (number | null)[]) =>
+    patch.mutate(templateIds === undefined
+      ? { stage: "scheduled" }
+      : { stage: "scheduled", interview_template_ids: templateIds });
+
   return {
     validate: () => patch.mutate({ stage: "validated" }),
     unvalidate: () => patch.mutate({ stage: "scored" }),
@@ -53,20 +60,12 @@ export function useApplicationMutations(applicationId: number, jobId?: number) {
         rejection_reason: reason || "",
       }),
     unreject: () => patch.mutate({ stage: "scored" }),
-    // `undefined` omits interview_template_id so the server applies the
-    // job's default; a number or null is sent as an explicit choice.
-    markScheduled: (templateId?: number | null) =>
-      patch.mutate(templateId === undefined
-        ? { stage: "scheduled" }
-        : { stage: "scheduled", interview_template_id: templateId }),
+    markScheduled: schedule,
     markInterviewed: () => patch.mutate({ stage: "interviewed" }),
     // Reopen an interviewed candidate for another round. Same PATCH as
     // markScheduled: the server distinguishes the two by the stage it is
     // leaving, and only bumps the round when leaving `interviewed`.
-    reopenRound: (templateId?: number | null) =>
-      patch.mutate(templateId === undefined
-        ? { stage: "scheduled" }
-        : { stage: "scheduled", interview_template_id: templateId }),
+    reopenRound: schedule,
     extendOffer: () => patch.mutate({ stage: "offer" }),
     markHired: () => patch.mutate({ stage: "hired" }),
     isPending: patch.isPending,

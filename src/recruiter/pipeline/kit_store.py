@@ -19,6 +19,14 @@ from recruiter.schemas.interview_template import TemplateSnapshot
 DEFAULT_TRACK = "default"
 
 
+def track_key(template_id: int | None) -> str:
+    """A track's key, derived once from its template when the track is
+    created and never changed: `t<template_id>`, or `default` for the
+    no-template track. Because (application, round, track) is unique, this
+    alone guarantees one track per template per round."""
+    return DEFAULT_TRACK if template_id is None else f"t{template_id}"
+
+
 async def kit_for(
     session: AsyncSession, app_row: Application, *, track: str = DEFAULT_TRACK,
 ) -> InterviewKitRow | None:
@@ -32,6 +40,20 @@ async def kit_for(
             InterviewKitRow.track == track,
         )
     )).scalars().one_or_none()
+
+
+async def kits_in_round(
+    session: AsyncSession, app_row: Application, *, round: int | None = None,
+) -> list[InterviewKitRow]:
+    """Every kit (track) of one round — the live round unless `round` is
+    given — in creation order, the order tracks are shown in."""
+    number = app_row.interview_round if round is None else round
+    return list((await session.execute(
+        select(InterviewKitRow)
+        .where(InterviewKitRow.application_id == app_row.id,
+               InterviewKitRow.round == number)
+        .order_by(InterviewKitRow.id)
+    )).scalars().all())
 
 
 async def create_kit(

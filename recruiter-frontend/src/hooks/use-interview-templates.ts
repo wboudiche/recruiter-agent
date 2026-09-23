@@ -15,11 +15,12 @@ export interface InterviewTemplate {
   is_active: boolean;
 }
 
-export function useInterviewTemplates(includeArchived = false) {
+export function useInterviewTemplates(includeArchived = false, enabled = true) {
   return useQuery({
     queryKey: queryKeys.interviewTemplates(includeArchived),
     queryFn: () =>
       api<InterviewTemplate[]>(`/api/interview-templates?include_archived=${includeArchived}`),
+    enabled,
   });
 }
 

@@ -133,4 +133,73 @@ describe("ActionBar — post-invite stage buttons", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(apiMock.mock.calls.some(([, o]) => o?.method === "PATCH")).toBe(false);
   });
+
+  it("offers the previous round's tracks for another round", async () => {
+    const t = (id: number, name: string) => ({ id, name, description: null, questions: [],
+      probe_mode: "none", include_job_questions: false, is_active: true });
+    const templates = [t(1, "Technical"), t(2, "RH screen"), t(3, "Culture")];
+    const kit = { kit: null, sheets: [], tracks: [
+      { track: "t1", template_id: 1, template_name: "Technical", kit: { status: "ready", questions: [] } },
+      { track: "t2", template_id: 2, template_name: "RH screen", kit: { status: "ready", questions: [] } },
+    ] };
+    apiMock.mockImplementation(async (path: string) =>
+      path.startsWith("/api/interview-templates") ? templates
+        : path.endsWith("/interview-kit") ? kit : {});
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    qc.setQueryData(queryKeys.interviewTemplates(false), templates);
+    qc.setQueryData(queryKeys.interviewKit(1), kit);
+    render(
+      <QueryClientProvider client={qc}>
+        <ActionBar application={baseApp({ stage: "interviewed" })} candidateEmail="alice@example.com" />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /another round/i }));
+
+    expect(await screen.findByRole("checkbox", { name: "Technical" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Culture" })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
+    await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/api/applications/1", {
+      method: "PATCH", json: { stage: "scheduled", interview_template_ids: [1, 2] },
+    }));
+  });
+
+  it("preselects the round's own tracks, not the job default, when re-scheduling a round that already has tracks", async () => {
+    // Reject -> re-invite -> schedule re-enters this same "invited" stage
+    // with the round's kits still standing. The job default must not win:
+    // that would silently drop every other track the moment the recruiter
+    // confirms the pre-filled dialog.
+    const t = (id: number, name: string) => ({ id, name, description: null, questions: [],
+      probe_mode: "none", include_job_questions: false, is_active: true });
+    const templates = [t(1, "Technical"), t(2, "RH screen"), t(3, "Culture")];
+    const kit = { kit: null, sheets: [], tracks: [
+      { track: "t1", template_id: 1, template_name: "Technical", kit: { status: "ready", questions: [] } },
+      { track: "t2", template_id: 2, template_name: "RH screen", kit: { status: "ready", questions: [] } },
+    ] };
+    apiMock.mockImplementation(async (path: string) =>
+      path.startsWith("/api/interview-templates") ? templates
+        : path.endsWith("/interview-kit") ? kit : {});
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    qc.setQueryData(queryKeys.interviewTemplates(false), templates);
+    qc.setQueryData(queryKeys.interviewKit(1), kit);
+    // The job's default is a THIRD template, distinct from the round's own
+    // tracks, so preselecting it would be visibly wrong.
+    qc.setQueryData(queryKeys.job(1), { id: 1, default_interview_template_id: 3 });
+    render(
+      <QueryClientProvider client={qc}>
+        <ActionBar application={baseApp({ stage: "invited" })} candidateEmail="alice@example.com" />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /mark as scheduled/i }));
+
+    expect(await screen.findByRole("checkbox", { name: "Technical" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Culture" })).not.toBeChecked();
+  });
 });

@@ -1,7 +1,14 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func,
+    JSON,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,8 +38,8 @@ class InterviewKitRow(Base):
         ForeignKey("applications.id", ondelete="CASCADE"), nullable=False,
     )
     round: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
-    # Always "default" in phase 1; parallel tracks are phase 3. It is on the
-    # unique constraint, so adding it later would rebuild that twice.
+    # `t<template_id>` for a templated track, `default` without a template
+    # (pipeline/kit_store.track_key); derived at creation, never changed.
     track: Mapped[str] = mapped_column(
         String(64), nullable=False, default="default", server_default="default",
     )

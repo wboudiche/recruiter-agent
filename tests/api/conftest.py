@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -6,9 +7,20 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from recruiter.api.candidates import get_engine_dep
 from recruiter.api.deps import get_session
+from recruiter.auth.passwords import hash_password
 from recruiter.config import get_config
 from recruiter.main import app
-from recruiter.models import Application, Base, Candidate, Stage
+from recruiter.models import (
+    Application,
+    Base,
+    Candidate,
+    InterviewAssignment,
+    InterviewKitRow,
+    Job,
+    Role,
+    Stage,
+    User,
+)
 
 
 @pytest.fixture
@@ -103,3 +115,77 @@ def create_scored_app(api_client: AsyncClient):
             return a.id
 
     return _make
+
+
+TRACKS_PW = "pw-12345678"
+
+
+@pytest.fixture
+def seed_tracks():
+    """Factory for a SCHEDULED application whose live round has two tracks,
+    `tech` (question q1) and `rh` (question r1), created in that order.
+
+    `panel` maps a track to its interviewers' emails (VIEWER users with
+    password TRACKS_PW, created here); `submitted` lists the emails whose
+    sheet is already submitted. Returns (application id, {email: user id}).
+    Use with api_client or api_client_unauth: it writes through the engine
+    that fixture installed.
+    """
+
+    async def _make(
+        *, panel: dict[str, list[str]] | None = None, submitted: tuple[str, ...] = (),
+    ) -> tuple[int, dict[str, int]]:
+        if panel is None:
+            panel = {"tech": ["tech@acme.com"], "rh": ["rh@acme.com"]}
+        engine = app.dependency_overrides[get_engine_dep]()
+        SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+        async with SessionLocal() as session:
+            job = Job(title="Backend", description="x", criteria=[])
+            session.add(job)
+            await session.flush()
+            cand = Candidate(source_type="paste", full_name="Marie", email="m@example.com")
+            session.add(cand)
+            await session.flush()
+            app_row = Application(
+                job_id=job.id, candidate_id=cand.id, stage=Stage.SCHEDULED, score=80,
+            )
+            session.add(app_row)
+            await session.flush()
+            for track, qid in (("tech", "q1"), ("rh", "r1")):
+                session.add(InterviewKitRow(
+                    application_id=app_row.id, round=1, track=track, status="ready",
+                    questions=[{"id": qid, "text": f"{track} question", "source": "baseline"}],
+                ))
+                await session.flush()  # ids in creation order
+            users: dict[str, int] = {}
+            for track, emails in panel.items():
+                for email in emails:
+                    user = User(email=email, role=Role.VIEWER, is_active=True,
+                                password_hash=hash_password(TRACKS_PW))
+                    session.add(user)
+                    await session.flush()
+                    users[email] = user.id
+                    session.add(InterviewAssignment(
+                        application_id=app_row.id, user_id=user.id, round=1, track=track,
+                        submitted_at=datetime.now(UTC) if email in submitted else None,
+                    ))
+            await session.commit()
+            return app_row.id, users
+
+    return _make
+
+
+@pytest.fixture
+def login_as():
+    """Log a client in as one of `seed_tracks`' interviewers (password
+    TRACKS_PW). Tests that log in several times should also reset the login
+    rate limiter, as test_interview_freeze_api.py does."""
+
+    async def _login(client: AsyncClient, email: str) -> None:
+        await client.post("/api/auth/logout")
+        r = await client.post(
+            "/api/auth/login/password", json={"email": email, "password": TRACKS_PW},
+        )
+        assert r.status_code == 204, r.text
+
+    return _login

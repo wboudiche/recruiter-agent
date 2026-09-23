@@ -28,8 +28,10 @@ class InterviewAssignment(Base):
 
     __tablename__ = "interview_assignments"
     __table_args__ = (
-        UniqueConstraint("application_id", "user_id", "round", "track",
-                         name="uq_interview_assignment_app_user_round_track"),
+        # One track per interviewer per round (phase 3): a person sits on at
+        # most one of a round's parallel interviews.
+        UniqueConstraint("application_id", "user_id", "round",
+                         name="uq_interview_assignment_app_user_round"),
         Index("ix_interview_assignments_application_id", "application_id"),
         Index("ix_interview_assignments_user_id", "user_id"),
     )
@@ -46,8 +48,8 @@ class InterviewAssignment(Base):
     round: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1",
     )
-    # Which track within the round. Always "default" until phase 3; part of
-    # the unique constraint below.
+    # Which track within the round — the kit this sheet's answers are keyed
+    # against. At most one per person per round (see the constraint above).
     track: Mapped[str] = mapped_column(
         String(64), nullable=False, default="default", server_default="default",
     )
