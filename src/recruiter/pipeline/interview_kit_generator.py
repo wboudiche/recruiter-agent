@@ -152,28 +152,39 @@ _PROFILE_SYSTEM = (
     "roles, the scope they owned, what they chose to do next, unexplained gaps, "
     "and anything found about them online. Ask for a concrete story rather than "
     "an opinion, never ask what the history already answers, and never assess "
-    "technical skill — another interview covers that. Ask only what this history "
+    "technical skill — another interview covers that. The role they applied for "
+    "is given as context for asking why this move and why here; never turn its "
+    "requirements into a question about skills. Ask only what this history "
     "actually supports: return 3-6 questions, or fewer, or an empty list when "
     "there is too little to go on. Never pad with generic questions."
 )
 
 
 # The role gives an RH question something to be about — why this move, why
-# here — but the profile is what the questions are built FROM, so a long
-# pasted JD is trimmed rather than allowed to crowd the history out.
+# here — but the profile is what the questions are built FROM, so a pasted
+# job ad is trimmed rather than allowed to crowd the history out. Sliced
+# before normalising: a description is unbounded text and all but the first
+# few hundred characters are discarded anyway.
 _MAX_ROLE_CHARS = 700
+_ROLE_SLICE_CHARS = 4000
 
 
-def _role_block(title: str | None, description: str | None) -> str | None:
-    """The job as an RH interviewer needs it: what the role is, no criteria
-    and no scoring — those are what make `generate_probes` technical."""
+def _role_block(*, title: str | None, description: str | None) -> str | None:
+    """The job as an RH interviewer needs it.
+
+    The description is the text the weighted criteria are derived from, so
+    it carries the same technical requirements: it is delimited like the
+    recruiter's hint, and `_PROFILE_SYSTEM` tells the model to read it as
+    context for why this move rather than as something to assess. The
+    criteria and the score breakdown themselves stay out.
+    """
     heading = (title or "").strip()
-    body = " ".join((description or "").split())[:_MAX_ROLE_CHARS]
+    body = " ".join((description or "")[:_ROLE_SLICE_CHARS].split())[:_MAX_ROLE_CHARS]
     if not heading and not body:
         return None
     lines = [f"They are applying for: {heading}" if heading else "The role they applied for:"]
     if body:
-        lines.append(body)
+        lines.append(f"<<<{body}>>>")
     return "\n".join(lines) + "\n"
 
 
@@ -185,7 +196,7 @@ def _build_profile_prompt(
     baseline: list[BaselineQuestion],
 ) -> str:
     parts = [f"Candidate profile:\n{profile}\n"]
-    role = _role_block(job_title, job_description)
+    role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
     if baseline:
@@ -206,8 +217,8 @@ async def generate_profile_probes(
     profile: str,
     baseline: list[BaselineQuestion],
     llm: LLMClient,
-    job_title: str | None = None,
-    job_description: str | None = None,
+    job_title: str | None,
+    job_description: str | None,
 ) -> GeneratedQuestions:
     """Probes drawn from the candidate's history, for an RH-style round.
 
@@ -233,7 +244,9 @@ _PROFILE_DRAFT_SYSTEM = (
     "human-resources conversation. Build it from this candidate's own history — "
     "a move between roles, the scope they owned, a gap, something found about "
     "them online — never from technical skill, and never restating a question "
-    "already being asked. Ask for a concrete story. Return exactly one question."
+    "already being asked. The role they applied for is context for asking why "
+    "this move; never turn its requirements into a question about skills. "
+    "Ask for a concrete story. Return exactly one question."
 )
 
 
@@ -243,14 +256,14 @@ async def draft_profile_question(
     existing_questions: list[str],
     hint: str | None,
     llm: LLMClient,
-    job_title: str | None = None,
-    job_description: str | None = None,
+    job_title: str | None,
+    job_description: str | None,
 ) -> GeneratedQuestion:
     """One extra question for an RH-style round, in the same register as
     `generate_profile_probes` — so "Draft with AI" on such a track cannot
     hand back a technical question."""
     parts = [f"Candidate profile:\n{profile}\n"]
-    role = _role_block(job_title, job_description)
+    role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
     if existing_questions:

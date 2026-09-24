@@ -237,8 +237,9 @@ async def test_an_rh_round_knows_which_role_the_candidate_applied_for(
     await _describe_job(app_id, "Head of Platform", "Leads a platform team of twelve, in Paris.")
     llm = _llm("Why move from owning a migration to leading a team?")
 
-    await _schedule(api_client, app_id, llm, tid)
+    r = await _schedule(api_client, app_id, llm, tid)
 
+    assert r.status_code == 200, r.text
     prompt = llm.calls[0]["messages"][0].content
     assert "Head of Platform" in prompt
     assert "team of twelve" in prompt

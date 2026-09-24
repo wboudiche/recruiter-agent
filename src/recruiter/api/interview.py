@@ -675,8 +675,8 @@ async def draft_kit_question(
         # Any other track — profile probes, or a curated RH list that
         # generates none — gets the question asked about the person, which
         # is what those tracks exist to keep technical questions out of.
+        job = await session.get(Job, app_row.job_id)
         if probe_mode_of(snapshot_from_row(kit_row)) == "score_gaps":
-            job = await session.get(Job, app_row.job_id)
             question = await draft_question(
                 profile=profile,
                 criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
@@ -686,14 +686,13 @@ async def draft_kit_question(
                 llm=llm,
             )
         else:
-            job = await session.get(Job, app_row.job_id)
             question = await draft_profile_question(
                 profile=profile,
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,
-                job_title=job.title if job else None,
-                job_description=job.description if job else None,
+                job_title=job.title,
+                job_description=job.description,
             )
     except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
         logger.warning("interview question draft failed: %s", exc, exc_info=True)
