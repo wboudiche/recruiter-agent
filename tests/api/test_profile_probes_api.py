@@ -267,4 +267,5 @@ async def test_drafting_on_an_rh_track_knows_the_role_too(
     assert r.status_code == 200, r.text
     prompt = llm.calls[0]["messages"][0].content
     assert "Head of Platform" in prompt
+    assert "team of twelve" in prompt, "the drafting path carries the description too"
     assert "production-grade clusters" not in prompt

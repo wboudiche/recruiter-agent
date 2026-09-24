@@ -152,9 +152,7 @@ _PROFILE_SYSTEM = (
     "roles, the scope they owned, what they chose to do next, unexplained gaps, "
     "and anything found about them online. Ask for a concrete story rather than "
     "an opinion, never ask what the history already answers, and never assess "
-    "technical skill — another interview covers that. The role they applied for "
-    "is given as context for asking why this move and why here; never turn its "
-    "requirements into a question about skills. Ask only what this history "
+    "technical skill — another interview covers that. Ask only what this history "
     "actually supports: return 3-6 questions, or fewer, or an empty list when "
     "there is too little to go on. Never pad with generic questions."
 )
@@ -162,37 +160,62 @@ _PROFILE_SYSTEM = (
 
 # The role gives an RH question something to be about — why this move, why
 # here — but the profile is what the questions are built FROM, so a pasted
-# job ad is trimmed rather than allowed to crowd the history out. Sliced
-# before normalising: a description is unbounded text and all but the first
-# few hundred characters are discarded anyway.
+# job ad is trimmed rather than allowed to crowd the history out.
 _MAX_ROLE_CHARS = 700
-_ROLE_SLICE_CHARS = 4000
+_FENCE_OPEN = "<<<"
+_FENCE_CLOSE = ">>>"
+# Said inside the block, where the model reads it, rather than in the system
+# prompt: only a prompt that actually carries a role should carry the rule
+# about how to read it.
+_ROLE_RULE = (
+    "Read the role only as context for why they are moving and why here — "
+    "never a question about what they know."
+)
 
 
-def _role_block(*, title: str | None, description: str | None) -> str | None:
-    """The job as an RH interviewer needs it.
+def _fenced(text: str) -> str:
+    """Recruiter-editable text, delimited so the model can see where it
+    stops. The delimiters are stripped from the text first: a job ad that
+    contained them would otherwise close the fence early and have its
+    remainder read as instructions."""
+    clean = text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " ")
+    return f"{_FENCE_OPEN}{' '.join(clean.split())}{_FENCE_CLOSE}"
+
+
+def _capped(text: str) -> str:
+    """Trimmed at a word boundary, and marked when it was trimmed: a clause
+    that simply stops invites the model to finish it from imagination."""
+    if len(text) <= _MAX_ROLE_CHARS:
+        return text
+    head = text[:_MAX_ROLE_CHARS]
+    cut = head.rsplit(" ", 1)[0]
+    # Only when a word boundary is near the end: an ad with one enormous
+    # "word" (a URL, a run of markup) would otherwise lose everything back
+    # to the previous space.
+    return (cut if len(cut) > _MAX_ROLE_CHARS * 0.8 else head) + "…"
+
+
+def _role_block(*, title: str, description: str) -> str | None:
+    """The job as an RH interviewer needs it: what the role is.
 
     The description is the text the weighted criteria are derived from, so
-    it carries the same technical requirements: it is delimited like the
-    recruiter's hint, and `_PROFILE_SYSTEM` tells the model to read it as
-    context for why this move rather than as something to assess. The
-    criteria and the score breakdown themselves stay out.
+    it carries the same technical requirements. It travels fenced and
+    capped, with `_ROLE_RULE` beside it, and the criteria and the score
+    breakdown themselves never reach the prompt.
     """
-    heading = (title or "").strip()
-    body = " ".join((description or "")[:_ROLE_SLICE_CHARS].split())[:_MAX_ROLE_CHARS]
-    if not heading and not body:
+    # Normalised before trimming: a description pasted from a web page can
+    # be mostly indentation, and trimming the raw text threw it all away.
+    body = " ".join(f"{title}\n{description}".split())
+    if not body:
         return None
-    lines = [f"They are applying for: {heading}" if heading else "The role they applied for:"]
-    if body:
-        lines.append(f"<<<{body}>>>")
-    return "\n".join(lines) + "\n"
+    return f"They are applying for:\n{_fenced(_capped(body))}\n{_ROLE_RULE}\n"
 
 
 def _build_profile_prompt(
     *,
     profile: str,
-    job_title: str | None,
-    job_description: str | None,
+    job_title: str,
+    job_description: str,
     baseline: list[BaselineQuestion],
 ) -> str:
     parts = [f"Candidate profile:\n{profile}\n"]
@@ -217,14 +240,15 @@ async def generate_profile_probes(
     profile: str,
     baseline: list[BaselineQuestion],
     llm: LLMClient,
-    job_title: str | None,
-    job_description: str | None,
+    job_title: str,
+    job_description: str,
 ) -> GeneratedQuestions:
     """Probes drawn from the candidate's history, for an RH-style round.
 
-    Deliberately blind to the job's criteria and the score breakdown: those
-    are what make `generate_probes` technical, and a round that switched to
-    this mode did so to stop inheriting technical questions.
+    The job's criteria and its score breakdown never reach this prompt —
+    they are what make `generate_probes` technical. The role itself does,
+    fenced and capped, so a question can ask why this move (see
+    `_role_block`).
     """
     return await llm.chat_structured(
         messages=[LLMMessage(role="user", content=_build_profile_prompt(
@@ -244,9 +268,7 @@ _PROFILE_DRAFT_SYSTEM = (
     "human-resources conversation. Build it from this candidate's own history — "
     "a move between roles, the scope they owned, a gap, something found about "
     "them online — never from technical skill, and never restating a question "
-    "already being asked. The role they applied for is context for asking why "
-    "this move; never turn its requirements into a question about skills. "
-    "Ask for a concrete story. Return exactly one question."
+    "already being asked. Ask for a concrete story. Return exactly one question."
 )
 
 
@@ -256,8 +278,8 @@ async def draft_profile_question(
     existing_questions: list[str],
     hint: str | None,
     llm: LLMClient,
-    job_title: str | None,
-    job_description: str | None,
+    job_title: str,
+    job_description: str,
 ) -> GeneratedQuestion:
     """One extra question for an RH-style round, in the same register as
     `generate_profile_probes` — so "Draft with AI" on such a track cannot
