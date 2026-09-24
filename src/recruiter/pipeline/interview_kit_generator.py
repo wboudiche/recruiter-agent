@@ -106,9 +106,11 @@ def _build_draft_prompt(
             "Already being asked — do NOT repeat or rephrase any of these:\n"
             + "\n".join(f"- {q}" for q in existing_questions) + "\n"
         )
-    cleaned = (hint or "").strip()[:_MAX_HINT_CHARS]
-    if cleaned:
-        parts.append(f"The recruiter wants to probe this specifically:\n<<<{cleaned}>>>\n")
+    if _clean(hint or ""):
+        parts.append(
+            "The recruiter wants to probe this specifically:\n"
+            f"{_fenced(hint or '', limit=_MAX_HINT_CHARS)}\n"
+        )
     else:
         parts.append("The recruiter has not named a topic; choose the most valuable gap.\n")
     parts.append(
@@ -173,26 +175,34 @@ _ROLE_RULE = (
 )
 
 
-def _fenced(text: str) -> str:
-    """Recruiter-editable text, delimited so the model can see where it
-    stops. The delimiters are stripped from the text first: a job ad that
-    contained them would otherwise close the fence early and have its
-    remainder read as instructions."""
-    clean = text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " ")
-    return f"{_FENCE_OPEN}{' '.join(clean.split())}{_FENCE_CLOSE}"
+def _clean(text: str) -> str:
+    """Externally-sourced text, ready to be delimited: the delimiters are
+    stripped first — text that contained them would otherwise close the
+    fence early and have its remainder read as instructions — and
+    whitespace is collapsed, so a job ad pasted from a web page is not
+    mostly indentation."""
+    without_fence = text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " ")
+    return " ".join(without_fence.split())
 
 
-def _capped(text: str) -> str:
+def _capped(text: str, limit: int) -> str:
     """Trimmed at a word boundary, and marked when it was trimmed: a clause
     that simply stops invites the model to finish it from imagination."""
-    if len(text) <= _MAX_ROLE_CHARS:
+    if len(text) <= limit:
         return text
-    head = text[:_MAX_ROLE_CHARS]
+    head = text[:limit]
     cut = head.rsplit(" ", 1)[0]
-    # Only when a word boundary is near the end: an ad with one enormous
+    # Only when a word boundary is near the end: text with one enormous
     # "word" (a URL, a run of markup) would otherwise lose everything back
     # to the previous space.
-    return (cut if len(cut) > _MAX_ROLE_CHARS * 0.8 else head) + "…"
+    return (cut if len(cut) > limit * 0.8 else head) + "…"
+
+
+def _fenced(text: str, *, limit: int) -> str:
+    """Cleaned, capped, and wrapped in delimiters the text cannot contain.
+    Capped after cleaning, so delimiters that are stripped anyway do not
+    eat into the budget."""
+    return f"{_FENCE_OPEN}{_capped(_clean(text), limit)}{_FENCE_CLOSE}"
 
 
 def _role_block(*, title: str, description: str) -> str | None:
@@ -203,12 +213,16 @@ def _role_block(*, title: str, description: str) -> str | None:
     capped, with `_ROLE_RULE` beside it, and the criteria and the score
     breakdown themselves never reach the prompt.
     """
-    # Normalised before trimming: a description pasted from a web page can
-    # be mostly indentation, and trimming the raw text threw it all away.
-    body = " ".join(f"{title}\n{description}".split())
-    if not body:
+    # Normalised separately, then joined: run together, a title and a
+    # description opening on "Engineering, Paris" read as one job called
+    # "Head of Platform Engineering".
+    parts = [p for p in (_clean(title), _clean(description)) if p]
+    if not parts:
         return None
-    return f"They are applying for:\n{_fenced(_capped(body))}\n{_ROLE_RULE}\n"
+    return (
+        "They are applying for:\n"
+        f"{_fenced(' — '.join(parts), limit=_MAX_ROLE_CHARS)}\n{_ROLE_RULE}\n"
+    )
 
 
 def _build_profile_prompt(
@@ -293,9 +307,11 @@ async def draft_profile_question(
             "Already being asked — do NOT repeat or rephrase any of these:\n"
             + "\n".join(f"- {q}" for q in existing_questions) + "\n"
         )
-    cleaned = (hint or "").strip()[:_MAX_HINT_CHARS]
-    if cleaned:
-        parts.append(f"The recruiter wants to ask about this specifically:\n<<<{cleaned}>>>\n")
+    if _clean(hint or ""):
+        parts.append(
+            "The recruiter wants to ask about this specifically:\n"
+            f"{_fenced(hint or '', limit=_MAX_HINT_CHARS)}\n"
+        )
     else:
         parts.append("The recruiter has not named a topic; choose what the history invites.\n")
     parts.append(

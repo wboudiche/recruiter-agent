@@ -676,16 +676,14 @@ async def draft_kit_question(
         # Any other track — profile probes, or a curated RH list that
         # generates none — gets the question asked about the person, which
         # is what those tracks exist to keep technical questions out of.
-        # Guarded, unlike the generation path: a job deleted while the
-        # recruiter had the kit open would otherwise surface as an
-        # AttributeError dressed up as a 502.
+        # Unguarded like the generation path: applications.job_id is NOT
+        # NULL and cascades, so an application whose job is gone is gone
+        # too and this handler has already 404'd above.
         job = await session.get(Job, app_row.job_id)
-        job_title = job.title if job else ""
-        job_description = job.description if job else ""
         if probe_mode_of(snapshot_from_row(kit_row)) == "score_gaps":
             question = await draft_question(
                 profile=profile,
-                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria if job else [])],
+                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
                 score_breakdown=app_row.score_breakdown,
                 existing_questions=existing,
                 hint=payload.hint,
@@ -697,8 +695,8 @@ async def draft_kit_question(
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,
-                job_title=job_title,
-                job_description=job_description,
+                job_title=job.title,
+                job_description=job.description,
             )
     except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
         logger.warning("interview question draft failed: %s", exc, exc_info=True)
