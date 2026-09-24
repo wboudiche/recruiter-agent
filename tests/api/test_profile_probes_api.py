@@ -12,7 +12,14 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
-from recruiter.models import Application, Candidate, InterviewKitRow, InterviewTemplate, Stage
+from recruiter.models import (
+    Application,
+    Candidate,
+    InterviewKitRow,
+    InterviewTemplate,
+    Job,
+    Stage,
+)
 from recruiter.pipeline.interview_kit_generator import _PROFILE_DRAFT_SYSTEM
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
@@ -207,3 +214,58 @@ async def test_a_malformed_candidate_still_answers_with_the_draft_error(
 
     assert r.status_code == 502, r.text
     assert "Could not draft a question" in r.json()["detail"]
+
+
+async def _describe_job(app_id: int, title: str, description: str) -> None:
+    async with _db()() as s:
+        app_row = await s.get(Application, app_id)
+        job = await s.get(Job, app_row.job_id)
+        job.title = title
+        job.description = description
+        await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_an_rh_round_knows_which_role_the_candidate_applied_for(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Blind to the scoring, not to the job: without the role an RH question
+    cannot ask why this move, only generic ones about the past."""
+    tid = await _profile_template()
+    app_id = await _invited(api_client, create_scored_app)
+    await _with_history(app_id)
+    await _describe_job(app_id, "Head of Platform", "Leads a platform team of twelve, in Paris.")
+    llm = _llm("Why move from owning a migration to leading a team?")
+
+    r = await _schedule(api_client, app_id, llm, tid)
+
+    assert r.status_code == 200, r.text
+    prompt = llm.calls[0]["messages"][0].content
+    assert "Head of Platform" in prompt
+    assert "team of twelve" in prompt
+    assert "Owned the cluster migration" in prompt, "the history is still what it asks about"
+    assert "production-grade clusters" not in prompt, "the scoring stays out"
+
+
+@pytest.mark.asyncio
+async def test_drafting_on_an_rh_track_knows_the_role_too(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    tid = await _profile_template()
+    app_id = await _invited(api_client, create_scored_app)
+    await _with_history(app_id)
+    await _describe_job(app_id, "Head of Platform", "Leads a platform team of twelve, in Paris.")
+    await _schedule(api_client, app_id, _llm(), tid)
+
+    llm = _llm("How big a team have you run?")
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        r = await api_client.post(f"{KIT.format(app_id)}/draft-question", json={"hint": None})
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert r.status_code == 200, r.text
+    prompt = llm.calls[0]["messages"][0].content
+    assert "Head of Platform" in prompt
+    assert "team of twelve" in prompt, "the drafting path carries the description too"
+    assert "production-grade clusters" not in prompt

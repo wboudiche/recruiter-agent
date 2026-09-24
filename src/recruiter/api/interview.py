@@ -205,11 +205,13 @@ async def run_generate_kit(
                     raise RuntimeError(NO_LLM_PROVIDER)
                 profile = profile_text(candidate, enrichment=app_row.enrichment)
                 if mode == "profile":
-                    # An RH round asks about the path, not the stack: the
-                    # criteria and the score breakdown are deliberately not
-                    # passed, which is the whole point of the mode.
+                    # An RH round asks about the path, not the stack. The
+                    # criteria and the score breakdown never reach this
+                    # prompt; the role itself does, fenced and capped, so a
+                    # question can ask why this move (see _role_block).
                     generated = await generate_profile_probes(
                         profile=profile, baseline=baseline, llm=llm,
+                        job_title=job.title, job_description=job.description,
                     )
                 else:
                     generated = await generate_probes(
@@ -674,8 +676,11 @@ async def draft_kit_question(
         # Any other track — profile probes, or a curated RH list that
         # generates none — gets the question asked about the person, which
         # is what those tracks exist to keep technical questions out of.
+        # Unguarded like the generation path: applications.job_id is NOT
+        # NULL and cascades, so an application whose job is gone is gone
+        # too and this handler has already 404'd above.
+        job = await session.get(Job, app_row.job_id)
         if probe_mode_of(snapshot_from_row(kit_row)) == "score_gaps":
-            job = await session.get(Job, app_row.job_id)
             question = await draft_question(
                 profile=profile,
                 criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
@@ -690,6 +695,8 @@ async def draft_kit_question(
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,
+                job_title=job.title,
+                job_description=job.description,
             )
     except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
         logger.warning("interview question draft failed: %s", exc, exc_info=True)
