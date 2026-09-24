@@ -110,6 +110,7 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="score_gaps">From score gaps (technical)</SelectItem>
+                <SelectItem value="profile">From the candidate's history (RH)</SelectItem>
                 <SelectItem value="none">None — curated questions only</SelectItem>
               </SelectContent>
             </Select>

@@ -26,9 +26,15 @@ from recruiter.pipeline.interview_kit import (
     fixed_questions,
     generation_in_flight,
     merge_regenerated,
+    probe_mode_of,
     wants_probes,
 )
-from recruiter.pipeline.interview_kit_generator import draft_question, generate_probes
+from recruiter.pipeline.interview_kit_generator import (
+    draft_profile_question,
+    draft_question,
+    generate_probes,
+    generate_profile_probes,
+)
 from recruiter.pipeline.interview_sheets import (
     answered_question_ids,
     can_edit_questions,
@@ -190,19 +196,29 @@ async def run_generate_kit(
             job_baseline = [BaselineQuestion.model_validate(b)
                             for b in (job.interview_baseline or [])]
             baseline = fixed_questions(snapshot, job_baseline)
-            if wants_probes(snapshot):
+            mode = probe_mode_of(snapshot)
+            if mode != "none":
                 if llm is None:
                     # patch_application only dispatches without a model
                     # when the snapshot wants no probes; recorded as an
                     # error kit by the except below if that ever changes.
                     raise RuntimeError(NO_LLM_PROVIDER)
-                generated = await generate_probes(
-                    profile=profile_text(candidate, enrichment=app_row.enrichment),
-                    criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
-                    score_breakdown=app_row.score_breakdown,
-                    baseline=baseline,
-                    llm=llm,
-                )
+                profile = profile_text(candidate, enrichment=app_row.enrichment)
+                if mode == "profile":
+                    # An RH round asks about the path, not the stack: the
+                    # criteria and the score breakdown are deliberately not
+                    # passed, which is the whole point of the mode.
+                    generated = await generate_profile_probes(
+                        profile=profile, baseline=baseline, llm=llm,
+                    )
+                else:
+                    generated = await generate_probes(
+                        profile=profile,
+                        criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
+                        score_breakdown=app_row.score_breakdown,
+                        baseline=baseline,
+                        llm=llm,
+                    )
                 texts = [q.text for q in generated.questions]
                 criteria_by_probe = [q.criterion for q in generated.questions]
         except Exception as exc:  # noqa: BLE001 — recorded, not swallowed
@@ -651,15 +667,27 @@ async def draft_kit_question(
         for q in (kit_row.questions if kit_row else [])
         if q.get("text")
     ]
+    profile = profile_text(candidate, enrichment=app_row.enrichment)
     try:
-        question = await draft_question(
-            profile=profile_text(candidate, enrichment=app_row.enrichment),
-            criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
-            score_breakdown=app_row.score_breakdown,
-            existing_questions=existing,
-            hint=payload.hint,
-            llm=llm,
-        )
+        # Drafted in the register the kit was built in: on an RH track a
+        # technical question would be exactly what the track exists to
+        # keep out (see generate_profile_probes).
+        if probe_mode_of(snapshot_from_row(kit_row)) == "profile":
+            question = await draft_profile_question(
+                profile=profile,
+                existing_questions=existing,
+                hint=payload.hint,
+                llm=llm,
+            )
+        else:
+            question = await draft_question(
+                profile=profile,
+                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
+                score_breakdown=app_row.score_breakdown,
+                existing_questions=existing,
+                hint=payload.hint,
+                llm=llm,
+            )
     except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
         logger.warning("interview question draft failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=502, detail=f"Could not draft a question: {exc}") from exc

@@ -6,6 +6,7 @@ from recruiter.pipeline.interview_kit import (
     fixed_questions,
     generation_in_flight,
     merge_regenerated,
+    probe_mode_of,
     snapshot_of,
     wants_probes,
 )
@@ -266,3 +267,21 @@ def test_the_snapshot_survives_a_round_trip_through_the_database_shape() -> None
     snap = snapshot_of(_template(probe_mode="none", include=False))
     again = TemplateSnapshot.model_validate(snap.model_dump())
     assert again == snap
+
+
+def test_probe_mode_of_reads_the_snapshot_and_defaults_to_score_gaps() -> None:
+    """A kit with no template generates the way kits always have."""
+    assert probe_mode_of(None) == "score_gaps"
+    assert probe_mode_of(snapshot_of(_template(probe_mode="score_gaps", include=True))) \
+        == "score_gaps"
+    assert probe_mode_of(snapshot_of(_template(probe_mode="profile", include=False))) \
+        == "profile"
+    assert probe_mode_of(snapshot_of(_template(probe_mode="none", include=False))) == "none"
+
+
+def test_a_profile_template_still_wants_probes() -> None:
+    """`none` is the only mode that skips the model — profile probes need
+    one just as much as score-gap probes do, which is what tells the
+    no-provider path to fail that track rather than dispatch it."""
+    assert wants_probes(snapshot_of(_template(probe_mode="profile", include=False))) is True
+    assert wants_probes(snapshot_of(_template(probe_mode="none", include=False))) is False

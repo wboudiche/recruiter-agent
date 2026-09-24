@@ -107,3 +107,68 @@ async def test_draft_question_caps_an_overlong_hint() -> None:
     prompt = llm.calls[0]["messages"][0].content
     assert "x" * 5000 not in prompt
     assert len(prompt) < 3000
+
+
+# --- profile probes ------------------------------------------------------
+# An RH conversation asks about the path, not the stack: these questions are
+# built from the candidate's own history and what enrichment found, and the
+# technical scoring is deliberately kept out of the prompt.
+
+
+@pytest.mark.asyncio
+async def test_profile_probes_are_built_from_the_history_and_enrichment() -> None:
+    from recruiter.pipeline.interview_kit_generator import generate_profile_probes
+
+    llm = FakeLLMClient(structured_responses=[
+        GeneratedQuestions(questions=[
+            GeneratedQuestion(text="What made you leave Acme after eight months?",
+                              criterion="moves"),
+        ]),
+    ])
+
+    await generate_profile_probes(
+        profile=(
+            "Marie Dupont · Staff SRE · Lyon\n"
+            "- Staff SRE at Acme (2024 – 2025): owned the cluster migration.\n"
+            "Found elsewhere online:\n"
+            "- github: maintains a Terraform provider with 400 stars."
+        ),
+        baseline=[BaselineQuestion(id="b1", text="Why this company?")],
+        llm=llm,
+    )
+
+    prompt = llm.calls[0]["messages"][0].content
+    assert "owned the cluster migration" in prompt, "the history is what it asks about"
+    assert "Terraform provider with 400 stars" in prompt, "enrichment steers a question too"
+    assert "Why this company?" in prompt, "the curated questions must not be duplicated"
+
+
+@pytest.mark.asyncio
+async def test_profile_probes_never_see_the_technical_scoring() -> None:
+    """The whole point of the mode: an RH round must not inherit questions
+    built from the score breakdown."""
+    from recruiter.pipeline.interview_kit_generator import generate_profile_probes
+
+    llm = FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[])])
+
+    await generate_profile_probes(profile="Marie Dupont", baseline=[], llm=llm)
+
+    call = llm.calls[0]
+    text = call["messages"][0].content + (call.get("system") or "")
+    for forbidden in ("scored", "rationale", "criteria", "weight"):
+        assert forbidden not in text.lower(), f"{forbidden!r} leaked into the profile prompt"
+
+
+@pytest.mark.asyncio
+async def test_profile_probes_may_return_nothing_for_a_thin_profile() -> None:
+    """Told to ask only what the history supports, the model is allowed to
+    return nothing rather than invent filler — the kit then holds just its
+    curated questions."""
+    from recruiter.pipeline.interview_kit_generator import generate_profile_probes
+
+    llm = FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[])])
+
+    out = await generate_profile_probes(profile="Marie Dupont", baseline=[], llm=llm)
+
+    assert out.questions == []
+    assert llm.calls[0]["max_tokens"] >= 2048

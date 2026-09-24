@@ -80,7 +80,9 @@ export function InterviewTemplatesTab() {
               <div>
                 <div className="font-medium">{t.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {t.probe_mode === "none" ? "No generated probes" : "Probes from score gaps"}
+                  {t.probe_mode === "none" ? "No generated probes"
+                    : t.probe_mode === "profile" ? "Probes from the candidate's history"
+                    : "Probes from score gaps"}
                   {t.include_job_questions ? " · includes the job's own questions" : ""}
                 </div>
               </div>

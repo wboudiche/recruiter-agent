@@ -38,6 +38,23 @@ describe("InterviewTemplatesTab", () => {
     expect(screen.getByText(/no generated probes/i)).toBeInTheDocument();
   });
 
+  it("creates a template that probes the candidate's history", async () => {
+    const capture: { body?: any } = {};
+    mount([], capture);
+    await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
+    await userEvent.type(screen.getByLabelText(/^name$/i), "RH screen");
+    await userEvent.click(screen.getByRole("combobox", { name: /generated probes/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /candidate's history/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(capture.body?.probe_mode).toBe("profile"));
+  });
+
+  it("says which probes a template generates", async () => {
+    mount([{ ...RH, probe_mode: "profile" }]);
+    expect(await screen.findByText(/probes from the candidate's history/i)).toBeInTheDocument();
+  });
+
   it("creates a template", async () => {
     const capture: { body?: any } = {};
     mount([], capture);
