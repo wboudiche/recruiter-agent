@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from recruiter.models.interview_template import InterviewTemplate
 from recruiter.schemas.interview import BaselineQuestion, InterviewKit, KitQuestion
-from recruiter.schemas.interview_template import TemplateSnapshot
+from recruiter.schemas.interview_template import ProbeMode, TemplateSnapshot
 
 
 # How long a run marked `generating` is assumed to still be working. Long
@@ -56,11 +56,17 @@ def fixed_questions(
     ]
 
 
+def probe_mode_of(snapshot: TemplateSnapshot | None) -> ProbeMode:
+    """Which generator a kit's probes come from. A kit with no template
+    generates the way kits always have, from the score breakdown."""
+    return "score_gaps" if snapshot is None else snapshot.probe_mode
+
+
 def wants_probes(snapshot: TemplateSnapshot | None) -> bool:
-    """Whether generation should call the LLM for probes. Probes come from
-    the technical score breakdown, so an RH-style template switches them
-    off rather than have technical questions appended to an HR round."""
-    return snapshot is None or snapshot.probe_mode == "score_gaps"
+    """Whether generation should call the LLM at all. Both generated modes
+    need a model; only a template that asks for no probes skips it, which
+    is what lets a curated RH round build with no provider configured."""
+    return probe_mode_of(snapshot) != "none"
 
 
 def generation_in_flight(kit: dict | None, *, now: datetime) -> bool:

@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import type { EditableQuestion } from "@/components/interview/question-list-editor";
 
-export type ProbeMode = "score_gaps" | "none";
+export type ProbeMode = "score_gaps" | "profile" | "none";
 
 export interface InterviewTemplate {
   id: number;

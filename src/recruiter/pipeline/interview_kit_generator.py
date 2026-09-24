@@ -143,3 +143,103 @@ async def draft_question(
     if not raw.questions:
         raise ValueError("the model returned no question")
     return raw.questions[0]
+
+
+_PROFILE_SYSTEM = (
+    "You write interview questions for a recruiter running a human-resources "
+    "conversation — the interview about the person's path, not their stack. "
+    "Build every question from this candidate's own history: the moves between "
+    "roles, the scope they owned, what they chose to do next, unexplained gaps, "
+    "and anything found about them online. Ask for a concrete story rather than "
+    "an opinion, never ask what the history already answers, and never assess "
+    "technical skill — another interview covers that. Ask only what this history "
+    "actually supports: return 3-6 questions, or fewer, or an empty list when "
+    "there is too little to go on. Never pad with generic questions."
+)
+
+
+def _build_profile_prompt(*, profile: str, baseline: list[BaselineQuestion]) -> str:
+    parts = [f"Candidate profile:\n{profile}\n"]
+    if baseline:
+        parts.append(
+            "These questions are already being asked — do NOT duplicate them:\n"
+            + "\n".join(f"- {b.text}" for b in baseline) + "\n"
+        )
+    parts.append(
+        "Return JSON with a `questions` array of {text, criterion}, where "
+        "`criterion` is one or two words naming what the question is about "
+        "(for example: motivation, scope, mobility), or null."
+    )
+    return "\n".join(parts)
+
+
+async def generate_profile_probes(
+    *,
+    profile: str,
+    baseline: list[BaselineQuestion],
+    llm: LLMClient,
+) -> GeneratedQuestions:
+    """Probes drawn from the candidate's history, for an RH-style round.
+
+    Deliberately blind to the job's criteria and the score breakdown: those
+    are what make `generate_probes` technical, and a round that switched to
+    this mode did so to stop inheriting technical questions.
+    """
+    return await llm.chat_structured(
+        messages=[LLMMessage(role="user", content=_build_profile_prompt(
+            profile=profile, baseline=baseline,
+        ))],
+        schema=GeneratedQuestions,
+        system=_PROFILE_SYSTEM,
+        # 2048, not 512: reasoning tokens count against this budget (PR #17).
+        max_tokens=2048,
+        temperature=0.3,
+    )
+
+
+_PROFILE_DRAFT_SYSTEM = (
+    "You write a single interview question for a recruiter running a "
+    "human-resources conversation. Build it from this candidate's own history — "
+    "a move between roles, the scope they owned, a gap, something found about "
+    "them online — never from technical skill, and never restating a question "
+    "already being asked. Ask for a concrete story. Return exactly one question."
+)
+
+
+async def draft_profile_question(
+    *,
+    profile: str,
+    existing_questions: list[str],
+    hint: str | None,
+    llm: LLMClient,
+) -> GeneratedQuestion:
+    """One extra question for an RH-style round, in the same register as
+    `generate_profile_probes` — so "Draft with AI" on such a track cannot
+    hand back a technical question."""
+    parts = [f"Candidate profile:\n{profile}\n"]
+    if existing_questions:
+        parts.append(
+            "Already being asked — do NOT repeat or rephrase any of these:\n"
+            + "\n".join(f"- {q}" for q in existing_questions) + "\n"
+        )
+    cleaned = (hint or "").strip()[:_MAX_HINT_CHARS]
+    if cleaned:
+        parts.append(f"The recruiter wants to ask about this specifically:\n<<<{cleaned}>>>\n")
+    else:
+        parts.append("The recruiter has not named a topic; choose what the history invites.\n")
+    parts.append(
+        "Return JSON with a single `questions` array holding exactly one "
+        "{text, criterion}, where `criterion` is one or two words naming what "
+        "the question is about, or null."
+    )
+    raw = await llm.chat_structured(
+        messages=[LLMMessage(role="user", content="\n".join(parts))],
+        schema=GeneratedQuestions,
+        system=_PROFILE_DRAFT_SYSTEM,
+        # 2048, not 512: reasoning tokens count against this budget (PR #17).
+        max_tokens=2048,
+        temperature=0.4,
+    )
+    if not raw.questions:
+        raise ValueError("the model returned no question")
+    return raw.questions[0]

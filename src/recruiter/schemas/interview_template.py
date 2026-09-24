@@ -5,10 +5,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from recruiter.schemas.interview import BaselineQuestion
 
-# "score_gaps": today's generator, driven by criteria and the score
-# breakdown. "none": curated questions only, no LLM call. Phase 4 adds a
-# profile-driven mode for RH-style templates.
-ProbeMode = Literal["score_gaps", "none"]
+# "score_gaps": the technical generator, driven by criteria and the score
+# breakdown. "profile": built from the candidate's own history and what
+# enrichment found, for RH-style rounds, and blind to the scoring.
+# "none": curated questions only, no LLM call.
+ProbeMode = Literal["score_gaps", "profile", "none"]
 
 # A template question is snapshotted into a kit as `t<template_id>-<id>`,
 # and KitQuestion.id is capped at 64. Capping the template side here keeps
