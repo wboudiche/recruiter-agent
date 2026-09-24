@@ -30,13 +30,23 @@ _FENCE_OPEN = "<<<"
 _FENCE_CLOSE = ">>>"
 
 
-def _tidy(text: str) -> str:
-    """Pasted text, readable: runs of spaces collapsed and blank lines
-    dropped — a job ad copied from a web page is largely indentation — but
-    its own line breaks kept, because a list of roles or bullets read as one
-    run-on line tells the model nothing about where each item ends."""
-    lines = [" ".join(line.split()) for line in text.splitlines()]
-    return "\n".join(line for line in lines if line)
+def _clean(text: str, *, limit: int | None = None) -> str:
+    """Pasted text, ready to be delimited.
+
+    The delimiters are removed first — text that contained them would
+    otherwise close its own fence and have the remainder read as an
+    instruction — then runs of spaces are collapsed and blank lines
+    dropped, since a job ad copied from a web page is largely indentation.
+    The text's own line breaks are kept: a list of roles or bullets read as
+    one run-on line tells the model nothing about where each item ends.
+
+    Returns "" for text that was nothing but markers and whitespace, so a
+    caller can tell "nothing was given" from "something was".
+    """
+    without_fence = text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " ")
+    lines = [" ".join(line.split()) for line in without_fence.splitlines()]
+    body = "\n".join(line for line in lines if line)
+    return _capped(body, limit) if limit else body
 
 
 def _capped(text: str, limit: int) -> str:
@@ -46,31 +56,29 @@ def _capped(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     head = text[:limit]
-    cut = head.rsplit(" ", 1)[0]
-    # The word boundary is only worth taking when it lies near the end. A
-    # title followed by one enormous "word" — a URL, a run of markup — has
-    # its last space at the very start, and cutting there would throw the
-    # rest away.
+    # Any whitespace, not just a space: a responsibilities list pasted one
+    # item per line has newlines and nothing else to cut on.
+    cut = head[:max(head.rfind(" "), head.rfind("\n"))] if any(
+        c in head for c in " \n"
+    ) else head
+    # The boundary is only worth taking when it lies near the end. A title
+    # followed by one enormous "word" — a URL, a run of markup — has its
+    # last break at the very start, and cutting there would throw the rest
+    # away.
     return (cut if len(cut) > limit * 0.8 else head) + "…"
 
 
-def _fenced(text: str, *, limit: int | None = None) -> str:
-    """Tidied, optionally capped, and wrapped in delimiters the text cannot
-    contain. Capped after the delimiters are removed, so markers that are
-    stripped anyway never eat into the budget."""
-    body = _tidy(text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " "))
-    return f"{_FENCE_OPEN}{_capped(body, limit) if limit else body}{_FENCE_CLOSE}"
+def _fenced(text: str) -> str:
+    """Already-cleaned text, wrapped in delimiters it cannot contain."""
+    return f"{_FENCE_OPEN}{text}{_FENCE_CLOSE}"
 
 
 def _hint_block(hint: str | None, *, asks: str) -> str:
     """What the recruiter typed, or a line saying they typed nothing."""
-    tidied = _tidy(hint or "")
-    if not tidied:
+    body = _clean(hint or "", limit=_MAX_HINT_CHARS)
+    if not body:
         return "The recruiter has not named a topic; " + asks + "\n"
-    return (
-        "The recruiter wants to probe this specifically:\n"
-        f"{_fenced(tidied, limit=_MAX_HINT_CHARS)}\n"
-    )
+    return f"The recruiter wants to probe this specifically:\n{_fenced(body)}\n"
 
 
 # The role gives an RH question something to be about — why this move, why
@@ -94,16 +102,17 @@ def _role_block(*, title: str, description: str) -> str | None:
     capped, with `_ROLE_RULE` beside it, and the criteria and the score
     breakdown themselves never reach the prompt.
     """
-    # Tidied separately, then joined: run together, a title and a
+    # Cleaned separately, then joined: run together, a title and a
     # description opening on "Engineering, Paris" read as one job called
-    # "Head of Platform Engineering".
-    parts = [p for p in (_tidy(title), _tidy(description)) if p]
+    # "Head of Platform Engineering". The description carries its own
+    # budget — the title is already bounded by its column, and a long one
+    # must not crowd out the part with something to say.
+    parts = [
+        p for p in (_clean(title), _clean(description, limit=_MAX_ROLE_CHARS)) if p
+    ]
     if not parts:
         return None
-    return (
-        "They are applying for:\n"
-        f"{_fenced(' — '.join(parts), limit=_MAX_ROLE_CHARS)}\n{_ROLE_RULE}\n"
-    )
+    return f"They are applying for:\n{_fenced(' — '.join(parts))}\n{_ROLE_RULE}\n"
 
 
 def _build_prompt(
@@ -113,7 +122,7 @@ def _build_prompt(
     score_breakdown: list[dict] | None,
     baseline: list[BaselineQuestion],
 ) -> str:
-    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
+    parts = [f"Candidate profile:\n{_fenced(_clean(profile))}\n"]
     if criteria:
         parts.append("Weighted criteria:\n" + "\n".join(
             f"- {c.name} (weight {c.weight}): {c.description}" for c in criteria
@@ -177,7 +186,7 @@ def _build_draft_prompt(
     existing_questions: list[str],
     hint: str | None,
 ) -> str:
-    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
+    parts = [f"Candidate profile:\n{_fenced(_clean(profile))}\n"]
     if criteria:
         parts.append("Weighted criteria:\n" + "\n".join(
             f"- {c.name} (weight {c.weight}): {c.description}" for c in criteria
@@ -247,7 +256,7 @@ def _build_profile_prompt(
     job_description: str,
     baseline: list[BaselineQuestion],
 ) -> str:
-    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
+    parts = [f"Candidate profile:\n{_fenced(_clean(profile))}\n"]
     role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
@@ -301,19 +310,15 @@ _PROFILE_DRAFT_SYSTEM = (
 )
 
 
-async def draft_profile_question(
+def _build_profile_draft_prompt(
     *,
     profile: str,
-    existing_questions: list[str],
-    hint: str | None,
-    llm: LLMClient,
     job_title: str,
     job_description: str,
-) -> GeneratedQuestion:
-    """One extra question for an RH-style round, in the same register as
-    `generate_profile_probes` — so "Draft with AI" on such a track cannot
-    hand back a technical question."""
-    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
+    existing_questions: list[str],
+    hint: str | None,
+) -> str:
+    parts = [f"Candidate profile:\n{_fenced(_clean(profile))}\n"]
     role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
@@ -328,8 +333,26 @@ async def draft_profile_question(
         "{text, criterion}, where `criterion` is one or two words naming what "
         "the question is about, or null."
     )
+    return "\n".join(parts)
+
+
+async def draft_profile_question(
+    *,
+    profile: str,
+    existing_questions: list[str],
+    hint: str | None,
+    llm: LLMClient,
+    job_title: str,
+    job_description: str,
+) -> GeneratedQuestion:
+    """One extra question for an RH-style round, in the same register as
+    `generate_profile_probes` — so "Draft with AI" on such a track cannot
+    hand back a technical question."""
     raw = await llm.chat_structured(
-        messages=[LLMMessage(role="user", content="\n".join(parts))],
+        messages=[LLMMessage(role="user", content=_build_profile_draft_prompt(
+            profile=profile, job_title=job_title, job_description=job_description,
+            existing_questions=existing_questions, hint=hint,
+        ))],
         schema=GeneratedQuestions,
         system=_PROFILE_DRAFT_SYSTEM,
         # 2048, not 512: reasoning tokens count against this budget (PR #17).

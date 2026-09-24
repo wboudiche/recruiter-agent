@@ -4,7 +4,6 @@ import pytest
 
 from recruiter.llm.client import FakeLLMClient
 from recruiter.pipeline.interview_kit_generator import (
-    _MAX_ROLE_CHARS,
     generate_probes,
     generate_profile_probes,
 )
@@ -231,9 +230,9 @@ async def test_a_long_job_description_cannot_swamp_the_history() -> None:
 
     prompt = llm.calls[0]["messages"][0].content
     role = _block_with(prompt, "Head of Platform")
-    # Within a word of the budget — pins the cap itself, not merely "shorter":
-    # raising _MAX_ROLE_CHARS would fail this.
-    assert _MAX_ROLE_CHARS - 20 <= len(role) <= _MAX_ROLE_CHARS + 1
+    # A literal bound, not one written in terms of the constant: raising
+    # _MAX_ROLE_CHARS must fail this test, which is what it is for.
+    assert 680 <= len(role) <= 750
     assert "Marie Dupont" in prompt
 
 
@@ -297,8 +296,8 @@ async def test_a_description_cannot_break_out_of_its_fence() -> None:
 
 @pytest.mark.asyncio
 async def test_a_title_cannot_break_out_either() -> None:
-    """The title is recruiter-editable free text with no length bound of its
-    own, so it is fenced with the description rather than beside it."""
+    """The title is bounded at 255 characters but its content is free text,
+    so it is fenced with the description rather than sitting beside it."""
     llm = FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[])])
 
     await generate_profile_probes(
@@ -515,3 +514,64 @@ async def test_a_pasted_ad_keeps_its_sections() -> None:
 
     role = _block_with(llm.calls[0]["messages"][0].content, "Head of Platform")
     assert "- Leads a team of twelve\n- Owns on-call" in role
+
+
+@pytest.mark.asyncio
+async def test_text_made_only_of_fence_markers_counts_as_nothing() -> None:
+    """Emptiness is decided after the markers are stripped, not before —
+    otherwise a hint of ">>>" announces a topic and hands over an empty
+    block, and a job of "<<<" describes a role called "—"."""
+    from recruiter.pipeline.interview_kit_generator import draft_profile_question
+
+    llm = FakeLLMClient(structured_responses=[
+        GeneratedQuestions(questions=[GeneratedQuestion(text="Q?", criterion=None)]),
+    ])
+
+    await draft_profile_question(
+        profile="Marie Dupont", existing_questions=[], hint=">>>", llm=llm,
+        job_title=">>>", job_description="<<<",
+    )
+
+    prompt = llm.calls[0]["messages"][0].content
+    assert "They are applying for" not in prompt, "a role of only markers is no role"
+    assert "has not named a topic" in prompt, "a hint of only markers is no hint"
+    assert "<<<>>>" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_list_pasted_one_item_per_line_is_cut_at_a_line_break() -> None:
+    """A responsibilities list has no spaces to cut on — only newlines — so
+    a space-only boundary search cuts it mid-word."""
+    llm = FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[])])
+
+    await generate_profile_probes(
+        profile="Marie Dupont",
+        job_title="Head of Platform",
+        job_description="\n".join(f"Kubernetes{i}" for i in range(200)),
+        baseline=[],
+        llm=llm,
+    )
+
+    role = _block_with(llm.calls[0]["messages"][0].content, "Head of Platform")
+    assert role.endswith("…")
+    body = role[:-1]
+    assert body.endswith(tuple(f"Kubernetes{i}" for i in range(200))), body[-30:]
+
+
+@pytest.mark.asyncio
+async def test_a_long_title_does_not_eat_the_descriptions_budget() -> None:
+    """The title is bounded by its column; the description is the part that
+    has something to say, so it is capped on its own budget."""
+    llm = FakeLLMClient(structured_responses=[GeneratedQuestions(questions=[])])
+
+    await generate_profile_probes(
+        profile="Marie Dupont",
+        job_title="Head of Platform " * 15,
+        job_description="word " * 400,
+        baseline=[],
+        llm=llm,
+    )
+
+    role = _block_with(llm.calls[0]["messages"][0].content, "Head of Platform")
+    description = role.split(" — ", 1)[1]
+    assert 680 <= len(description) <= 750, "the description keeps its own budget"
