@@ -210,6 +210,7 @@ async def run_generate_kit(
                     # passed, which is the whole point of the mode.
                     generated = await generate_profile_probes(
                         profile=profile, baseline=baseline, llm=llm,
+                        job_title=job.title, job_description=job.description,
                     )
                 else:
                     generated = await generate_probes(
@@ -685,11 +686,14 @@ async def draft_kit_question(
                 llm=llm,
             )
         else:
+            job = await session.get(Job, app_row.job_id)
             question = await draft_profile_question(
                 profile=profile,
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,
+                job_title=job.title if job else None,
+                job_description=job.description if job else None,
             )
     except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
         logger.warning("interview question draft failed: %s", exc, exc_info=True)

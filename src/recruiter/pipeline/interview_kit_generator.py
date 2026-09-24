@@ -158,8 +158,36 @@ _PROFILE_SYSTEM = (
 )
 
 
-def _build_profile_prompt(*, profile: str, baseline: list[BaselineQuestion]) -> str:
+# The role gives an RH question something to be about — why this move, why
+# here — but the profile is what the questions are built FROM, so a long
+# pasted JD is trimmed rather than allowed to crowd the history out.
+_MAX_ROLE_CHARS = 700
+
+
+def _role_block(title: str | None, description: str | None) -> str | None:
+    """The job as an RH interviewer needs it: what the role is, no criteria
+    and no scoring — those are what make `generate_probes` technical."""
+    heading = (title or "").strip()
+    body = " ".join((description or "").split())[:_MAX_ROLE_CHARS]
+    if not heading and not body:
+        return None
+    lines = [f"They are applying for: {heading}" if heading else "The role they applied for:"]
+    if body:
+        lines.append(body)
+    return "\n".join(lines) + "\n"
+
+
+def _build_profile_prompt(
+    *,
+    profile: str,
+    job_title: str | None,
+    job_description: str | None,
+    baseline: list[BaselineQuestion],
+) -> str:
     parts = [f"Candidate profile:\n{profile}\n"]
+    role = _role_block(job_title, job_description)
+    if role:
+        parts.append(role)
     if baseline:
         parts.append(
             "These questions are already being asked — do NOT duplicate them:\n"
@@ -178,6 +206,8 @@ async def generate_profile_probes(
     profile: str,
     baseline: list[BaselineQuestion],
     llm: LLMClient,
+    job_title: str | None = None,
+    job_description: str | None = None,
 ) -> GeneratedQuestions:
     """Probes drawn from the candidate's history, for an RH-style round.
 
@@ -187,7 +217,8 @@ async def generate_profile_probes(
     """
     return await llm.chat_structured(
         messages=[LLMMessage(role="user", content=_build_profile_prompt(
-            profile=profile, baseline=baseline,
+            profile=profile, job_title=job_title, job_description=job_description,
+            baseline=baseline,
         ))],
         schema=GeneratedQuestions,
         system=_PROFILE_SYSTEM,
@@ -212,11 +243,16 @@ async def draft_profile_question(
     existing_questions: list[str],
     hint: str | None,
     llm: LLMClient,
+    job_title: str | None = None,
+    job_description: str | None = None,
 ) -> GeneratedQuestion:
     """One extra question for an RH-style round, in the same register as
     `generate_profile_probes` — so "Draft with AI" on such a track cannot
     hand back a technical question."""
     parts = [f"Candidate profile:\n{profile}\n"]
+    role = _role_block(job_title, job_description)
+    if role:
+        parts.append(role)
     if existing_questions:
         parts.append(
             "Already being asked — do NOT repeat or rephrase any of these:\n"
