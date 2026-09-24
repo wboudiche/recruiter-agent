@@ -20,6 +20,92 @@ _SYSTEM = (
 )
 
 
+# Everything in these prompts that was pasted or scraped — the candidate's
+# profile and its enrichment summaries, the job ad, the recruiter's hint —
+# is delimited, so the model can see where such text stops and the
+# instructions resume. The delimiters are stripped from the text first: text
+# that contained them would otherwise close its own fence and have the
+# remainder read as an instruction.
+_FENCE_OPEN = "<<<"
+_FENCE_CLOSE = ">>>"
+
+
+def _tidy(text: str) -> str:
+    """Pasted text, readable: runs of spaces collapsed and blank lines
+    dropped — a job ad copied from a web page is largely indentation — but
+    its own line breaks kept, because a list of roles or bullets read as one
+    run-on line tells the model nothing about where each item ends."""
+    lines = [" ".join(line.split()) for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def _capped(text: str, limit: int) -> str:
+    """Trimmed at a word boundary where there is one, and marked when it was
+    trimmed: a clause that simply stops invites the model to finish it from
+    imagination."""
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    cut = head.rsplit(" ", 1)[0]
+    # The word boundary is only worth taking when it lies near the end. A
+    # title followed by one enormous "word" — a URL, a run of markup — has
+    # its last space at the very start, and cutting there would throw the
+    # rest away.
+    return (cut if len(cut) > limit * 0.8 else head) + "…"
+
+
+def _fenced(text: str, *, limit: int | None = None) -> str:
+    """Tidied, optionally capped, and wrapped in delimiters the text cannot
+    contain. Capped after the delimiters are removed, so markers that are
+    stripped anyway never eat into the budget."""
+    body = _tidy(text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " "))
+    return f"{_FENCE_OPEN}{_capped(body, limit) if limit else body}{_FENCE_CLOSE}"
+
+
+def _hint_block(hint: str | None, *, asks: str) -> str:
+    """What the recruiter typed, or a line saying they typed nothing."""
+    tidied = _tidy(hint or "")
+    if not tidied:
+        return "The recruiter has not named a topic; " + asks + "\n"
+    return (
+        "The recruiter wants to probe this specifically:\n"
+        f"{_fenced(tidied, limit=_MAX_HINT_CHARS)}\n"
+    )
+
+
+# The role gives an RH question something to be about — why this move, why
+# here — but the profile is what the questions are built FROM, so a pasted
+# job ad is trimmed rather than allowed to crowd the history out.
+_MAX_ROLE_CHARS = 700
+# Said inside the block, where the model reads it, rather than in the system
+# prompt: only a prompt that actually carries a role should carry the rule
+# about how to read it.
+_ROLE_RULE = (
+    "Read the role only as context for why they are moving and why here — "
+    "never a question about what they know."
+)
+
+
+def _role_block(*, title: str, description: str) -> str | None:
+    """The job as an RH interviewer needs it: what the role is.
+
+    The description is the text the weighted criteria are derived from, so
+    it carries the same technical requirements. It travels fenced and
+    capped, with `_ROLE_RULE` beside it, and the criteria and the score
+    breakdown themselves never reach the prompt.
+    """
+    # Tidied separately, then joined: run together, a title and a
+    # description opening on "Engineering, Paris" read as one job called
+    # "Head of Platform Engineering".
+    parts = [p for p in (_tidy(title), _tidy(description)) if p]
+    if not parts:
+        return None
+    return (
+        "They are applying for:\n"
+        f"{_fenced(' — '.join(parts), limit=_MAX_ROLE_CHARS)}\n{_ROLE_RULE}\n"
+    )
+
+
 def _build_prompt(
     *,
     profile: str,
@@ -27,7 +113,7 @@ def _build_prompt(
     score_breakdown: list[dict] | None,
     baseline: list[BaselineQuestion],
 ) -> str:
-    parts = [f"Candidate profile:\n{profile}\n"]
+    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
     if criteria:
         parts.append("Weighted criteria:\n" + "\n".join(
             f"- {c.name} (weight {c.weight}): {c.description}" for c in criteria
@@ -91,7 +177,7 @@ def _build_draft_prompt(
     existing_questions: list[str],
     hint: str | None,
 ) -> str:
-    parts = [f"Candidate profile:\n{profile}\n"]
+    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
     if criteria:
         parts.append("Weighted criteria:\n" + "\n".join(
             f"- {c.name} (weight {c.weight}): {c.description}" for c in criteria
@@ -106,13 +192,7 @@ def _build_draft_prompt(
             "Already being asked — do NOT repeat or rephrase any of these:\n"
             + "\n".join(f"- {q}" for q in existing_questions) + "\n"
         )
-    if _clean(hint or ""):
-        parts.append(
-            "The recruiter wants to probe this specifically:\n"
-            f"{_fenced(hint or '', limit=_MAX_HINT_CHARS)}\n"
-        )
-    else:
-        parts.append("The recruiter has not named a topic; choose the most valuable gap.\n")
+    parts.append(_hint_block(hint, asks="choose the most valuable gap."))
     parts.append(
         "Return JSON with a single `questions` array holding exactly one "
         "{text, criterion}."
@@ -160,71 +240,6 @@ _PROFILE_SYSTEM = (
 )
 
 
-# The role gives an RH question something to be about — why this move, why
-# here — but the profile is what the questions are built FROM, so a pasted
-# job ad is trimmed rather than allowed to crowd the history out.
-_MAX_ROLE_CHARS = 700
-_FENCE_OPEN = "<<<"
-_FENCE_CLOSE = ">>>"
-# Said inside the block, where the model reads it, rather than in the system
-# prompt: only a prompt that actually carries a role should carry the rule
-# about how to read it.
-_ROLE_RULE = (
-    "Read the role only as context for why they are moving and why here — "
-    "never a question about what they know."
-)
-
-
-def _clean(text: str) -> str:
-    """Externally-sourced text, ready to be delimited: the delimiters are
-    stripped first — text that contained them would otherwise close the
-    fence early and have its remainder read as instructions — and
-    whitespace is collapsed, so a job ad pasted from a web page is not
-    mostly indentation."""
-    without_fence = text.replace(_FENCE_OPEN, " ").replace(_FENCE_CLOSE, " ")
-    return " ".join(without_fence.split())
-
-
-def _capped(text: str, limit: int) -> str:
-    """Trimmed at a word boundary, and marked when it was trimmed: a clause
-    that simply stops invites the model to finish it from imagination."""
-    if len(text) <= limit:
-        return text
-    head = text[:limit]
-    cut = head.rsplit(" ", 1)[0]
-    # Only when a word boundary is near the end: text with one enormous
-    # "word" (a URL, a run of markup) would otherwise lose everything back
-    # to the previous space.
-    return (cut if len(cut) > limit * 0.8 else head) + "…"
-
-
-def _fenced(text: str, *, limit: int) -> str:
-    """Cleaned, capped, and wrapped in delimiters the text cannot contain.
-    Capped after cleaning, so delimiters that are stripped anyway do not
-    eat into the budget."""
-    return f"{_FENCE_OPEN}{_capped(_clean(text), limit)}{_FENCE_CLOSE}"
-
-
-def _role_block(*, title: str, description: str) -> str | None:
-    """The job as an RH interviewer needs it: what the role is.
-
-    The description is the text the weighted criteria are derived from, so
-    it carries the same technical requirements. It travels fenced and
-    capped, with `_ROLE_RULE` beside it, and the criteria and the score
-    breakdown themselves never reach the prompt.
-    """
-    # Normalised separately, then joined: run together, a title and a
-    # description opening on "Engineering, Paris" read as one job called
-    # "Head of Platform Engineering".
-    parts = [p for p in (_clean(title), _clean(description)) if p]
-    if not parts:
-        return None
-    return (
-        "They are applying for:\n"
-        f"{_fenced(' — '.join(parts), limit=_MAX_ROLE_CHARS)}\n{_ROLE_RULE}\n"
-    )
-
-
 def _build_profile_prompt(
     *,
     profile: str,
@@ -232,7 +247,7 @@ def _build_profile_prompt(
     job_description: str,
     baseline: list[BaselineQuestion],
 ) -> str:
-    parts = [f"Candidate profile:\n{profile}\n"]
+    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
     role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
@@ -298,7 +313,7 @@ async def draft_profile_question(
     """One extra question for an RH-style round, in the same register as
     `generate_profile_probes` — so "Draft with AI" on such a track cannot
     hand back a technical question."""
-    parts = [f"Candidate profile:\n{profile}\n"]
+    parts = [f"Candidate profile:\n{_fenced(profile)}\n"]
     role = _role_block(title=job_title, description=job_description)
     if role:
         parts.append(role)
@@ -307,13 +322,7 @@ async def draft_profile_question(
             "Already being asked — do NOT repeat or rephrase any of these:\n"
             + "\n".join(f"- {q}" for q in existing_questions) + "\n"
         )
-    if _clean(hint or ""):
-        parts.append(
-            "The recruiter wants to ask about this specifically:\n"
-            f"{_fenced(hint or '', limit=_MAX_HINT_CHARS)}\n"
-        )
-    else:
-        parts.append("The recruiter has not named a topic; choose what the history invites.\n")
+    parts.append(_hint_block(hint, asks="choose what the history invites."))
     parts.append(
         "Return JSON with a single `questions` array holding exactly one "
         "{text, criterion}, where `criterion` is one or two words naming what "
