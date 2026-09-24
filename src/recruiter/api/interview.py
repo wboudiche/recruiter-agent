@@ -658,7 +658,6 @@ async def draft_kit_question(
             detail="No LLM provider configured — set one in Settings → LLM.",
         )
 
-    job = await session.get(Job, app_row.job_id)
     candidate = await session.get(Candidate, app_row.candidate_id)
     kits = await kits_in_round(session, app_row)
     kit_row = kit_for_caller(kits, rows, user, track) if kits else None
@@ -667,23 +666,27 @@ async def draft_kit_question(
         for q in (kit_row.questions if kit_row else [])
         if q.get("text")
     ]
-    profile = profile_text(candidate, enrichment=app_row.enrichment)
+    # Everything the model needs is built inside the try: a candidate
+    # record that cannot be rendered is a failed draft (502), not a 500.
     try:
-        # Drafted in the register the kit was built in: on an RH track a
-        # technical question would be exactly what the track exists to
-        # keep out (see generate_profile_probes).
-        if probe_mode_of(snapshot_from_row(kit_row)) == "profile":
-            question = await draft_profile_question(
+        profile = profile_text(candidate, enrichment=app_row.enrichment)
+        # Only a kit that generates FROM the scoring drafts from it too.
+        # Any other track — profile probes, or a curated RH list that
+        # generates none — gets the question asked about the person, which
+        # is what those tracks exist to keep technical questions out of.
+        if probe_mode_of(snapshot_from_row(kit_row)) == "score_gaps":
+            job = await session.get(Job, app_row.job_id)
+            question = await draft_question(
                 profile=profile,
+                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
+                score_breakdown=app_row.score_breakdown,
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,
             )
         else:
-            question = await draft_question(
+            question = await draft_profile_question(
                 profile=profile,
-                criteria=[CriteriaItem.model_validate(c) for c in (job.criteria or [])],
-                score_breakdown=app_row.score_breakdown,
                 existing_questions=existing,
                 hint=payload.hint,
                 llm=llm,

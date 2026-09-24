@@ -8,7 +8,17 @@ import {
   useInterviewTemplates,
   useSaveInterviewTemplate,
   type InterviewTemplate,
+  type ProbeMode,
 } from "@/hooks/use-interview-templates";
+
+// Keyed by mode rather than chained ternaries, so adding a mode is a
+// typecheck error here instead of a template silently described as
+// technical in this list.
+const PROBE_LABEL: Record<ProbeMode, string> = {
+  score_gaps: "Probes from score gaps",
+  profile: "Probes from the candidate's history",
+  none: "No generated probes",
+};
 
 export function InterviewTemplatesTab() {
   const [showArchived, setShowArchived] = useState(false);
@@ -44,8 +54,9 @@ export function InterviewTemplatesTab() {
         <div>
           <h3 className="font-medium">Interview templates</h3>
           <p className="text-xs text-muted-foreground">
-            A template decides which questions a round starts from and
-            whether probes are generated from scorecard gaps.
+            A template decides which questions a round starts from, and
+            where its generated questions come from — the candidate's
+            scorecard gaps, their career history, or nowhere at all.
           </p>
         </div>
         <Button type="button" size="sm" onClick={openNew}>
@@ -80,9 +91,7 @@ export function InterviewTemplatesTab() {
               <div>
                 <div className="font-medium">{t.name}</div>
                 <div className="text-xs text-muted-foreground">
-                  {t.probe_mode === "none" ? "No generated probes"
-                    : t.probe_mode === "profile" ? "Probes from the candidate's history"
-                    : "Probes from score gaps"}
+                  {PROBE_LABEL[t.probe_mode]}
                   {t.include_job_questions ? " · includes the job's own questions" : ""}
                 </div>
               </div>

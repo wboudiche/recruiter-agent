@@ -179,7 +179,16 @@ def merge_regenerated(
     fresh_baseline = [
         q for q in _baseline_questions(baseline) if q.id not in answered_baseline_ids
     ]
-    fresh_probes = _probe_questions(probes, criteria_by_probe)
+    # A regeneration that produced no probes has nothing to replace the
+    # existing ones with, so it keeps them rather than deleting them. That
+    # case is routine in `profile` mode, which is told to return nothing
+    # when the candidate's history gives it nothing new to ask.
+    unanswered_probe = [
+        q for q in existing.questions if not _is_answered(q) and q.source == "probe"
+    ]
+    fresh_probes = (
+        _probe_questions(probes, criteria_by_probe) if probes else unanswered_probe
+    )
 
     # Combine in baseline-then-probe order within each group
     return InterviewKit(

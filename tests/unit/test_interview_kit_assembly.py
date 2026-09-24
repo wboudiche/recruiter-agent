@@ -285,3 +285,18 @@ def test_a_profile_template_still_wants_probes() -> None:
     no-provider path to fail that track rather than dispatch it."""
     assert wants_probes(snapshot_of(_template(probe_mode="profile", include=False))) is True
     assert wants_probes(snapshot_of(_template(probe_mode="none", include=False))) is False
+
+
+def test_a_regeneration_that_returns_no_probes_keeps_the_ones_already_there() -> None:
+    """An RH template may legitimately return nothing when the history gives
+    it nothing new to ask. That must not delete the probes already on the
+    kit — a regeneration with no probes has nothing to replace them with."""
+    existing = InterviewKit(status="ready", questions=[
+        KitQuestion(id="b1", text="Why this role?", source="baseline"),
+        KitQuestion(id="p1", text="What made you leave Acme?", source="probe"),
+    ])
+
+    merged = merge_regenerated(existing, _baseline(), [], criteria_by_probe=[], now=NOW)
+
+    assert [q.text for q in merged.questions if q.source == "probe"] == [
+        "What made you leave Acme?"]

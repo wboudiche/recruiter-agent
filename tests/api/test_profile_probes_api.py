@@ -13,6 +13,7 @@ from recruiter.api.candidates import get_engine_dep, get_llm
 from recruiter.llm.client import FakeLLMClient
 from recruiter.main import app
 from recruiter.models import Application, Candidate, InterviewKitRow, InterviewTemplate, Stage
+from recruiter.pipeline.interview_kit_generator import _PROFILE_DRAFT_SYSTEM
 from recruiter.schemas.interview import GeneratedQuestion, GeneratedQuestions
 
 KIT = "/api/applications/{}/interview-kit"
@@ -28,11 +29,11 @@ def _llm(*questions: str) -> FakeLLMClient:
     ])])
 
 
-async def _profile_template(name: str = "RH screen") -> int:
+async def _profile_template(name: str = "RH screen", *, probe_mode: str = "profile") -> int:
     async with _db()() as s:
         template = InterviewTemplate(
             name=name, questions=[{"id": "m1", "text": "What draws you to us?"}],
-            probe_mode="profile", include_job_questions=False,
+            probe_mode=probe_mode, include_job_questions=False,
         )
         s.add(template)
         await s.commit()
@@ -152,6 +153,57 @@ async def test_drafting_on_an_rh_track_stays_in_the_same_register(
 
     assert r.status_code == 200, r.text
     assert r.json()["question"]["text"] == "Where do you want to be in three years?"
-    prompt = "\n".join(m.content for call in llm.calls for m in call.get("messages", []))
-    assert "Owned the cluster migration" in prompt
-    assert "production-grade clusters" not in prompt
+    call = llm.calls[0]
+    assert call["system"] == _PROFILE_DRAFT_SYSTEM, "the register is the point of the branch"
+    assert "Owned the cluster migration" in call["messages"][0].content
+    assert "production-grade clusters" not in call["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_drafting_on_a_curated_rh_track_stays_in_the_same_register(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """An RH template that generates no probes at all (`none`) is still an
+    RH interview: drafting one question by hand must not reach for the
+    technical prompt and its score breakdown."""
+    tid = await _profile_template(probe_mode="none")
+    app_id = await _invited(api_client, create_scored_app)
+    await _with_history(app_id)
+    await _schedule(api_client, app_id, _llm(), tid)
+
+    llm = _llm("What pulled you towards this team?")
+    app.dependency_overrides[get_llm] = lambda: llm
+    try:
+        r = await api_client.post(f"{KIT.format(app_id)}/draft-question", json={"hint": None})
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert r.status_code == 200, r.text
+    call = llm.calls[0]
+    assert call["system"] == _PROFILE_DRAFT_SYSTEM, "a curated RH track drafted technically"
+    assert "production-grade clusters" not in call["messages"][0].content
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_candidate_still_answers_with_the_draft_error(
+    api_client: AsyncClient, create_scored_app,
+) -> None:
+    """Building the profile is part of drafting, so a candidate record that
+    cannot be rendered belongs in the handler's 502, not in a bare 500."""
+    tid = await _profile_template()
+    app_id = await _invited(api_client, create_scored_app)
+    await _schedule(api_client, app_id, _llm(), tid)
+    async with _db()() as s:
+        app_row = await s.get(Application, app_id)
+        candidate = await s.get(Candidate, app_row.candidate_id)
+        candidate.experience = ["a string where the extractor writes an object"]
+        await s.commit()
+
+    app.dependency_overrides[get_llm] = lambda: _llm("unused")
+    try:
+        r = await api_client.post(f"{KIT.format(app_id)}/draft-question", json={"hint": None})
+    finally:
+        app.dependency_overrides.pop(get_llm, None)
+
+    assert r.status_code == 502, r.text
+    assert "Could not draft a question" in r.json()["detail"]

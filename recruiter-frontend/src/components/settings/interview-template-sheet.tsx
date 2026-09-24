@@ -80,8 +80,9 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
         <SheetHeader>
           <SheetTitle>{template ? "Edit template" : "New template"}</SheetTitle>
           <SheetDescription>
-            Templates decide which questions a round starts from and whether
-            probes are generated from scorecard gaps.
+            A template decides which questions a round starts from, and
+            where its generated questions come from — the candidate's
+            scorecard gaps, their career history, or nowhere at all.
           </SheetDescription>
         </SheetHeader>
 
