@@ -43,6 +43,11 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   const [probeMode, setProbeMode] = useState<ProbeMode>("score_gaps");
   const [includeJobQuestions, setIncludeJobQuestions] = useState(true);
   const [rows, setRows] = useState<EditableQuestion[]>([]);
+  // A request to see the controls, not a stored setting: settings that
+  // happen to match a preset must not snap the radio back to it while
+  // they are being edited. Declared with the rest of the state, above the
+  // effect that resets it.
+  const [editingSettings, setEditingSettings] = useState(false);
 
   // Reset the working copy from the template whenever the sheet opens —
   // matching a new template (no `template`) starts with the backend's own
@@ -63,13 +68,11 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   }, [open, template]);
 
   // Derived, never stored: the radio reads back what the two settings say,
-  // so the label can never drift from the behaviour. The exception is
-  // Custom, which is a request to see the controls — settings that happen
-  // to match a preset must not snap the radio back while editing them.
+  // so the label can never drift from the behaviour. Custom is the one
+  // exception — see `editingSettings` above.
   const derived = interviewKind({
     probe_mode: probeMode, include_job_questions: includeJobQuestions,
   });
-  const [editingSettings, setEditingSettings] = useState(false);
   const kind: InterviewKind = editingSettings ? "custom" : derived;
 
   function chooseKind(next: InterviewKind) {

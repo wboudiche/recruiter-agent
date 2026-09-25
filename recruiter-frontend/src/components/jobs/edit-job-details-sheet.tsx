@@ -23,7 +23,7 @@ import { api, ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { readOnlyNotice } from "@/lib/read-only-notice";
 import type { JobRead } from "@/hooks/use-jobs";
-import { useInterviewTemplates } from "@/hooks/use-interview-templates";
+import { useInterviewTemplates, withKind } from "@/hooks/use-interview-templates";
 
 interface Props {
   job: JobRead;
@@ -124,7 +124,7 @@ export function EditJobDetailsSheet({ job, open, onOpenChange, canWrite = false 
               <SelectContent>
                 <SelectItem value="none">None — the job's own questions</SelectItem>
                 {templates.map((t) => (
-                  <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>
+                  <SelectItem key={t.id} value={String(t.id)}>{withKind(t.name, t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

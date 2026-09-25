@@ -957,4 +957,22 @@ describe("InterviewKitSection — kinds", () => {
     expect(await screen.findByRole("tab", { name: /rh screen.*hr/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /technical.*technical/i })).toBeInTheDocument();
   });
+
+  it("labels a one-track round, which has no tabs to read the kind off", async () => {
+    // The common case, and the one an interviewer sees: a single track,
+    // rendered without a tab strip.
+    mountWithKit(RH.kit, {}, { tracks: [RH], me: { id: 7, role: "viewer" }, canWrite: false });
+    expect(await screen.findByText("RH screen · HR")).toBeInTheDocument();
+  });
+
+  it("names the kind in the add-track picker, where the same choice is made", async () => {
+    mountWithKit(TECH.kit, {}, {
+      tracks: [TECH], stage: "scheduled",
+      templates: [{ ...TEMPLATE(2, "RH screen"), probe_mode: "profile",
+                    include_job_questions: false }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /add track/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /track template/i }));
+    expect(await screen.findByRole("option", { name: "RH screen · HR" })).toBeInTheDocument();
+  });
 });

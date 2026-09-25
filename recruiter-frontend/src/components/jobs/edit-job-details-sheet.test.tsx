@@ -18,7 +18,7 @@ const JOB: JobRead = {
   created_at: "2026-09-21T00:00:00Z", updated_at: "2026-09-21T00:00:00Z",
 };
 const RH = { id: 3, name: "RH screen", description: null, questions: [],
-             probe_mode: "none", include_job_questions: false, is_active: true };
+             probe_mode: "profile", include_job_questions: false, is_active: true };
 
 function mount(job: JobRead, capture: { body?: any }) {
   server.use(
@@ -47,6 +47,13 @@ describe("EditJobDetailsSheet — default interview template", () => {
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
     await waitFor(() => expect(capture.body?.default_interview_template_id).toBe(3));
+  });
+
+  it("names each template's kind, as the other two pickers do", async () => {
+    mount(JOB, {});
+    await userEvent.click(
+      await screen.findByRole("combobox", { name: /default interview template/i }));
+    expect(await screen.findByRole("option", { name: "RH screen · HR" })).toBeInTheDocument();
   });
 
   it("does not resend an untouched default, so an archived one cannot block a title save", async () => {

@@ -8,8 +8,8 @@ import {
   useInterviewTemplates,
   useSaveInterviewTemplate,
   KIND_LABEL,
-  KIND_SUMMARY,
   interviewKind,
+  settingsSummary,
   type InterviewTemplate,
 } from "@/hooks/use-interview-templates";
 
@@ -86,7 +86,7 @@ export function InterviewTemplatesTab() {
                   <span className="rounded border border-border px-1.5 py-0.5">
                     {KIND_LABEL[interviewKind(t)]}
                   </span>
-                  <span>{KIND_SUMMARY[interviewKind(t)]}</span>
+                  <span>{settingsSummary(t)}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

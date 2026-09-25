@@ -94,6 +94,27 @@ describe("InterviewTemplatesTab", () => {
     expect(screen.getByText("Custom")).toBeInTheDocument();
   });
 
+  it("describes what a custom template does, not that it is custom", async () => {
+    mount([{ ...RH, id: 4, name: "Curated", probe_mode: "none", include_job_questions: true }]);
+    await waitFor(() => expect(screen.getByText("Curated")).toBeInTheDocument());
+
+    expect(screen.getByText(/no generated questions/i)).toBeInTheDocument();
+    expect(screen.getByText(/job's own questions are included/i)).toBeInTheDocument();
+  });
+
+  it("saves the job-questions setting a custom template unticks", async () => {
+    const capture: { body?: any } = {};
+    mount([], capture);
+    await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
+    await userEvent.type(screen.getByLabelText(/^name$/i), "Curated");
+    await userEvent.click(screen.getByRole("radio", { name: /^custom$/i }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /include the job's own/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(capture.body?.include_job_questions).toBe(false));
+    expect(capture.body.probe_mode).toBe("score_gaps");
+  });
+
   it("creates a template", async () => {
     const capture: { body?: any } = {};
     mount([], capture);

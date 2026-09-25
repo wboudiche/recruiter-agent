@@ -4,8 +4,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  KIND_LABEL,
-  interviewKind,
+  withKind,
   type InterviewTemplate,
 } from "@/hooks/use-interview-templates";
 
@@ -40,7 +39,7 @@ export function ScheduleRoundDialog({
     { id: null as number | null, label: "No template — the job's own questions" },
     ...templates.map((t) => ({
       id: t.id as number | null,
-      label: `${t.name} · ${KIND_LABEL[interviewKind(t)]}`,
+      label: withKind(t.name, t),
     })),
   ];
   const ordered = options.map((o) => o.id).filter((id) => chosen.includes(id));

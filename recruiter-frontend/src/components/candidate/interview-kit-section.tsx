@@ -5,11 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useInterviewers } from "@/hooks/use-interviewers";
-import {
-  KIND_LABEL,
-  interviewKind,
-  useInterviewTemplates,
-} from "@/hooks/use-interview-templates";
+import { useInterviewTemplates, withKind } from "@/hooks/use-interview-templates";
 import {
   type SheetRead, type TrackRead, sheetHasContent, useInterviewKit, useTrackMutations,
 } from "@/hooks/use-interview-kit";
@@ -30,16 +26,20 @@ interface Props {
 
 const trackLabel = (t: TrackRead) => t.template_name ?? "No template";
 
-/** "RH screen · HR" — which conversation this tab is for. A track with no
- *  template says only its name: every untemplated round is technical, so a
- *  badge on all of them would say nothing. */
-const trackHeading = (t: TrackRead) =>
-  t.probe_mode == null
-    ? trackLabel(t)
-    : `${trackLabel(t)} · ${KIND_LABEL[interviewKind({
-        probe_mode: t.probe_mode,
-        include_job_questions: t.include_job_questions ?? false,
-      })]}`;
+/** "RH screen · HR" — which conversation a track is for, or null when it
+ *  has no template to name: every untemplated round is technical, so a
+ *  badge on all of them would say nothing. Both settings come off the
+ *  kit's own snapshot, so either being absent means there is none to read.
+ *  Null rather than "No template" because this also labels the one-track
+ *  header, which shows nothing at all when there is no template. */
+const trackHeading = (t: TrackRead): string | null => {
+  if (t.template_name == null) return null;
+  if (t.probe_mode == null || t.include_job_questions == null) return t.template_name;
+  return withKind(t.template_name, {
+    probe_mode: t.probe_mode,
+    include_job_questions: t.include_job_questions,
+  });
+};
 
 export function InterviewKitSection({ applicationId, canWrite, interviewRound, stage }: Props) {
   const { tracks, sheets, isLoading, isError, refetch, generate } =
@@ -103,7 +103,8 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound, s
   const used = new Set(tracks.map((t) => t.template_id));
   const options: TrackOption[] = [
     ...(used.has(null) ? [] : [{ templateId: null, label: "No template" }]),
-    ...templates.filter((t) => !used.has(t.id)).map((t) => ({ templateId: t.id, label: t.name })),
+    ...templates.filter((t) => !used.has(t.id))
+      .map((t) => ({ templateId: t.id, label: withKind(t.name, t) })),
   ];
   const addButton = canChangeTracks && options.length > 0 && (
     <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>+ Add track</Button>
@@ -131,7 +132,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound, s
         interviewRound={interviewRound}
         track={null}
         kit={only.kit}
-        templateName={only.template_name}
+        templateName={trackHeading(only)}
         sheets={sheets}
       />
     );
@@ -169,7 +170,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound, s
             const done = panel.filter((s) => s.submitted_at).length;
             return (
               <TabsTrigger key={t.track} value={t.track}>
-                {trackHeading(t)}
+                {trackHeading(t) ?? trackLabel(t)}
                 <span
                   className={
                     t.kit.status === "error"
