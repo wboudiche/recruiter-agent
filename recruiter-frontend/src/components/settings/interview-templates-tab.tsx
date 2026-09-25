@@ -7,18 +7,11 @@ import { ApiError } from "@/lib/api";
 import {
   useInterviewTemplates,
   useSaveInterviewTemplate,
+  KIND_LABEL,
+  KIND_SUMMARY,
+  interviewKind,
   type InterviewTemplate,
-  type ProbeMode,
 } from "@/hooks/use-interview-templates";
-
-// Keyed by mode rather than chained ternaries, so adding a mode is a
-// typecheck error here instead of a template silently described as
-// technical in this list.
-const PROBE_LABEL: Record<ProbeMode, string> = {
-  score_gaps: "Probes from score gaps",
-  profile: "Probes from the candidate's history",
-  none: "No generated probes",
-};
 
 export function InterviewTemplatesTab() {
   const [showArchived, setShowArchived] = useState(false);
@@ -54,9 +47,8 @@ export function InterviewTemplatesTab() {
         <div>
           <h3 className="font-medium">Interview templates</h3>
           <p className="text-xs text-muted-foreground">
-            A template decides which questions a round starts from, and
-            where its generated questions come from — the candidate's
-            scorecard gaps, their career history, or nowhere at all.
+            A template decides what kind of interview a round runs and which
+            questions it starts from.
           </p>
         </div>
         <Button type="button" size="sm" onClick={openNew}>
@@ -90,9 +82,11 @@ export function InterviewTemplatesTab() {
             <li key={t.id} className="flex items-center justify-between gap-4 p-3">
               <div>
                 <div className="font-medium">{t.name}</div>
-                <div className="text-xs text-muted-foreground">
-                  {PROBE_LABEL[t.probe_mode]}
-                  {t.include_job_questions ? " · includes the job's own questions" : ""}
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="rounded border border-border px-1.5 py-0.5">
+                    {KIND_LABEL[interviewKind(t)]}
+                  </span>
+                  <span>{KIND_SUMMARY[interviewKind(t)]}</span>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

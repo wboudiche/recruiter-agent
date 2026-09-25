@@ -5,7 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import { useInterviewers } from "@/hooks/use-interviewers";
-import { useInterviewTemplates } from "@/hooks/use-interview-templates";
+import {
+  KIND_LABEL,
+  interviewKind,
+  useInterviewTemplates,
+} from "@/hooks/use-interview-templates";
 import {
   type SheetRead, type TrackRead, sheetHasContent, useInterviewKit, useTrackMutations,
 } from "@/hooks/use-interview-kit";
@@ -25,6 +29,17 @@ interface Props {
 }
 
 const trackLabel = (t: TrackRead) => t.template_name ?? "No template";
+
+/** "RH screen · HR" — which conversation this tab is for. A track with no
+ *  template says only its name: every untemplated round is technical, so a
+ *  badge on all of them would say nothing. */
+const trackHeading = (t: TrackRead) =>
+  t.probe_mode == null
+    ? trackLabel(t)
+    : `${trackLabel(t)} · ${KIND_LABEL[interviewKind({
+        probe_mode: t.probe_mode,
+        include_job_questions: t.include_job_questions ?? false,
+      })]}`;
 
 export function InterviewKitSection({ applicationId, canWrite, interviewRound, stage }: Props) {
   const { tracks, sheets, isLoading, isError, refetch, generate } =
@@ -154,7 +169,7 @@ export function InterviewKitSection({ applicationId, canWrite, interviewRound, s
             const done = panel.filter((s) => s.submitted_at).length;
             return (
               <TabsTrigger key={t.track} value={t.track}>
-                {trackLabel(t)}
+                {trackHeading(t)}
                 <span
                   className={
                     t.kit.status === "error"

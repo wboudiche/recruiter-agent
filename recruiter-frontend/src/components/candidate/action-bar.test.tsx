@@ -158,9 +158,9 @@ describe("ActionBar — post-invite stage buttons", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /another round/i }));
 
-    expect(await screen.findByRole("checkbox", { name: "Technical" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Culture" })).not.toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: /^Technical ·/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^RH screen ·/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^Culture ·/ })).not.toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
     await waitFor(() => expect(apiMock).toHaveBeenCalledWith("/api/applications/1", {
       method: "PATCH", json: { stage: "scheduled", interview_template_ids: [1, 2] },
@@ -198,8 +198,8 @@ describe("ActionBar — post-invite stage buttons", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /mark as scheduled/i }));
 
-    expect(await screen.findByRole("checkbox", { name: "Technical" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Culture" })).not.toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: /^Technical ·/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^RH screen ·/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^Culture ·/ })).not.toBeChecked();
   });
 });

@@ -3,10 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ScheduleRoundDialog } from "./schedule-round-dialog";
 
-const T = (id: number, name: string) => ({
-  id, name, description: null, questions: [], probe_mode: "none" as const,
-  include_job_questions: false, is_active: true,
-});
+const T = (
+  id: number, name: string,
+  probe_mode: "score_gaps" | "profile" | "none" = "none",
+  include_job_questions = false,
+) => ({ id, name, description: null, questions: [], probe_mode, include_job_questions,
+        is_active: true });
 
 function mount(preselected: (number | null)[], onConfirm = vi.fn()) {
   render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
@@ -18,15 +20,15 @@ function mount(preselected: (number | null)[], onConfirm = vi.fn()) {
 describe("ScheduleRoundDialog", () => {
   it("preselects the given templates and confirms them", async () => {
     const onConfirm = mount([2]);
-    expect(screen.getByRole("checkbox", { name: "RH screen" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Technical" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^RH screen ·/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /^Technical ·/ })).not.toBeChecked();
     await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
     expect(onConfirm).toHaveBeenCalledWith([2]);
   });
 
   it("confirms several tracks, No template first, then list order", async () => {
     const onConfirm = mount([2]);
-    await userEvent.click(screen.getByRole("checkbox", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /^Technical ·/ }));
     await userEvent.click(screen.getByRole("checkbox", { name: /no template/i }));
     await userEvent.click(screen.getByRole("button", { name: /^schedule$/i }));
     expect(onConfirm).toHaveBeenCalledWith([null, 1, 2]);
@@ -39,7 +41,18 @@ describe("ScheduleRoundDialog", () => {
 
   it("cannot schedule with nothing ticked", async () => {
     mount([1]);
-    await userEvent.click(screen.getByRole("checkbox", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /^Technical ·/ }));
     expect(screen.getByRole("button", { name: /^schedule$/i })).toBeDisabled();
+  });
+});
+
+describe("ScheduleRoundDialog — kinds", () => {
+  it("says which kind of interview each template runs", () => {
+    render(<ScheduleRoundDialog open onOpenChange={() => {}} title="Schedule interview"
+      templates={[T(1, "Deep dive", "score_gaps", true), T(2, "RH screen", "profile", false)]}
+      preselected={[null]} onConfirm={() => {}} />);
+
+    expect(screen.getByRole("checkbox", { name: /deep dive.*technical/i })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /rh screen.*hr/i })).toBeInTheDocument();
   });
 });

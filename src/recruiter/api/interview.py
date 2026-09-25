@@ -79,6 +79,11 @@ class TrackRead(BaseModel):
     track: str
     template_id: int | None = None
     template_name: str | None = None
+    # What the kit was built to do, read off its own snapshot: the screen
+    # labels each track by kind, and an interviewer cannot read the
+    # templates list to look it up. None when the kit has no template.
+    probe_mode: str | None = None
+    include_job_questions: bool | None = None
     kit: InterviewKit
 
 
@@ -136,8 +141,12 @@ async def _read(session: AsyncSession, app_row: Application, user: User) -> Inte
         kit=content_of(primary) if primary else None,
         template_name=primary.template_name if primary else None,
         tracks=[
-            TrackRead(track=k.track, template_id=k.template_id,
-                      template_name=k.template_name, kit=content_of(k))
+            TrackRead(
+                track=k.track, template_id=k.template_id, template_name=k.template_name,
+                probe_mode=(s.probe_mode if (s := snapshot_from_row(k)) else None),
+                include_job_questions=(s.include_job_questions if s else None),
+                kit=content_of(k),
+            )
             for k in shown
         ],
         sheets=await _sheets_for(session, app_row, user),

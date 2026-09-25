@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import type { ProbeMode } from "./use-interview-templates";
 
 export type Rating = "strong" | "adequate" | "weak";
 
@@ -66,6 +67,11 @@ export interface TrackRead {
   track: string;
   template_id: number | null;
   template_name: string | null;
+  /** What the kit was built to do, from its own snapshot — null when it has
+   *  no template. Lets the screen name each track's kind without reading
+   *  the templates list, which an interviewer cannot. */
+  probe_mode?: ProbeMode | null;
+  include_job_questions?: boolean | null;
   kit: InterviewKit;
 }
 

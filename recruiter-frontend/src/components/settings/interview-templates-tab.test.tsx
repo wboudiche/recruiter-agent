@@ -11,8 +11,10 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+// An RH screen as one is actually set up: history probes, the job's own
+// technical questions left out.
 const RH = { id: 3, name: "RH screen", description: null, questions: [],
-             probe_mode: "none", include_job_questions: false, is_active: true };
+             probe_mode: "profile", include_job_questions: false, is_active: true };
 
 function mount(templates: unknown[], capture: { body?: any; path?: string } = {}) {
   server.use(
@@ -35,24 +37,61 @@ describe("InterviewTemplatesTab", () => {
   it("lists templates with what each one does", async () => {
     mount([RH]);
     await waitFor(() => expect(screen.getByText("RH screen")).toBeInTheDocument());
-    expect(screen.getByText(/no generated probes/i)).toBeInTheDocument();
+    expect(screen.getByText("HR")).toBeInTheDocument();
+    expect(screen.getByText(/career history/i)).toBeInTheDocument();
   });
 
-  it("creates a template that probes the candidate's history", async () => {
+  it("creates an HR interview without asking about question sources", async () => {
     const capture: { body?: any } = {};
     mount([], capture);
     await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
     await userEvent.type(screen.getByLabelText(/^name$/i), "RH screen");
-    await userEvent.click(screen.getByRole("combobox", { name: /generated probes/i }));
-    await userEvent.click(await screen.findByRole("option", { name: /candidate's history/i }));
+    await userEvent.click(screen.getByRole("radio", { name: /^hr$/i }));
     await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
+    // The kind is the only thing chosen; both settings follow from it.
     await waitFor(() => expect(capture.body?.probe_mode).toBe("profile"));
+    expect(capture.body.include_job_questions).toBe(false);
   });
 
-  it("says which probes a template generates", async () => {
-    mount([{ ...RH, probe_mode: "profile" }]);
-    expect(await screen.findByText(/probes from the candidate's history/i)).toBeInTheDocument();
+  it("says in words what the chosen kind will do", async () => {
+    mount([]);
+    await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
+    expect(screen.getByText(/scorecard gaps/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("radio", { name: /^hr$/i }));
+    expect(screen.getByText(/career history/i)).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /generated probes/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps the underlying controls for a mix that is neither preset", async () => {
+    const capture: { body?: any } = {};
+    mount([], capture);
+    await userEvent.click(await screen.findByRole("button", { name: /new template/i }));
+    await userEvent.type(screen.getByLabelText(/^name$/i), "Curated");
+    await userEvent.click(screen.getByRole("radio", { name: /^custom$/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /generated probes/i }));
+    await userEvent.click(await screen.findByRole("option", { name: /^none/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(capture.body?.probe_mode).toBe("none"));
+  });
+
+  it("opens an existing template on the kind it already is", async () => {
+    mount([{ ...RH, probe_mode: "profile", include_job_questions: false }]);
+    await userEvent.click(await screen.findByRole("button", { name: /edit rh screen/i }));
+    expect(screen.getByRole("radio", { name: /^hr$/i })).toBeChecked();
+  });
+
+  it("names each template's kind in the list", async () => {
+    mount([
+      { ...RH, id: 1, name: "RH screen", probe_mode: "profile", include_job_questions: false },
+      { ...RH, id: 2, name: "Deep dive", probe_mode: "score_gaps", include_job_questions: true },
+      { ...RH, id: 3, name: "Curated", probe_mode: "none", include_job_questions: false },
+    ]);
+    await waitFor(() => expect(screen.getByText("RH screen")).toBeInTheDocument());
+    expect(screen.getByText("HR")).toBeInTheDocument();
+    expect(screen.getByText("Technical")).toBeInTheDocument();
+    expect(screen.getByText("Custom")).toBeInTheDocument();
   });
 
   it("creates a template", async () => {

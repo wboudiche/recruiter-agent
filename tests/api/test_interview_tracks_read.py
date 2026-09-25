@@ -99,3 +99,31 @@ async def test_marking_interviewed_by_hand_closes_every_track(
     r = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
     assert r.status_code == 200, r.text
     assert all(k.closed_at for k in await _kits(app_id))
+
+
+@pytest.mark.asyncio
+async def test_a_track_says_what_kind_of_interview_it_is(
+    api_client: AsyncClient, seed_tracks,
+) -> None:
+    """The kit screen labels each track, and an interviewer cannot read the
+    templates list — so the settings the label is derived from travel with
+    the kit, out of the snapshot it was built from."""
+    app_id, _ = await seed_tracks()
+    SessionLocal = async_sessionmaker(app.dependency_overrides[get_engine_dep](),
+                                      expire_on_commit=False)
+    async with SessionLocal() as s:
+        kit = (await s.execute(select(InterviewKitRow).where(
+            InterviewKitRow.application_id == app_id, InterviewKitRow.track == "rh",
+        ))).scalar_one()
+        kit.template_name = "RH screen"
+        kit.template_snapshot = {
+            "questions": [], "probe_mode": "profile", "include_job_questions": False,
+        }
+        await s.commit()
+
+    tracks = (await api_client.get(KIT.format(app_id))).json()["tracks"]
+    by_track = {t["track"]: t for t in tracks}
+
+    assert by_track["rh"]["probe_mode"] == "profile"
+    assert by_track["rh"]["include_job_questions"] is False
+    assert by_track["tech"]["probe_mode"] is None, "a kit with no template has no settings"
