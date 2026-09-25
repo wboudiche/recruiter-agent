@@ -99,3 +99,72 @@ async def test_marking_interviewed_by_hand_closes_every_track(
     r = await api_client.patch(f"/api/applications/{app_id}", json={"stage": "interviewed"})
     assert r.status_code == 200, r.text
     assert all(k.closed_at for k in await _kits(app_id))
+
+
+async def _set_snapshot(app_id: int, track: str, name: str, snapshot: dict) -> None:
+    SessionLocal = async_sessionmaker(app.dependency_overrides[get_engine_dep](),
+                                      expire_on_commit=False)
+    async with SessionLocal() as s:
+        kit = (await s.execute(select(InterviewKitRow).where(
+            InterviewKitRow.application_id == app_id, InterviewKitRow.track == track,
+        ))).scalar_one()
+        kit.template_name = name
+        kit.template_snapshot = snapshot
+        await s.commit()
+
+
+RH_SNAPSHOT = {"questions": [], "probe_mode": "profile", "include_job_questions": False}
+
+
+@pytest.mark.asyncio
+async def test_a_track_says_what_kind_of_interview_it_is(
+    api_client: AsyncClient, seed_tracks,
+) -> None:
+    """The kit screen labels each track, and an interviewer cannot read the
+    templates list — so the settings the label is derived from travel with
+    the kit, out of the snapshot it was built from."""
+    app_id, _ = await seed_tracks()
+    await _set_snapshot(app_id, "rh", "RH screen", RH_SNAPSHOT)
+
+    tracks = (await api_client.get(KIT.format(app_id))).json()["tracks"]
+    by_track = {t["track"]: t for t in tracks}
+
+    assert by_track["rh"]["probe_mode"] == "profile"
+    assert by_track["rh"]["include_job_questions"] is False
+    assert by_track["tech"]["probe_mode"] is None, "a kit with no template has no settings"
+
+
+@pytest.mark.asyncio
+async def test_an_interviewer_sees_the_kind_of_their_own_track(
+    api_client_unauth: AsyncClient, seed_tracks, login_as,
+) -> None:
+    """The audience the fields exist for: an interviewer, who has no access
+    to the templates list and reads the kind off their own kit."""
+    app_id, _ = await seed_tracks()
+    await _set_snapshot(app_id, "rh", "RH screen", RH_SNAPSHOT)
+
+    await login_as(api_client_unauth, "rh@acme.com")
+    tracks = (await api_client_unauth.get(KIT.format(app_id))).json()["tracks"]
+
+    assert [t["track"] for t in tracks] == ["rh"]
+    assert tracks[0]["probe_mode"] == "profile"
+    assert tracks[0]["include_job_questions"] is False
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_snapshot_leaves_the_track_unlabelled(
+    api_client: AsyncClient, seed_tracks,
+) -> None:
+    """A snapshot this version cannot parse costs the kind, not the screen.
+    The read is the one page an interview runs from; a row written by an
+    older version, or by hand, must not take it down for every track."""
+    app_id, _ = await seed_tracks()
+    await _set_snapshot(app_id, "rh", "RH screen", {"questions": []})
+
+    r = await api_client.get(KIT.format(app_id))
+
+    assert r.status_code == 200, r.text
+    by_track = {t["track"]: t for t in r.json()["tracks"]}
+    assert by_track["rh"]["probe_mode"] is None
+    assert by_track["rh"]["template_name"] == "RH screen", "the track still reads"
+    assert [q["id"] for q in by_track["rh"]["kit"]["questions"]] == ["r1"]

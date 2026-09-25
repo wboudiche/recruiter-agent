@@ -8,7 +8,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -66,6 +66,7 @@ from recruiter.schemas.interview import (
     KitQuestion,
     SheetRead,
 )
+from recruiter.schemas.interview_template import ProbeMode
 from recruiter.schemas.job import CriteriaItem
 
 router = APIRouter(prefix="/api", tags=["interview"], dependencies=[Depends(require_user)])
@@ -79,7 +80,37 @@ class TrackRead(BaseModel):
     track: str
     template_id: int | None = None
     template_name: str | None = None
+    # What the kit was built to do, read off its own snapshot: the screen
+    # labels each track by kind, and an interviewer cannot read the
+    # templates list to look it up. None when the kit has no template, or
+    # when its snapshot cannot be read — see `_track_read`.
+    probe_mode: ProbeMode | None = None
+    include_job_questions: bool | None = None
     kit: InterviewKit
+
+
+def _track_read(row: InterviewKitRow) -> TrackRead:
+    """One track of a kit read, including what kind of interview it runs.
+
+    A snapshot this version cannot parse costs the kind, not the screen:
+    this read is the page an interview is run from, and a row written by
+    an older version — or by hand — must not take it down for every
+    track. Generation still refuses such a row loudly (run_generate_kit),
+    which is where a broken snapshot needs to be an error.
+    """
+    try:
+        snapshot = snapshot_from_row(row)
+    except ValidationError:
+        logger.warning("kit %s: unreadable template snapshot, track not labelled", row.id)
+        snapshot = None
+    return TrackRead(
+        track=row.track,
+        template_id=row.template_id,
+        template_name=row.template_name,
+        probe_mode=snapshot.probe_mode if snapshot else None,
+        include_job_questions=snapshot.include_job_questions if snapshot else None,
+        kit=content_of(row),
+    )
 
 
 class InterviewKitRead(BaseModel):
@@ -135,11 +166,7 @@ async def _read(session: AsyncSession, app_row: Application, user: User) -> Inte
     return InterviewKitRead(
         kit=content_of(primary) if primary else None,
         template_name=primary.template_name if primary else None,
-        tracks=[
-            TrackRead(track=k.track, template_id=k.template_id,
-                      template_name=k.template_name, kit=content_of(k))
-            for k in shown
-        ],
+        tracks=[_track_read(k) for k in shown],
         sheets=await _sheets_for(session, app_row, user),
     )
 

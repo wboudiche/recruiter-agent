@@ -890,8 +890,10 @@ describe("InterviewKitSection", () => {
 const q = (id: string, text: string) =>
   ({ id, text, source: "baseline", answer: null, rating: null });
 const TECH = { track: "t1", template_id: 1, template_name: "Technical",
+               probe_mode: "score_gaps", include_job_questions: true,
                kit: { status: "ready", questions: [q("q1", "Clusters?")] } };
 const RH = { track: "t2", template_id: 2, template_name: "RH screen",
+             probe_mode: "profile", include_job_questions: false,
              kit: { status: "ready", questions: [q("r1", "Why us?")] } };
 const TEMPLATE = (id: number, name: string) => ({ id, name, description: null, questions: [],
   probe_mode: "none", include_job_questions: false, is_active: true });
@@ -946,5 +948,31 @@ describe("InterviewKitSection — tracks", () => {
     const rhTab = await screen.findByRole("tab", { name: /rh screen/i });
     expect(rhTab).toHaveTextContent("failed");
     expect(screen.getByRole("tab", { name: /technical/i })).not.toHaveTextContent("failed");
+  });
+});
+
+describe("InterviewKitSection — kinds", () => {
+  it("labels each track's tab with the kind of interview it runs", async () => {
+    mountWithKit(TECH.kit, {}, { tracks: [TECH, RH] });
+    expect(await screen.findByRole("tab", { name: /rh screen.*hr/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /technical.*technical/i })).toBeInTheDocument();
+  });
+
+  it("labels a one-track round, which has no tabs to read the kind off", async () => {
+    // The common case, and the one an interviewer sees: a single track,
+    // rendered without a tab strip.
+    mountWithKit(RH.kit, {}, { tracks: [RH], me: { id: 7, role: "viewer" }, canWrite: false });
+    expect(await screen.findByText("RH screen · HR")).toBeInTheDocument();
+  });
+
+  it("names the kind in the add-track picker, where the same choice is made", async () => {
+    mountWithKit(TECH.kit, {}, {
+      tracks: [TECH], stage: "scheduled",
+      templates: [{ ...TEMPLATE(2, "RH screen"), probe_mode: "profile",
+                    include_job_questions: false }],
+    });
+    await userEvent.click(await screen.findByRole("button", { name: /add track/i }));
+    await userEvent.click(screen.getByRole("combobox", { name: /track template/i }));
+    expect(await screen.findByRole("option", { name: "RH screen · HR" })).toBeInTheDocument();
   });
 });

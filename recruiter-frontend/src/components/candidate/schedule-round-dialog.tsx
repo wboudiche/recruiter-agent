@@ -3,7 +3,10 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import type { InterviewTemplate } from "@/hooks/use-interview-templates";
+import {
+  withKind,
+  type InterviewTemplate,
+} from "@/hooks/use-interview-templates";
 
 interface Props {
   open: boolean;
@@ -34,7 +37,10 @@ export function ScheduleRoundDialog({
 
   const options = [
     { id: null as number | null, label: "No template — the job's own questions" },
-    ...templates.map((t) => ({ id: t.id as number | null, label: t.name })),
+    ...templates.map((t) => ({
+      id: t.id as number | null,
+      label: withKind(t.name, t),
+    })),
   ];
   const ordered = options.map((o) => o.id).filter((id) => chosen.includes(id));
   const toggle = (id: number | null, on: boolean) =>
