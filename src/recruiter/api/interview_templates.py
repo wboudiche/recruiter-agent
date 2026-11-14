@@ -5,19 +5,28 @@ viewer read-only guard, which this router inherits by being registered on
 `_api_router` in main.py. Templates are archived (`is_active=false`), never
 deleted: kits hold their own snapshot, and archiving frees the name.
 """
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from recruiter.api.candidates import get_llm
 from recruiter.api.deps import get_session, require_user
-from recruiter.models import InterviewTemplate
+from recruiter.llm.client import LLMClient
+from recruiter.models import InterviewTemplate, Job
+from recruiter.pipeline.template_question_suggester import suggest_template_questions
 from recruiter.schemas.interview_template import (
     InterviewTemplateCreate,
     InterviewTemplateRead,
     InterviewTemplateUpdate,
+    SuggestedTemplateQuestions,
+    SuggestTemplateQuestionsRequest,
     TemplateQuestion,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/interview-templates", tags=["interview"], dependencies=[Depends(require_user)],
@@ -69,6 +78,35 @@ async def create_template(
     await _commit_or_conflict(session)
     await session.refresh(tpl)
     return tpl
+
+
+@router.post("/suggest-questions", response_model=SuggestedTemplateQuestions)
+async def suggest_questions(
+    payload: SuggestTemplateQuestionsRequest,
+    session: AsyncSession = Depends(get_session),
+    llm: LLMClient = Depends(get_llm),
+) -> SuggestedTemplateQuestions:
+    """Draft questions for the editor to append. Writes nothing: the admin
+    keeps, edits or deletes them and saves the template as usual."""
+    job = None
+    if payload.job_id is not None:
+        job = await session.get(Job, payload.job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="job not found")
+    try:
+        questions = await suggest_template_questions(
+            name=payload.name,
+            description=payload.description,
+            kind=payload.kind,
+            job_title=job.title if job else None,
+            job_description=job.description if job else None,
+            existing=payload.existing,
+            llm=llm,
+        )
+    except Exception as exc:
+        logger.warning("template question suggestion failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Question suggestion failed") from exc
+    return SuggestedTemplateQuestions(questions=questions)
 
 
 @router.patch("/{template_id}", response_model=InterviewTemplateRead)

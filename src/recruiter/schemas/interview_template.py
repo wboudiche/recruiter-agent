@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from recruiter.schemas.interview import BaselineQuestion
 
@@ -67,3 +67,41 @@ class TemplateSnapshot(BaseModel):
     questions: list[BaselineQuestion] = Field(default_factory=list)
     probe_mode: ProbeMode
     include_job_questions: bool
+
+
+# What kind of interview a template runs, as the editor names it. The
+# backend stores probe_mode/include_job_questions; the kind only steers how
+# suggested questions are written.
+TemplateKind = Literal["technical", "hr", "custom"]
+
+
+class SuggestedTemplateQuestion(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    criterion: str | None = Field(default=None, max_length=200)
+
+
+class SuggestedTemplateQuestions(BaseModel):
+    questions: list[SuggestedTemplateQuestion]
+
+
+EXISTING_MAX = 50
+EXISTING_ITEM_MAX = 2000
+
+
+class SuggestTemplateQuestionsRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=2000)
+    kind: TemplateKind
+    job_id: int | None = None
+    existing: list[str] = Field(default_factory=list)
+
+    @field_validator("existing", mode="before")
+    @classmethod
+    def _trim_existing(cls, value: object) -> object:
+        """Trimmed, never refused: the editor has no cap on how many
+        questions a template holds, and refusing would make every later click
+        fail. The most recent 50 are what a repeat is most likely of."""
+        if not isinstance(value, list):
+            return value
+        return [v[:EXISTING_ITEM_MAX] if isinstance(v, str) else v
+                for v in value[-EXISTING_MAX:]]

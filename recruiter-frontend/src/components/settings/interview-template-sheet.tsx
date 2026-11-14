@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +19,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { QuestionListEditor, type EditableQuestion } from "@/components/interview/question-list-editor";
+import {
+  QuestionListEditor,
+  newQuestionId,
+  type EditableQuestion,
+} from "@/components/interview/question-list-editor";
+import { useJobs } from "@/hooks/use-jobs";
 import { ApiError } from "@/lib/api";
 import {
   KIND_LABEL,
@@ -26,10 +32,13 @@ import {
   interviewKind,
   settingsForKind,
   useSaveInterviewTemplate,
+  useSuggestTemplateQuestions,
   type InterviewKind,
   type InterviewTemplate,
   type ProbeMode,
 } from "@/hooks/use-interview-templates";
+
+const NO_JOB = "none";
 
 interface Props {
   template?: InterviewTemplate | null;
@@ -48,6 +57,10 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   // they are being edited. Declared with the rest of the state, above the
   // effect that resets it.
   const [editingSettings, setEditingSettings] = useState(false);
+  // Only feeds a suggestion; never saved on the template.
+  const [basedOnJob, setBasedOnJob] = useState<string>(NO_JOB);
+  const opening = useRef(0);
+  const suggest = useSuggestTemplateQuestions();
 
   // Reset the working copy from the template whenever the sheet opens —
   // matching a new template (no `template`) starts with the backend's own
@@ -59,6 +72,11 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
     setProbeMode(template?.probe_mode ?? "score_gaps");
     setIncludeJobQuestions(template?.include_job_questions ?? true);
     setRows(template?.questions ?? []);
+    setBasedOnJob(NO_JOB);
+    // A new opening: a suggestion requested in an earlier one must not land
+    // in this template's rows, nor keep its button spinning.
+    opening.current += 1;
+    suggest.reset();
     setEditingSettings(
       interviewKind({
         probe_mode: template?.probe_mode ?? "score_gaps",
@@ -85,6 +103,39 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   }
 
   const save = useSaveInterviewTemplate();
+  const jobs = useJobs();
+  // Open jobs first: a speciality template is usually written because such
+  // a job just opened.
+  const jobOptions = [...(jobs.data ?? [])].sort(
+    (a, b) => Number(b.status === "open") - Number(a.status === "open"),
+  );
+
+  function handleSuggest() {
+    const requestedIn = opening.current;
+    const current = () => opening.current === requestedIn;
+    suggest.mutate(
+      {
+        name: name.trim(),
+        description: description || null,
+        kind,
+        job_id: basedOnJob === NO_JOB ? null : Number(basedOnJob),
+        existing: rows.map((r) => r.text.trim()).filter(Boolean),
+      },
+      {
+        // Appended, never replacing: the admin keeps what they wrote.
+        onSuccess: ({ questions }) => {
+          if (!current()) return;
+          setRows((rowsNow) => [
+            ...rowsNow,
+            ...questions.map((q) => ({ id: newQuestionId(), text: q.text, criterion: q.criterion })),
+          ]);
+        },
+        onError: () => {
+          if (current()) toast.error("Couldn't suggest questions — try again.");
+        },
+      },
+    );
+  }
 
   function handleSave() {
     save.mutate(
@@ -188,6 +239,32 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
               </div>
             </>
           )}
+
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="space-y-1 flex-1 min-w-48">
+              <Label htmlFor="template-based-on-job">Based on job</Label>
+              <Select value={basedOnJob} onValueChange={setBasedOnJob}>
+                <SelectTrigger id="template-based-on-job" aria-label="Based on job">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_JOB}>No job</SelectItem>
+                  {jobOptions.map((j) => (
+                    <SelectItem key={j.id} value={String(j.id)}>{j.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleSuggest}
+              disabled={suggest.isPending || !name.trim()}
+            >
+              <Sparkles className="h-4 w-4 mr-1" />
+              {suggest.isPending ? "Suggesting…" : "Suggest questions"}
+            </Button>
+          </div>
 
           <QuestionListEditor
             rows={rows}
