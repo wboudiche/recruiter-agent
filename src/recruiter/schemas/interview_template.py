@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,3 +67,28 @@ class TemplateSnapshot(BaseModel):
     questions: list[BaselineQuestion] = Field(default_factory=list)
     probe_mode: ProbeMode
     include_job_questions: bool
+
+
+# What kind of interview a template runs, as the editor names it. The
+# backend stores probe_mode/include_job_questions; the kind only steers how
+# suggested questions are written.
+TemplateKind = Literal["technical", "hr", "custom"]
+
+
+class SuggestedTemplateQuestion(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+    criterion: str | None = Field(default=None, max_length=200)
+
+
+class SuggestedTemplateQuestions(BaseModel):
+    questions: list[SuggestedTemplateQuestion]
+
+
+class SuggestTemplateQuestionsRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = Field(default=None, max_length=2000)
+    kind: TemplateKind
+    job_id: int | None = None
+    existing: list[Annotated[str, Field(max_length=2000)]] = Field(
+        default_factory=list, max_length=50,
+    )
