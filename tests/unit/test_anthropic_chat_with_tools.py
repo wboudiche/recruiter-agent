@@ -20,7 +20,7 @@ async def test_anthropic_chat_with_tools_text_only(monkeypatch) -> None:
     response.content = [_block("text", text="Marie has 8 years.")]
     response.stop_reason = "end_turn"
 
-    client = AnthropicLLMClient(api_key="x", model="claude-x")
+    client = AnthropicLLMClient(api_key="x", model="claude-sonnet-4-6")
     client._client.messages.create = AsyncMock(return_value=response)
 
     turn = await client.chat_with_tools(
@@ -45,7 +45,7 @@ async def test_anthropic_chat_with_tools_forwards_temperature() -> None:
     response = MagicMock()
     response.content = [_block("text", text="ok")]
     response.stop_reason = "end_turn"
-    client = AnthropicLLMClient(api_key="x", model="claude-x")
+    client = AnthropicLLMClient(api_key="x", model="claude-sonnet-4-6")
     client._client.messages.create = AsyncMock(return_value=response)
 
     await client.chat_with_tools(
