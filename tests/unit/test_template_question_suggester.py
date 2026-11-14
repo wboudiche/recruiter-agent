@@ -159,3 +159,13 @@ async def test_raises_when_no_questions_come_back() -> None:
     fake = FakeLLMClient(structured_responses=[_resp(), _resp()])
     with pytest.raises(ValueError):
         await _call(fake)
+
+
+@pytest.mark.asyncio
+async def test_raises_when_every_suggestion_repeats_an_existing_question() -> None:
+    fake = FakeLLMClient(structured_responses=[
+        _resp("Tell me about Kubernetes", " tell me about kubernetes", "TELL ME ABOUT KUBERNETES",
+              "Tell me  about Kubernetes", "tell me about Kubernetes"),
+    ])
+    with pytest.raises(ValueError):
+        await _call(fake, existing=["Tell me about Kubernetes"])

@@ -104,3 +104,34 @@ describe("InterviewTemplateSheet — Suggest questions", () => {
     expect(questionTexts()).toEqual(["Q1"]);
   });
 });
+
+describe("InterviewTemplateSheet — a suggestion still in flight", () => {
+  it("is dropped when the sheet is reopened on another template", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    server.use(
+      http.get("http://localhost:8000/api/jobs", () => HttpResponse.json(JOBS)),
+      http.post("http://localhost:8000/api/interview-templates/suggest-questions", async () => {
+        await gate;
+        return HttpResponse.json({ questions: [{ text: "Late", criterion: null }] });
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const OTHER: InterviewTemplate = { ...TECH, id: 5, name: "Technical — DevOps",
+                                       questions: [{ id: "d1", text: "D1" }] };
+    const ui = (template: InterviewTemplate, open: boolean) => (
+      <QueryClientProvider client={qc}>
+        <InterviewTemplateSheet template={template} open={open} onOpenChange={() => {}} />
+        <Toaster />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui(TECH, true));
+    await userEvent.click(suggestButton());
+    rerender(ui(TECH, false));
+    rerender(ui(OTHER, true));
+    expect(suggestButton()).toHaveTextContent("Suggest questions");
+    release();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(questionTexts()).toEqual(["D1"]);
+  });
+});

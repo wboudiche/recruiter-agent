@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,8 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   const [editingSettings, setEditingSettings] = useState(false);
   // Only feeds a suggestion; never saved on the template.
   const [basedOnJob, setBasedOnJob] = useState<string>(NO_JOB);
+  const opening = useRef(0);
+  const suggest = useSuggestTemplateQuestions();
 
   // Reset the working copy from the template whenever the sheet opens —
   // matching a new template (no `template`) starts with the backend's own
@@ -71,6 +73,10 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
     setIncludeJobQuestions(template?.include_job_questions ?? true);
     setRows(template?.questions ?? []);
     setBasedOnJob(NO_JOB);
+    // A new opening: a suggestion requested in an earlier one must not land
+    // in this template's rows, nor keep its button spinning.
+    opening.current += 1;
+    suggest.reset();
     setEditingSettings(
       interviewKind({
         probe_mode: template?.probe_mode ?? "score_gaps",
@@ -97,7 +103,6 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   }
 
   const save = useSaveInterviewTemplate();
-  const suggest = useSuggestTemplateQuestions();
   const jobs = useJobs();
   // Open jobs first: a speciality template is usually written because such
   // a job just opened.
@@ -106,6 +111,8 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
   );
 
   function handleSuggest() {
+    const requestedIn = opening.current;
+    const current = () => opening.current === requestedIn;
     suggest.mutate(
       {
         name: name.trim(),
@@ -116,12 +123,16 @@ export function InterviewTemplateSheet({ template, open, onOpenChange }: Props) 
       },
       {
         // Appended, never replacing: the admin keeps what they wrote.
-        onSuccess: ({ questions }) =>
-          setRows((current) => [
-            ...current,
+        onSuccess: ({ questions }) => {
+          if (!current()) return;
+          setRows((rowsNow) => [
+            ...rowsNow,
             ...questions.map((q) => ({ id: newQuestionId(), text: q.text, criterion: q.criterion })),
-          ]),
-        onError: () => toast.error("Couldn't suggest questions — try again."),
+          ]);
+        },
+        onError: () => {
+          if (current()) toast.error("Couldn't suggest questions — try again.");
+        },
       },
     );
   }

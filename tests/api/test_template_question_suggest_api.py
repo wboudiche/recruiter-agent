@@ -104,3 +104,16 @@ async def test_viewers_cannot_suggest(
     assert login.status_code == 204
     assert (await api_client_unauth.post(URL, json=BODY)).status_code == 403
     assert fake.calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_long_existing_list_is_trimmed_not_refused(
+    api_client: AsyncClient, fake: FakeLLMClient,
+) -> None:
+    existing = [f"Old question {i}" for i in range(60)] + ["x" * 3000]
+    resp = await api_client.post(URL, json={**BODY, "existing": existing})
+    assert resp.status_code == 200, resp.text
+    prompt = fake.calls[-1]["messages"][0].content
+    assert "x" * 2000 in prompt and "x" * 2001 not in prompt  # each item capped
+    assert "Old question 59" in prompt          # the most recent items are kept
+    assert "Old question 0\n" not in prompt     # the oldest beyond 50 are dropped

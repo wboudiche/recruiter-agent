@@ -119,4 +119,6 @@ async def suggest_template_questions(
         raise ValueError("the model suggested no questions")
     seen = {_normalised(e) for e in existing if e.strip()}
     fresh = [q for q in questions if _normalised(q.text) not in seen]
+    if not fresh:
+        raise ValueError("every suggested question repeats one the template already asks")
     return fresh[:_MAX_COUNT]
