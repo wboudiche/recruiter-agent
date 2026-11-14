@@ -213,7 +213,7 @@ export default function JobsNew() {
                   type="number"
                   min={0}
                   max={1}
-                  step={0.05}
+                  step={0.01}
                   placeholder="0.25"
                   {...form.register(`criteria.${index}.weight`)}
                 />

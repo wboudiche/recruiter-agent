@@ -45,3 +45,19 @@ describe("EditCriteriaSheet — viewer read-only", () => {
     expect(weight).not.toBeDisabled();
   });
 });
+
+describe("EditCriteriaSheet — weight precision", () => {
+  // The LLM suggests weights like 0.23. A coarser step makes the browser's
+  // native validation refuse the form with no visible reason.
+  it("accepts a weight with two decimals", () => {
+    const Wrapper = wrap();
+    const j = { ...job(), criteria: [{ name: "Rust", weight: 0.23, description: "" }] };
+    render(
+      <Wrapper>
+        <EditCriteriaSheet job={j} open onOpenChange={() => {}} canWrite />
+      </Wrapper>,
+    );
+    const weight = screen.getByLabelText(/weight/i) as HTMLInputElement;
+    expect(weight.validity.valid).toBe(true);
+  });
+});

@@ -156,7 +156,7 @@ export function EditCriteriaSheet({ job, open, onOpenChange, canWrite = false }:
                     type="number"
                     min={0}
                     max={1}
-                    step={0.05}
+                    step={0.01}
                     value={it.weight}
                     onChange={(e) =>
                       update(idx, { weight: Number(e.target.value) })
