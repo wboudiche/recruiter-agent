@@ -115,3 +115,26 @@ export function useSaveInterviewTemplate() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["interview-templates"] }),
   });
 }
+
+export interface SuggestTemplateQuestionsBody {
+  name: string;
+  description: string | null;
+  kind: InterviewKind;
+  job_id: number | null;
+  existing: string[];
+}
+
+export interface SuggestedTemplateQuestion {
+  text: string;
+  criterion: string | null;
+}
+
+/** Drafts questions for the editor to append. The server stores nothing. */
+export function useSuggestTemplateQuestions() {
+  return useMutation({
+    mutationFn: (body: SuggestTemplateQuestionsBody) =>
+      api<{ questions: SuggestedTemplateQuestion[] }>(
+        "/api/interview-templates/suggest-questions", { method: "POST", json: body },
+      ),
+  });
+}
