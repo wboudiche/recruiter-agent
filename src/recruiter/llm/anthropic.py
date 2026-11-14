@@ -1,4 +1,5 @@
 import json
+import re
 from typing import TypeVar
 
 from anthropic import AsyncAnthropic
@@ -10,6 +11,15 @@ from recruiter.llm.client import EmptyLLMResponse, LLMMessage
 T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
+
+# Claude 4.7 and later answer a 400 to `temperature`. Matching the models that
+# still accept it, rather than the ones that don't, keeps an unknown or future
+# model on the side that works.
+_SAMPLING_MODELS = re.compile(r"^claude-(3|(opus|sonnet|haiku)-4(-[0-6])?(-\d{8})?$)")
+
+
+def accepts_temperature(model: str) -> bool:
+    return bool(_SAMPLING_MODELS.match(model))
 
 
 class AnthropicLLMClient:
@@ -28,9 +38,10 @@ class AnthropicLLMClient:
         kwargs: dict = {
             "model": self._model,
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "messages": [{"role": m.role, "content": m.content} for m in messages],
         }
+        if accepts_temperature(self._model):
+            kwargs["temperature"] = temperature
         if system is not None:
             kwargs["system"] = system
         response = await self._client.messages.create(**kwargs)
@@ -86,9 +97,10 @@ class AnthropicLLMClient:
         kwargs: dict = {
             "model": self._model,
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "messages": api_messages,
         }
+        if accepts_temperature(self._model):
+            kwargs["temperature"] = temperature
         if system is not None:
             kwargs["system"] = system
         if api_tools:
